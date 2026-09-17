@@ -6,10 +6,11 @@ import { logoutAction } from "@/features/auth/actions";
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
 /** Routes landing in later phases — rendered as inert text, not dead links. */
-const UPCOMING_LINKS = ["Movimientos", "Presupuesto"] as const;
+const UPCOMING_LINKS = ["Presupuesto"] as const;
 
 const NAV_LINKS = [
   { href: "/", label: "Dashboard" },
+  { href: "/movimientos", label: "Movimientos" },
   { href: "/integrantes", label: "Integrantes" },
   { href: "/categorias", label: "Categorías" },
   { href: "/bolsas", label: "Bolsas" },
