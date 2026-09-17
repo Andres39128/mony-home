@@ -76,3 +76,19 @@ export async function requireUser(): Promise<SessionUser> {
 }
 
 export { ForbiddenError, requireAdmin } from "@/lib/auth";
+
+export type AdminGuard =
+  | { ok: false; error: string }
+  | { ok: true; user: SessionUser };
+
+/**
+ * Server-action admin gate. Returns a FormState-compatible error when the
+ * current user lacks the admin role, or the authenticated user so the action
+ * reuses it without a second session lookup. UI hiding is never trusted —
+ * this guard runs server-side on every call.
+ */
+export async function adminGuard(message: string): Promise<AdminGuard> {
+  const user = await requireUser();
+  if (user.role !== "admin") return { ok: false, error: message };
+  return { ok: true, user };
+}
