@@ -26,6 +26,8 @@ const envSchema = z.object({
   APP_NAME: z.string().min(1).default("mony-home"),
   /** Secret for signing sessions once auth lands. */
   AUTH_SECRET: z.string().min(1).optional(),
+  /** Password (pre-hash) assigned to seeded demo users by `npm run db:seed`. */
+  SEED_ADMIN_PASSWORD: z.string().min(1).default("changeme-on-first-login"),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
