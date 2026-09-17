@@ -1,0 +1,2 @@
+# Full verification pipeline before sharing commits.
+npm run verify

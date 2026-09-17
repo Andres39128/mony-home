@@ -1,0 +1,2 @@
+# Staged TypeScript files: lint (with autofix), then whole-project typecheck.
+npx lint-staged && npm run typecheck
