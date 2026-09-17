@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import { centsToNumber, formatCents, MoneyParseError, parseAmountToCents, percentage } from "@/lib/money";
+
+describe("parseAmountToCents", () => {
+  it("parses plain integers", () => {
+    expect(parseAmountToCents("1500")).toBe(150000);
+    expect(parseAmountToCents("0")).toBe(0);
+  });
+
+  it("parses explicit decimal point", () => {
+    expect(parseAmountToCents("1500.75")).toBe(150075);
+    expect(parseAmountToCents("0.5")).toBe(50);
+    expect(parseAmountToCents("0.05")).toBe(5);
+  });
+
+  it("parses es-AR thousands + decimal comma", () => {
+    expect(parseAmountToCents("1.500,75")).toBe(150075);
+    expect(parseAmountToCents("1.234.567,89")).toBe(123456789);
+  });
+
+  it("parses decimal comma without thousands", () => {
+    expect(parseAmountToCents("1500,75")).toBe(150075);
+    expect(parseAmountToCents("0,5")).toBe(50);
+  });
+
+  it("strips currency symbols and whitespace", () => {
+    expect(parseAmountToCents("$ 1.500,75")).toBe(150075);
+    expect(parseAmountToCents("$1500")).toBe(150000);
+    expect(parseAmountToCents(" 1 500 ")).toBe(150000);
+    expect(parseAmountToCents("$ -1.500")).toBe(-150000);
+  });
+
+  it("resolves the '1.234' ambiguity to thousands (es-AR convention)", () => {
+    expect(parseAmountToCents("1.234")).toBe(123400);
+    expect(parseAmountToCents("1,234")).toBe(123400);
+    expect(parseAmountToCents("1.234.567")).toBe(123456700);
+  });
+
+  it("accepts the other locale style when both separators are present (last wins)", () => {
+    expect(parseAmountToCents("1,234.56")).toBe(123456);
+    expect(parseAmountToCents("1,234,567.89")).toBe(123456789);
+  });
+
+  it("rounds more than two decimals half-up to cents", () => {
+    expect(parseAmountToCents("1.2345")).toBe(123); // 1.2345 → 123.45 → 123
+    expect(parseAmountToCents("0,2859")).toBe(29); // 0.2859 → 28.59 → 29
+    expect(parseAmountToCents("0,2849")).toBe(28); // 0.2849 → 28.49 → 28
+  });
+
+  it("reads a trailing 3-digit group after a single separator as thousands", () => {
+    expect(parseAmountToCents("2,285")).toBe(228500);
+    expect(parseAmountToCents("0,285")).toBe(28500); // es-AR: 285, not 0.285
+  });
+
+  it("parses negative amounts to negative cents", () => {
+    expect(parseAmountToCents("-1500,75")).toBe(-150075);
+    expect(parseAmountToCents("-1500")).toBe(-150000);
+    expect(parseAmountToCents("+1500")).toBe(150000);
+  });
+
+  it.each(["abc", "", "   ", "$", "-", "12,34.5", "1.2.3", "1..5", "1500,", ",5", ".5", "1500.500.75"])(
+    "throws MoneyParseError naming the input for %j",
+    (bad) => {
+      expect(() => parseAmountToCents(bad)).toThrowError(MoneyParseError);
+      try {
+        parseAmountToCents(bad);
+      } catch (error) {
+        expect((error as MoneyParseError).input).toBe(bad);
+        expect((error as MoneyParseError).message).toContain(bad.trim() || bad);
+      }
+    },
+  );
+});
+
+describe("centsToNumber", () => {
+  it("converts cents to float units", () => {
+    expect(centsToNumber(150075)).toBe(1500.75);
+    expect(centsToNumber(-1)).toBe(-0.01);
+  });
+});
+
+describe("formatCents", () => {
+  // The exact glyph between '$' and the digits (regular vs narrow no-break
+  // space) varies across ICU versions, so we assert against an Intl-generated
+  // expectation plus a structural regex instead of a hardcoded literal.
+  it("formats ARS with es-AR grouping, matching a local Intl expectation", () => {
+    const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(
+      1500.75,
+    );
+    expect(formatCents(150075)).toBe(expected);
+    expect(formatCents(150075)).toMatch(/^\$\s?1\.500,75$/u);
+  });
+
+  it("formats negative amounts", () => {
+    const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(
+      -1500.75,
+    );
+    expect(formatCents(-150075)).toBe(expected);
+  });
+
+  it("honors a custom currency", () => {
+    const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD" }).format(
+      10,
+    );
+    expect(formatCents(1000, "USD")).toBe(expected);
+  });
+});
+
+describe("percentage", () => {
+  it("returns 0 when total is 0 or negative", () => {
+    expect(percentage(50, 0)).toBe(0);
+    expect(percentage(50, -10)).toBe(0);
+  });
+
+  it("returns the ratio rounded to 2 decimals", () => {
+    expect(percentage(50, 100)).toBe(50);
+    expect(percentage(1, 3)).toBe(33.33);
+    expect(percentage(2, 3)).toBe(66.67);
+  });
+
+  it("can exceed 100 when part > total", () => {
+    expect(percentage(75, 50)).toBe(150);
+  });
+});
