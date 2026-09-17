@@ -6,7 +6,15 @@ import { logoutAction } from "@/features/auth/actions";
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
 /** Routes landing in later phases — rendered as inert text, not dead links. */
-const UPCOMING_LINKS = ["Movimientos", "Bolsas", "Presupuesto"] as const;
+const UPCOMING_LINKS = ["Movimientos", "Presupuesto"] as const;
+
+const NAV_LINKS = [
+  { href: "/", label: "Dashboard" },
+  { href: "/integrantes", label: "Integrantes" },
+  { href: "/categorias", label: "Categorías" },
+  { href: "/bolsas", label: "Bolsas" },
+  { href: "/grupos", label: "Grupos" },
+] as const;
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
@@ -16,15 +24,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <nav className="flex items-center gap-4 text-sm">
-            <Link href="/" className="font-medium text-zinc-900 hover:underline dark:text-zinc-50">
-              Dashboard
-            </Link>
-            <Link
-              href="/integrantes"
-              className="font-medium text-zinc-900 hover:underline dark:text-zinc-50"
-            >
-              Integrantes
-            </Link>
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="font-medium text-zinc-900 hover:underline dark:text-zinc-50"
+              >
+                {link.label}
+              </Link>
+            ))}
             {UPCOMING_LINKS.map((label) => (
               <span key={label} className="text-zinc-400 dark:text-zinc-600">
                 {label}
