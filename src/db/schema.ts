@@ -36,8 +36,28 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   name: text("name").notNull(),
   role: roleEnum("role").notNull().default("member"),
+  isActive: boolean("is_active").notNull().default(true),
+  /** Failed login attempts since last success; reset on success or after a lockout window expires. */
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  /** When set and in the future, login is rejected before credential verification. */
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 of the session token; the raw token lives only in the user's cookie. */
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("sessions_user_id_idx").on(table.userId)],
+);
 
 export const categories = pgTable("categories", {
   id: uuid("id").defaultRandom().primaryKey(),

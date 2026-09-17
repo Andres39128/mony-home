@@ -24,8 +24,6 @@ const envSchema = z.object({
   ASSISTANT_DAILY_LIMIT: z.coerce.number().int().positive().default(8),
   /** Human-readable app name; later sent to OpenRouter as the X-Title attribution header. */
   APP_NAME: z.string().min(1).default("mony-home"),
-  /** Secret for signing sessions once auth lands. */
-  AUTH_SECRET: z.string().min(1).optional(),
   /** Password (pre-hash) assigned to seeded demo users by `npm run db:seed`. */
   SEED_ADMIN_PASSWORD: z.string().min(1).default("changeme-on-first-login"),
 });
