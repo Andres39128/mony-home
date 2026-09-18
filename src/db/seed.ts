@@ -18,7 +18,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type AppConfig } from "../lib/config.ts";
-import { budgets, categories, envelopes, expenseGroups, transactions, users } from "./schema.ts";
+import { budgets, categories, envelopes, expenseGroups, savingsContributions, savingsGoals, transactions, users } from "./schema.ts";
 
 /** Any Postgres drizzle database — postgres-js in the CLI, PGlite in tests. */
 type SeedDb = PgDatabase<PgQueryResultHKT>;
@@ -228,6 +228,45 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
       { month: day(1), categoryId: categoryId("Ocio"), amountCents: 150000 },
     ])
     .onConflictDoNothing();
+
+  // --- Savings goals + investments (demo only; no unique key → check by name) ---
+  // Each goal and its contributions are inserted in the same guard block, so a
+  // re-run never duplicates either. Contributions are a separate ledger from
+  // transactions on purpose (saving is not income/expense).
+  const goalRows = await db.select().from(savingsGoals);
+  if (!goalRows.some((g) => g.name === "Fondo de emergencia")) {
+    const [goal] = await db
+      .insert(savingsGoals)
+      .values({
+        name: "Fondo de emergencia",
+        kind: "savings",
+        scope: "common",
+        // 3-6 months of expenses: $15.000 target by end of the current year.
+        targetCents: 1500000,
+        deadline: isoDay(year, 12, 31, 31),
+      })
+      .returning();
+    await db.insert(savingsContributions).values([
+      { goalId: goal.id, memberId: userId("andres"), kind: "deposit", amountCents: 300000, date: day(1) },
+      { goalId: goal.id, memberId: userId("maria"), kind: "deposit", amountCents: 150000, date: day(10) },
+    ]);
+  }
+  if (!goalRows.some((g) => g.name === "Plazo fijo")) {
+    const [goal] = await db
+      .insert(savingsGoals)
+      .values({
+        name: "Plazo fijo",
+        kind: "investment",
+        scope: "common",
+        currentValueCents: 165000,
+        valueUpdatedAt: now,
+      })
+      .returning();
+    await db.insert(savingsContributions).values([
+      { goalId: goal.id, memberId: userId("andres"), kind: "deposit", amountCents: 200000, date: day(3) },
+      { goalId: goal.id, memberId: userId("maria"), kind: "withdrawal", amountCents: 50000, date: day(12) },
+    ]);
+  }
 }
 
 async function seed(): Promise<void> {

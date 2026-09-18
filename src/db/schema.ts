@@ -29,6 +29,8 @@ export const categoryKindEnum = pgEnum("category_kind", ["income", "expense"]);
 export const transactionTypeEnum = pgEnum("transaction_type", ["income", "expense"]);
 export const scopeKindEnum = pgEnum("scope_kind", ["individual", "common"]);
 export const groupStatusEnum = pgEnum("group_status", ["active", "closed"]);
+export const savingsKindEnum = pgEnum("savings_kind", ["savings", "investment"]);
+export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "withdrawal"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -162,5 +164,72 @@ export const budgets = pgTable(
     unique("budgets_month_category_id_unique").on(table.month, table.categoryId),
     check("budgets_amount_non_negative", sql`${table.amountCents} >= 0`),
     index("budgets_month_idx").on(table.month),
+  ],
+);
+
+/**
+ * Savings goals and investments. A savings goal ('savings') is a cumulative
+ * pool with optional target/deadline; an investment ('investment') tracks a
+ * manually updated current value. Contributions live in the SEPARATE
+ * savings_contributions ledger — saving is neither income nor expense and
+ * must never pollute those stats.
+ */
+export const savingsGoals = pgTable(
+  "savings_goals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    kind: savingsKindEnum("kind").notNull().default("savings"),
+    scope: scopeKindEnum("scope").notNull().default("common"),
+    /** null = common goal; required when scope is 'individual'. */
+    memberId: uuid("member_id").references(() => users.id),
+    /** Cumulative target; null = open pool (no progress bar). */
+    targetCents: integer("target_cents"),
+    deadline: date("deadline", { mode: "string" }),
+    /** Investments only: last manually-set valuation; null = never updated. */
+    currentValueCents: integer("current_value_cents"),
+    valueUpdatedAt: timestamp("value_updated_at", { withTimezone: true }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "savings_goals_individual_requires_member",
+      sql`${table.scope} <> 'individual' OR ${table.memberId} IS NOT NULL`,
+    ),
+    check(
+      "savings_goals_target_non_negative",
+      sql`${table.targetCents} IS NULL OR ${table.targetCents} >= 0`,
+    ),
+    check(
+      "savings_goals_current_value_non_negative",
+      sql`${table.currentValueCents} IS NULL OR ${table.currentValueCents} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Contributions ledger: deposits add to a goal's net accumulation,
+ * withdrawals subtract (emergency funds get used). Not a `transactions` row.
+ */
+export const savingsContributions = pgTable(
+  "savings_contributions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => savingsGoals.id, { onDelete: "restrict" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    kind: contributionKindEnum("kind").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    date: date("date", { mode: "string" }).notNull().default(sql`CURRENT_DATE`),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("savings_contributions_amount_positive", sql`${table.amountCents} > 0`),
+    index("savings_contributions_goal_date_idx").on(table.goalId, table.date),
   ],
 );

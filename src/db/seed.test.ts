@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { loadConfig } from "@/lib/config";
 import { seedDatabase } from "@/db/seed";
-import { budgets, categories, envelopes, expenseGroups, transactions, users } from "@/db/schema";
+import { budgets, categories, envelopes, expenseGroups, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import { createTestDb } from "@/db/test-utils";
 
 /**
@@ -25,7 +25,7 @@ describe("seedDatabase", () => {
   });
 
   const tableCounts = async () => {
-    const [userRows, categoryRows, envelopeRows, groupRows, transactionRows, budgetRows] =
+    const [userRows, categoryRows, envelopeRows, groupRows, transactionRows, budgetRows, goalRows, contributionRows] =
       await Promise.all([
         db.select().from(users),
         db.select().from(categories),
@@ -33,6 +33,8 @@ describe("seedDatabase", () => {
         db.select().from(expenseGroups),
         db.select().from(transactions),
         db.select().from(budgets),
+        db.select().from(savingsGoals),
+        db.select().from(savingsContributions),
       ]);
     return {
       users: userRows,
@@ -41,6 +43,8 @@ describe("seedDatabase", () => {
       groups: groupRows,
       transactions: transactionRows,
       budgets: budgetRows,
+      goals: goalRows,
+      contributions: contributionRows,
     };
   };
 
@@ -54,6 +58,8 @@ describe("seedDatabase", () => {
     expect(counts.groups).toHaveLength(1);
     expect(counts.transactions).toHaveLength(8);
     expect(counts.budgets).toHaveLength(2);
+    expect(counts.goals).toHaveLength(2);
+    expect(counts.contributions).toHaveLength(4);
   });
 
   it("is idempotent in demo mode (re-run does not duplicate rows)", async () => {
@@ -67,6 +73,8 @@ describe("seedDatabase", () => {
     expect(counts.groups).toHaveLength(1);
     expect(counts.transactions).toHaveLength(8);
     expect(counts.budgets).toHaveLength(2);
+    expect(counts.goals).toHaveLength(2);
+    expect(counts.contributions).toHaveLength(4);
   });
 
   it("seeds only categories + admin in production mode (SEED_DEMO_DATA=false)", async () => {
@@ -81,6 +89,8 @@ describe("seedDatabase", () => {
     expect(counts.groups).toHaveLength(0);
     expect(counts.transactions).toHaveLength(0);
     expect(counts.budgets).toHaveLength(0);
+    expect(counts.goals).toHaveLength(0);
+    expect(counts.contributions).toHaveLength(0);
   });
 
   it("is idempotent in production mode (re-run does not duplicate rows)", async () => {
