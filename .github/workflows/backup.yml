@@ -28,6 +28,20 @@ jobs:
       - name: Prepare backup name
         run: echo "BACKUP_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
 
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          # pg_dump must match or exceed the server major version (17) — the
+          # runner's stock client is 16 and aborts with a version mismatch.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -sSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
       - name: Dump database
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
