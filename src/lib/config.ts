@@ -24,8 +24,18 @@ const envSchema = z.object({
   ASSISTANT_DAILY_LIMIT: z.coerce.number().int().positive().default(8),
   /** Human-readable app name; later sent to OpenRouter as the X-Title attribution header. */
   APP_NAME: z.string().min(1).default("mony-home"),
-  /** Password (pre-hash) assigned to seeded demo users by `npm run db:seed`. */
+  /** Password (pre-hash) assigned to the seeded admin user by `npm run db:seed`. */
   SEED_ADMIN_PASSWORD: z.string().min(1).default("changeme-on-first-login"),
+  /**
+   * Seed scope for `npm run db:seed`. `false` = production bootstrap: only
+   * categories + the admin user. Anything else keeps full demo seeding.
+   * Parsed as an enum instead of `z.coerce.boolean()`, which would turn the
+   * string "false" into `true`.
+   */
+  SEED_DEMO_DATA: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

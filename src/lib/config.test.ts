@@ -43,6 +43,19 @@ describe("loadConfig", () => {
       /ASSISTANT_DAILY_LIMIT/,
     );
   });
+
+  it("defaults SEED_DEMO_DATA to true and parses 'false'", () => {
+    expect(loadConfig({}).SEED_DEMO_DATA).toBe(true);
+    expect(loadConfig({ SEED_DEMO_DATA: "" }).SEED_DEMO_DATA).toBe(true); // blank = unset
+    expect(loadConfig({ SEED_DEMO_DATA: "true" }).SEED_DEMO_DATA).toBe(true);
+    expect(loadConfig({ SEED_DEMO_DATA: "false" }).SEED_DEMO_DATA).toBe(false);
+  });
+
+  it("rejects SEED_DEMO_DATA values other than true/false", () => {
+    // "yes"/"1" fail loudly instead of coercing to a surprising boolean.
+    expect(() => loadConfig({ SEED_DEMO_DATA: "yes" })).toThrowError(/SEED_DEMO_DATA/);
+    expect(() => loadConfig({ SEED_DEMO_DATA: "1" })).toThrowError(/SEED_DEMO_DATA/);
+  });
 });
 
 describe("getConfig", () => {

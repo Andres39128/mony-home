@@ -1,0 +1,55 @@
+name: backup
+
+# Weekly production database backup (Supabase Postgres).
+#
+# Requires the SUPABASE_DB_URL repository secret: the direct/session (5432)
+# connection string — NOT the transaction pooler (6543), which breaks pg_dump.
+# Set it once with:
+#
+#   gh secret set SUPABASE_DB_URL
+#
+# Dumps are plain-text SQL (schema + data), gzipped, kept 90 days as workflow
+# artifacts. See the README "Operations (production)" section for the
+# restore procedure.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # every Monday 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prepare backup name
+        run: echo "BACKUP_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
+
+      - name: Dump database
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_URL}" ]; then
+            echo "::error::SUPABASE_DB_URL secret is not set. Configure it with: gh secret set SUPABASE_DB_URL" >&2
+            exit 1
+          fi
+          # --no-owner/--no-privileges keep the dump restorable into Supabase
+          # without superuser role/ACL conflicts.
+          pg_dump --no-owner --no-privileges "${SUPABASE_DB_URL}" | gzip > "backup-${BACKUP_DATE}.sql.gz"
+
+      - name: Report dump size and table count
+        run: |
+          ls -lh "backup-${BACKUP_DATE}.sql.gz"
+          echo "Tables with data (COPY statements): $(gunzip -c "backup-${BACKUP_DATE}.sql.gz" | grep -c '^COPY ')"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ env.BACKUP_DATE }}
+          path: backup-*.sql.gz
+          retention-days: 90
+          if-no-files-found: error
