@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import type { CategoryView } from "@/features/categories/service";
 import type { FormState } from "@/lib/form-state";
+import { FALLBACK_COLOR } from "@/features/analytics/transform";
 import {
   ActiveBadge,
   EditDetails,
@@ -34,11 +35,11 @@ function NameIcon({ category }: { category: CategoryView }) {
     <span className="flex items-center gap-2">
       <span
         aria-hidden
-        className="size-3 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/20"
+        className="size-3 shrink-0 rounded-full ring-1 ring-ink/10"
         style={{ backgroundColor: category.color }}
       />
       {category.icon && <span aria-hidden>{category.icon}</span>}
-      <span className={category.isActive ? "" : "text-zinc-400 dark:text-zinc-500"}>
+      <span className={category.isActive ? "" : "text-muted"}>
         {category.name}
       </span>
     </span>
@@ -49,7 +50,7 @@ function CategoryFields({ state, category }: { state: FormState; category?: Cate
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+        <span className="font-medium text-muted">Nombre</span>
         <input
           name="name"
           defaultValue={category?.name}
@@ -63,7 +64,7 @@ function CategoryFields({ state, category }: { state: FormState; category?: Cate
         <input type="hidden" name="kind" value={category.kind} />
       ) : (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Tipo</span>
+          <span className="font-medium text-muted">Tipo</span>
           <select name="kind" defaultValue="expense" className={inputClass}>
             <option value="expense">Gasto</option>
             <option value="income">Ingreso</option>
@@ -72,17 +73,17 @@ function CategoryFields({ state, category }: { state: FormState; category?: Cate
         </label>
       )}
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Color</span>
+        <span className="font-medium text-muted">Color</span>
         <input
           name="color"
           type="color"
-          defaultValue={category?.color ?? "#64748b"}
-          className="h-10 w-full rounded-lg border border-zinc-300 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-800"
+          defaultValue={category?.color ?? FALLBACK_COLOR}
+          className="h-10 w-full rounded-lg border border-line bg-surface p-1"
         />
         <FieldError message={state.fieldErrors?.color} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Ícono (opcional)</span>
+        <span className="font-medium text-muted">Ícono (opcional)</span>
         <input
           name="icon"
           defaultValue={category?.icon ?? ""}
@@ -102,9 +103,9 @@ function CreateCategoryForm({ action }: { action: CategoryAction }) {
     <form
       action={formAction}
       data-tour="categorias-crear"
-      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
-      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nueva categoría</h2>
+      <h2 className="font-semibold text-ink">Nueva categoría</h2>
       <CategoryFields state={state} />
       <FormError state={state} />
       <SubmitButton pending={pending}>Crear categoría</SubmitButton>
@@ -145,7 +146,7 @@ function EditCategoryForm({
         <OkMessage state={state} />
         <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
       </form>
-      <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+      <div className="flex flex-wrap items-start gap-3 border-t border-line pt-4">
         <form action={toggleFormAction} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={category.id} />
           <FormError state={toggleState} />
@@ -180,11 +181,11 @@ export default function CategoriesPanel({
         const items = categories.filter((c) => c.kind === section.kind);
         return (
           <div key={section.kind} className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
               {section.title}
             </h2>
             {items.length === 0 ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="text-sm text-muted">
                 Todavía no hay categorías en esta sección.
               </p>
             ) : (
@@ -205,7 +206,7 @@ export default function CategoriesPanel({
                   ) : (
                     <li
                       key={category.id}
-                      className={`flex items-center justify-between gap-2 rounded-2xl border border-zinc-200 bg-white px-6 py-4 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+                      className={`flex items-center justify-between gap-2 rounded-2xl border border-line bg-surface px-6 py-4 text-sm shadow-sm ${
                         category.isActive ? "" : "opacity-60"
                       }`}
                     >

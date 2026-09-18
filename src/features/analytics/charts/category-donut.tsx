@@ -83,8 +83,8 @@ export default function CategoryDonut({
         </ResponsiveContainer>
         {/* Donut hole total: HTML overlay beats fighting SVG <text> sizing. */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">Total gastado</span>
-          <span className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+          <span className="text-xs text-muted">Total gastado</span>
+          <span className="text-lg font-semibold tabular-nums text-ink">
             {formatCents(totalCents)}
           </span>
         </div>

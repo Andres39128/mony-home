@@ -61,10 +61,10 @@ export default function NewMovementDialog({
         type="button"
         data-tour={tourId}
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
       >
         Nuevo movimiento
-        <kbd className="rounded border border-white/30 px-1.5 text-xs font-normal dark:border-zinc-500">
+        <kbd className="rounded border border-base/40 px-1.5 text-xs font-normal">
           N
         </kbd>
       </button>
@@ -72,19 +72,19 @@ export default function NewMovementDialog({
       <dialog
         ref={dialogRef}
         onClose={() => setOpen(false)}
-        className="m-auto max-h-[85vh] w-[44rem] max-w-[92vw] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900"
+        className="m-auto max-h-[85vh] w-[44rem] max-w-[92vw] overflow-y-auto rounded-2xl bg-surface p-6 shadow-xl backdrop:bg-black/40"
       >
         {open && (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
+              <h2 className="font-semibold text-ink">
                 Nuevo movimiento
               </h2>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Cerrar"
-                className="rounded-lg px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                className="inline-flex size-11 items-center justify-center rounded-lg text-muted hover:bg-base"
               >
                 ✕
               </button>

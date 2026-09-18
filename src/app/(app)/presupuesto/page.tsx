@@ -44,7 +44,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
 
   return (
     <section className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold capitalize tracking-tight text-zinc-900 dark:text-zinc-50">
+      <h1 className="text-2xl font-semibold capitalize tracking-tight text-ink">
         Presupuesto de {monthLabel(month)}
       </h1>
 
@@ -52,50 +52,52 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
       <form
         method="get"
         action="/presupuesto"
-        className="flex flex-wrap items-end gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-surface p-4 shadow-sm"
       >
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Mes</span>
+          <span className="font-medium text-muted">Mes</span>
           <input type="month" name="month" defaultValue={month} className={inputClass} />
         </label>
         <button
           type="submit"
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
         >
           Filtrar
         </button>
       </form>
 
       <div data-tour="presupuesto-resumen" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Presupuestado</h2>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+        <article className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+          <h2 className="text-sm font-medium text-muted">Presupuestado</h2>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
             {formatCents(view.totals.plannedCents)}
           </p>
         </article>
-        <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Gastado</h2>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-red-600 dark:text-red-400">
+        <article className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+          <h2 className="text-sm font-medium text-muted">Gastado</h2>
+          <p className="mt-1 w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-2xl font-semibold tabular-nums text-danger-text">
             {formatCents(view.totals.spentCents)}
           </p>
         </article>
-        <article className="flex flex-col gap-2 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">% del presupuesto</h2>
-          <p className="text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+        <article className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-5 shadow-sm">
+          <h2 className="text-sm font-medium text-muted">% del presupuesto</h2>
+          <p className="text-2xl font-semibold tabular-nums text-ink">
             {totals.pct}%
           </p>
           <ProgressBar pct={totals.pct} status={totals.status} />
         </article>
-        <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Ingresos del mes</h2>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+        <article className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+          <h2 className="text-sm font-medium text-muted">Ingresos del mes</h2>
+          <p className="mt-1 w-fit rounded-lg bg-sage px-2 py-0.5 text-2xl font-semibold tabular-nums text-ink">
             {formatCents(view.context.incomeCents)}
           </p>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mt-1 text-sm text-muted">
             Saldo:{" "}
             <span
               className={`font-semibold tabular-nums ${
-                balanceCents < 0 ? "text-red-600 dark:text-red-400" : "text-zinc-900 dark:text-zinc-50"
+                balanceCents < 0
+                  ? "rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text"
+                  : "text-ink"
               }`}
             >
               {formatCents(balanceCents)}
@@ -104,9 +106,9 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
         </article>
       </div>
 
-      <div data-tour="presupuesto-tabla" className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div data-tour="presupuesto-tabla" className="overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm">
         <table className="w-full text-sm">
-          <thead className="border-b border-zinc-200 text-left text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          <thead className="border-b border-line text-left text-muted">
             <tr>
               <th className="px-6 py-3 font-medium">Categoría</th>
               <th className="px-4 py-3 text-right font-medium">Presupuestado</th>
@@ -119,26 +121,26 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
             {view.rows.map((row) => (
               <tr
                 key={row.categoryId}
-                className="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
+                className="border-b border-line last:border-0"
               >
                 <td className="px-6 py-3">
-                  <span className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-50">
+                  <span className="flex items-center gap-2 font-medium text-ink">
                     <span
                       className="inline-block h-3 w-3 rounded-full"
                       style={{ backgroundColor: row.color }}
                     />
                     {row.categoryName}
                     {row.plannedCents === 0 && (
-                      <span className="text-xs font-normal text-amber-600 dark:text-amber-400">
+                      <span className="rounded bg-honey px-1 text-xs font-normal text-ink">
                         Sin presupuestar
                       </span>
                     )}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums text-zinc-700 dark:text-zinc-300">
+                <td className="px-4 py-3 text-right tabular-nums text-muted">
                   {formatCents(row.plannedCents)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums text-zinc-700 dark:text-zinc-300">
+                <td className="px-4 py-3 text-right tabular-nums text-muted">
                   {formatCents(row.spentCents)}
                 </td>
                 <td className="w-48 px-4 py-3">
@@ -147,8 +149,8 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
                 <td
                   className={`px-6 py-3 text-right tabular-nums ${
                     row.remainingCents < 0
-                      ? "font-medium text-red-600 dark:text-red-400"
-                      : "text-zinc-700 dark:text-zinc-300"
+                      ? "font-medium text-danger-text"
+                      : "text-muted"
                   }`}
                 >
                   {formatCents(row.remainingCents)}

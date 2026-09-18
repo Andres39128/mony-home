@@ -25,11 +25,11 @@ interface Props {
 
 function StatusBadge({ status }: { status: ExpenseGroupView["status"] }) {
   return status === "active" ? (
-    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+    <span className="rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-ink">
       Activo
     </span>
   ) : (
-    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+    <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
       Cerrado
     </span>
   );
@@ -39,7 +39,7 @@ function GroupFields({ state, group }: { state: FormState; group?: ExpenseGroupV
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+        <span className="font-medium text-muted">Nombre</span>
         <input
           name="name"
           defaultValue={group?.name}
@@ -50,7 +50,7 @@ function GroupFields({ state, group }: { state: FormState; group?: ExpenseGroupV
         <FieldError message={state.fieldErrors?.name} />
       </label>
       <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Descripción (opcional)</span>
+        <span className="font-medium text-muted">Descripción (opcional)</span>
         <textarea
           name="description"
           defaultValue={group?.description ?? ""}
@@ -70,9 +70,9 @@ function CreateGroupForm({ action }: { action: GroupAction }) {
     <form
       action={formAction}
       data-tour="grupos-crear"
-      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
-      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nuevo grupo</h2>
+      <h2 className="font-semibold text-ink">Nuevo grupo</h2>
       <GroupFields state={state} />
       <FormError state={state} />
       <SubmitButton pending={pending}>Crear grupo</SubmitButton>
@@ -130,14 +130,14 @@ function GroupRow({
           <>
             <span>{group.name}</span>
             <StatusBadge status={group.status} />
-            <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+            <span className="text-sm font-normal text-muted">
               {group.transactionCount} {group.transactionCount === 1 ? "movimiento" : "movimientos"}
             </span>
           </>
         }
       >
         {group.description && (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">{group.description}</p>
+          <p className="text-sm text-muted">{group.description}</p>
         )}
         <form action={formAction} className="flex flex-col gap-4">
           <input type="hidden" name="id" value={group.id} />
@@ -146,7 +146,7 @@ function GroupRow({
           <OkMessage state={state} />
           <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
         </form>
-        <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        <div className="flex flex-wrap items-start gap-3 border-t border-line pt-4">
           <form action={statusFormAction} className="flex flex-col gap-2">
             <input type="hidden" name="id" value={group.id} />
             <input type="hidden" name="status" value={group.status === "active" ? "closed" : "active"} />
@@ -173,7 +173,7 @@ export default function GroupsPanel({
   return (
     <div className="flex flex-col gap-6">
       {groups.length === 0 ? (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="text-sm text-muted">
           Todavía no hay grupos creados.
         </p>
       ) : (
@@ -190,15 +190,15 @@ export default function GroupsPanel({
             ) : (
               <li
                 key={group.id}
-                className="flex flex-wrap items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-6 py-4 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+                className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface px-6 py-4 text-sm shadow-sm"
               >
-                <span className="font-medium text-zinc-900 dark:text-zinc-50">{group.name}</span>
+                <span className="font-medium text-ink">{group.name}</span>
                 <StatusBadge status={group.status} />
-                <span className="text-zinc-500 dark:text-zinc-400">
+                <span className="text-muted">
                   {group.transactionCount} {group.transactionCount === 1 ? "movimiento" : "movimientos"}
                 </span>
                 {group.description && (
-                  <span className="text-zinc-500 dark:text-zinc-400">· {group.description}</span>
+                  <span className="text-muted">· {group.description}</span>
                 )}
               </li>
             ),

@@ -22,7 +22,7 @@ export default async function AhorroPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">
         Ahorro
       </h1>
       <SavingsPanel

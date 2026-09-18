@@ -28,6 +28,7 @@ import { getMonth } from "@/features/budgets/service";
 import { monthlyProgress } from "@/features/envelopes/service";
 import { getPatrimony } from "@/features/savings/service";
 import { formatCents } from "@/lib/money";
+import { Card } from "@/components/card";
 import { ProgressBar } from "@/components/progress";
 import { inputClass } from "@/components/forms";
 
@@ -50,18 +51,15 @@ function drillQuery(
   return next.toString();
 }
 
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      {children}
-    </article>
-  );
-}
+/** Colored money chip: pastel fill + ink/danger text, legible on both themes. */
+const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-ink";
+const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text";
+const CHIP_WEALTH = "w-fit rounded-lg bg-honey px-2 py-0.5 text-ink";
 
 function KpiCard({
   title,
   value,
-  valueClass = "text-zinc-900 dark:text-zinc-50",
+  valueClass = "text-ink",
   children,
 }: {
   title: string;
@@ -70,8 +68,8 @@ function KpiCard({
   children?: React.ReactNode;
 }) {
   return (
-    <Card>
-      <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{title}</h2>
+    <Card className="p-5">
+      <h2 className="text-sm font-medium text-muted">{title}</h2>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
       {children}
     </Card>
@@ -94,21 +92,16 @@ function ChartCard({
   children: React.ReactNode;
 }) {
   return (
-    <article
-      data-tour={tourId}
-      className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
-        wide ? "lg:col-span-2" : ""
-      }`}
-    >
-      <h2 className="mb-3 text-sm font-medium text-zinc-500 dark:text-zinc-400">{title}</h2>
+    <Card data-tour={tourId} className={`p-5 ${wide ? "lg:col-span-2" : ""}`}>
+      <h2 className="mb-3 text-sm font-medium text-muted">{title}</h2>
       {emptyMessage ? (
-        <p className="flex h-[240px] items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="flex h-[240px] items-center justify-center text-sm text-muted">
           {emptyMessage}
         </p>
       ) : (
         children
       )}
-    </article>
+    </Card>
   );
 }
 
@@ -173,14 +166,14 @@ export default async function DashboardPage({
 
   const balanceClass =
     totals.balanceCents > 0
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? CHIP_WEALTH
       : totals.balanceCents < 0
-        ? "text-red-600 dark:text-red-400"
-        : "text-zinc-900 dark:text-zinc-50";
+        ? CHIP_EXPENSE
+        : "text-ink";
 
   return (
     <section className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">
         Dashboard
       </h1>
 
@@ -189,14 +182,14 @@ export default async function DashboardPage({
         method="get"
         action="/"
         data-tour="dashboard-filtros"
-        className="grid items-end gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7 dark:border-zinc-800 dark:bg-zinc-900"
+        className="grid items-end gap-3 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7"
       >
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Mes</span>
+          <span className="font-medium text-muted">Mes</span>
           <input type="month" name="month" defaultValue={month} className={inputClass} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Ámbito</span>
+          <span className="font-medium text-muted">Ámbito</span>
           <select name="scope" defaultValue={filters.scope ?? ""} className={inputClass}>
             <option value="">Todos</option>
             <option value="individual">Individual</option>
@@ -204,7 +197,7 @@ export default async function DashboardPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Integrante</span>
+          <span className="font-medium text-muted">Integrante</span>
           <select name="memberId" defaultValue={filters.memberId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.members.map((member) => (
@@ -215,7 +208,7 @@ export default async function DashboardPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Categoría</span>
+          <span className="font-medium text-muted">Categoría</span>
           <select name="categoryId" defaultValue={filters.categoryId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.categories.map((category) => (
@@ -227,7 +220,7 @@ export default async function DashboardPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Bolsa</span>
+          <span className="font-medium text-muted">Bolsa</span>
           <select name="envelopeId" defaultValue={filters.envelopeId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.envelopes.map((envelope) => (
@@ -238,7 +231,7 @@ export default async function DashboardPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Grupo</span>
+          <span className="font-medium text-muted">Grupo</span>
           <select name="groupId" defaultValue={filters.groupId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.groups.map((group) => (
@@ -252,13 +245,13 @@ export default async function DashboardPage({
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
           >
             Filtrar
           </button>
           <Link
             href="/"
-            className="text-sm text-zinc-500 underline-offset-2 hover:underline dark:text-zinc-400"
+            className="inline-flex min-h-11 items-center text-sm text-muted underline-offset-2 hover:underline"
           >
             Limpiar
           </Link>
@@ -269,23 +262,23 @@ export default async function DashboardPage({
         <KpiCard
           title="Ingresos"
           value={formatCents(totals.incomeCents)}
-          valueClass="text-emerald-600 dark:text-emerald-400"
+          valueClass={CHIP_INCOME}
         />
         <KpiCard
           title="Gastos"
           value={formatCents(totals.expenseCents)}
-          valueClass="text-red-600 dark:text-red-400"
+          valueClass={CHIP_EXPENSE}
         />
         <KpiCard title="Saldo" value={formatCents(totals.balanceCents)} valueClass={balanceClass} />
         <KpiCard
           title="Presupuesto ejecutado"
           value={`${budgetTotals.pct}%`}
-          valueClass={budgetProgress.status === "over" ? "text-red-600 dark:text-red-400" : "text-zinc-900 dark:text-zinc-50"}
+          valueClass={budgetProgress.status === "over" ? CHIP_EXPENSE : "text-ink"}
         >
           <div className="mt-2">
             <ProgressBar pct={budgetProgress.pct} status={budgetProgress.status} />
           </div>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="mt-1 text-xs text-muted">
             de {formatCents(budgetTotals.plannedCents)} planificados
           </p>
         </KpiCard>
@@ -296,15 +289,15 @@ export default async function DashboardPage({
       <Link
         href="/ahorro"
         data-tour="dashboard-patrimonio"
-        className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm transition-colors hover:bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50"
+        className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey/40 p-5 shadow-sm transition-colors hover:bg-honey/60"
       >
-        <h2 className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+        <h2 className="text-sm font-medium text-ink">
           Patrimonio
         </h2>
-        <p className="text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+        <p className="text-2xl font-semibold tabular-nums text-ink">
           {formatCents(patrimony.totalCents)}
         </p>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-ink">
           Ahorro {formatCents(patrimony.savingsCents)} · Inversión{" "}
           {formatCents(patrimony.investmentsCents)}
         </p>
@@ -351,14 +344,14 @@ export default async function DashboardPage({
               <li key={row.id}>
                 <Link
                   href={envelopeHref(row.id)}
-                  className="group block rounded-lg transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                  className="group block rounded-lg transition-colors hover:bg-base"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                    <span className="font-medium text-zinc-700 group-hover:underline dark:text-zinc-300">
+                    <span className="font-medium text-muted group-hover:underline">
                       {row.name}
                       {row.scope === "individual" && row.memberName ? ` · ${row.memberName}` : ""}
                     </span>
-                    <span className="tabular-nums text-zinc-500 dark:text-zinc-400">
+                    <span className="tabular-nums text-muted">
                       {formatCents(row.spentCents)} / {formatCents(row.plannedCents)}
                     </span>
                   </div>

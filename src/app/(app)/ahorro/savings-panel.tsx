@@ -39,11 +39,11 @@ interface Props {
 /** "Común" / "Individual · {member}" badge, same pattern as the bolsas panel. */
 function ScopeBadge({ goal }: { goal: GoalView }) {
   return goal.scope === "common" ? (
-    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+    <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
       Común
     </span>
   ) : (
-    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+    <span className="rounded-full bg-honey px-2 py-0.5 text-xs font-medium text-ink">
       Individual · {goal.memberName ?? "?"}
     </span>
   );
@@ -59,8 +59,8 @@ function DeadlineLabel({ deadline }: { deadline: string | null }) {
     <span
       className={`text-xs ${
         months < 0
-          ? "font-medium text-red-600 dark:text-red-400"
-          : "text-zinc-500 dark:text-zinc-400"
+          ? "font-medium text-danger-text"
+          : "text-muted"
       }`}
     >
       {copy}
@@ -81,14 +81,14 @@ function KindToggle({
     { value: "withdrawal" as const, label: "Retiro" },
   ];
   return (
-    <div className="inline-flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
+    <div className="inline-flex overflow-hidden rounded-lg border border-line">
       {options.map((option) => (
         <label
           key={option.value}
           className={`cursor-pointer px-3 py-1.5 text-sm font-medium transition-colors ${
             value === option.value
-              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-              : "bg-white text-zinc-600 hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              ? "bg-ink text-base"
+              : "bg-surface text-muted hover:bg-base"
           }`}
         >
           <input
@@ -140,9 +140,9 @@ function QuickContributionForm({
   const [kind, setKind] = useState<"deposit" | "withdrawal">("deposit");
 
   return (
-    <form action={formAction} data-tour={tourId} className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+    <form action={formAction} data-tour={tourId} className="flex flex-col gap-2 border-t border-line pt-3">
       <input type="hidden" name="id" value={goal.id} />
-      <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+      <p className="text-xs font-medium text-muted">
         Aportar a esta meta — monto y Enter; el toggle cambia a retiro
       </p>
       <div className="flex flex-wrap items-center gap-2">
@@ -180,35 +180,35 @@ function GoalCard({
   const progress = computeGoalProgress(goal.netCents, goal.targetCents);
   return (
     <li
-      className={`flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+      className={`flex flex-col gap-3 rounded-2xl border border-line bg-surface px-6 py-4 shadow-sm ${
         goal.isActive ? "" : "opacity-60"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-medium text-zinc-900 dark:text-zinc-50">{goal.name}</span>
+        <span className="font-medium text-ink">{goal.name}</span>
         <ScopeBadge goal={goal} />
       </div>
       {progress ? (
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted">
             <span>
               {formatCents(goal.netCents)} de {formatCents(goal.targetCents!)}
             </span>
             <span className="tabular-nums">{progress.pct}%</span>
           </div>
           <ProgressBar pct={progress.pct} status={progress.status} />
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          <span className="text-xs text-muted">
             Faltan {formatCents(progress.remainingCents)}
           </span>
         </div>
       ) : (
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm text-muted">
           Acumulado: {formatCents(goal.netCents)}
         </p>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <DeadlineLabel deadline={goal.deadline} />
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+        <span className="text-xs text-muted">
           {goal.contributionCount} {goal.contributionCount === 1 ? "aporte" : "aportes"}
         </span>
       </div>
@@ -243,52 +243,52 @@ function InvestmentCard({
   const valueCents = investmentValueCents(goal.netCents, goal.currentValueCents);
   const returnClass =
     returnValue > 0
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? "rounded-md bg-sage/40 px-1.5 text-ink"
       : returnValue < 0
-        ? "text-red-600 dark:text-red-400"
-        : "text-zinc-500 dark:text-zinc-400";
+        ? "rounded-md bg-danger-fill/50 px-1.5 text-danger-text"
+        : "text-muted";
 
   const [valueState, valueFormAction, valuePending] = useActionState(valueAction, {});
 
   return (
     <li
-      className={`flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+      className={`flex flex-col gap-3 rounded-2xl border border-line bg-surface px-6 py-4 shadow-sm ${
         goal.isActive ? "" : "opacity-60"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-medium text-zinc-900 dark:text-zinc-50">{goal.name}</span>
+        <span className="font-medium text-ink">{goal.name}</span>
         <ScopeBadge goal={goal} />
       </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Invertido neto</p>
-          <p className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+          <p className="text-xs text-muted">Invertido neto</p>
+          <p className="font-medium tabular-nums text-ink">
             {formatCents(goal.netCents)}
           </p>
         </div>
         <div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Valor actual</p>
-          <p className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+          <p className="text-xs text-muted">Valor actual</p>
+          <p className="font-medium tabular-nums text-ink">
             {formatCents(valueCents)}
           </p>
         </div>
         <div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Retorno</p>
+          <p className="text-xs text-muted">Retorno</p>
           <p className={`font-medium tabular-nums ${returnClass}`}>
             {returnValue > 0 ? "+" : ""}
             {returnValue}%
           </p>
         </div>
         <div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">Aportes</p>
-          <p className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+          <p className="text-xs text-muted">Aportes</p>
+          <p className="font-medium tabular-nums text-ink">
             {goal.contributionCount}
           </p>
         </div>
       </div>
       {goal.valueUpdatedAt && (
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        <p className="text-xs text-muted">
           actualizado{" "}
           {new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short", year: "numeric" }).format(
             goal.valueUpdatedAt,
@@ -299,7 +299,7 @@ function InvestmentCard({
         <form
           action={valueFormAction}
           data-tour={valueTourId}
-          className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800"
+          className="flex flex-wrap items-center gap-2 border-t border-line pt-3"
         >
           <input type="hidden" name="id" value={goal.id} />
           <input
@@ -343,12 +343,12 @@ function GoalFields({
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+          <span className="font-medium text-muted">Nombre</span>
           <input name="name" defaultValue={goal?.name} required maxLength={64} className={inputClass} />
           <FieldError message={state.fieldErrors?.name} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Tipo</span>
+          <span className="font-medium text-muted">Tipo</span>
           <select
             name="kind"
             value={kind}
@@ -361,7 +361,7 @@ function GoalFields({
           <FieldError message={state.fieldErrors?.kind} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Ámbito</span>
+          <span className="font-medium text-muted">Ámbito</span>
           <select name="scope" defaultValue={goal?.scope ?? "common"} className={inputClass}>
             <option value="common">Común</option>
             <option value="individual">Individual</option>
@@ -369,7 +369,7 @@ function GoalFields({
           <FieldError message={state.fieldErrors?.scope} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="font-medium text-muted">
             Integrante (solo individuales)
           </span>
           <select name="memberId" defaultValue={goal?.memberId ?? ""} className={inputClass}>
@@ -386,7 +386,7 @@ function GoalFields({
       {kind === "savings" ? (
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="font-medium text-muted">
               Objetivo (opcional)
             </span>
             <input
@@ -399,7 +399,7 @@ function GoalFields({
             <FieldError message={state.fieldErrors?.target} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="font-medium text-muted">
               Fecha límite (opcional)
             </span>
             <input type="date" name="deadline" defaultValue={goal?.deadline ?? undefined} className={inputClass} />
@@ -408,7 +408,7 @@ function GoalFields({
         </div>
       ) : (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="font-medium text-muted">
             Valor actual (opcional)
           </span>
           <input
@@ -437,9 +437,9 @@ function CreateGoalForm({
     <form
       action={formAction}
       data-tour="ahorro-crear"
-      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
-      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nueva meta</h2>
+      <h2 className="font-semibold text-ink">Nueva meta</h2>
       <GoalFields state={state} members={members} />
       <FormError state={state} />
       <SubmitButton pending={pending}>Crear meta</SubmitButton>
@@ -468,11 +468,11 @@ function EditGoalForm({
     <EditDetails
       summary={
         <>
-          <span className={goal.isActive ? "" : "text-zinc-400 dark:text-zinc-500"}>
+          <span className={goal.isActive ? "" : "text-muted"}>
             {goal.name}
           </span>
           <ScopeBadge goal={goal} />
-          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+          <span className="text-sm font-normal text-muted">
             {formatCents(goal.netCents)}
           </span>
           <span className="ml-auto">
@@ -488,7 +488,7 @@ function EditGoalForm({
         <OkMessage state={state} />
         <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
       </form>
-      <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+      <div className="flex flex-wrap items-start gap-3 border-t border-line pt-4">
         <form action={toggleFormAction} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={goal.id} />
           <FormError state={toggleState} />
@@ -542,12 +542,14 @@ export default function SavingsPanel({
             key={item.label}
             className={`rounded-2xl border p-5 shadow-sm ${
               item.accent
-                ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30"
-                : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+                ? "border-honey bg-honey/40"
+                : "border-line bg-surface"
             }`}
           >
-            <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{item.label}</h2>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+            <h2 className={`text-sm font-medium ${item.accent ? "text-ink" : "text-muted"}`}>
+              {item.label}
+            </h2>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
               {formatCents(item.cents)}
             </p>
           </article>
@@ -556,7 +558,7 @@ export default function SavingsPanel({
 
       <div data-tour="ahorro-metas" className="flex flex-col gap-3">
         {savings.length > 0 && (
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-muted">
             Metas de ahorro
           </h2>
         )}
@@ -573,7 +575,7 @@ export default function SavingsPanel({
         </ul>
 
         {investments.length > 0 && (
-          <h2 className="mt-2 text-sm font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          <h2 className="mt-2 text-sm font-medium uppercase tracking-wide text-muted">
             Inversiones
           </h2>
         )}
@@ -591,7 +593,7 @@ export default function SavingsPanel({
           ))}
         </ul>
         {goals.length === 0 && (
-          <p className="rounded-2xl border border-dashed border-zinc-300 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          <p className="rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-muted">
             Todavía no hay metas ni inversiones.
           </p>
         )}

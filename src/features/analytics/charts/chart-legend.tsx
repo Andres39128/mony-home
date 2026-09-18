@@ -30,7 +30,7 @@ export function ChartLegend({
               type="button"
               aria-pressed={!isHidden}
               onClick={() => onToggle(item.key)}
-              className={`flex items-center gap-1.5 rounded px-1 py-0.5 transition-opacity hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded px-2 transition-colors hover:bg-base ${
                 isHidden ? "opacity-40 line-through" : ""
               }`}
             >

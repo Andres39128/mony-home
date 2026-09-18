@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import type { LoginState } from "@/features/auth/actions";
+import { inputClass } from "@/components/forms";
 
 /**
  * Spanish error copy keyed by the server error — generic on purpose:
@@ -24,7 +25,7 @@ export default function LoginForm({
   return (
     <form action={formAction} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <label htmlFor="username" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label htmlFor="username" className="text-sm font-medium text-muted">
           Usuario
         </label>
         <input
@@ -34,11 +35,11 @@ export default function LoginForm({
           autoComplete="username"
           required
           maxLength={64}
-          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:border-zinc-100"
+          className={inputClass}
         />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor="password" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        <label htmlFor="password" className="text-sm font-medium text-muted">
           Contraseña
         </label>
         <input
@@ -48,18 +49,18 @@ export default function LoginForm({
           autoComplete="current-password"
           required
           maxLength={128}
-          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-zinc-900 outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:border-zinc-100"
+          className={inputClass}
         />
       </div>
       {errorMessage && (
-        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <p role="alert" className="rounded-lg bg-danger-fill px-3 py-2 text-sm text-danger-text">
           {errorMessage}
         </p>
       )}
       <button
         type="submit"
         disabled={pending}
-        className="mt-2 rounded-lg bg-zinc-900 px-4 py-2 font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        className="mt-2 inline-flex min-h-11 items-center justify-center rounded-lg bg-ink px-4 py-2 font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
       >
         Iniciar sesión
       </button>

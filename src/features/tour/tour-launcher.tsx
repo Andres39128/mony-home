@@ -99,7 +99,7 @@ export default function TourLauncher() {
       disabled={!steps}
       title={steps ? "¿Cómo funciona? Recorrido guiado por esta página" : "Esta página no tiene recorrido guiado"}
       aria-label="¿Cómo funciona?"
-      className="flex size-8 items-center justify-center rounded-full border border-zinc-300 font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      className="flex size-11 items-center justify-center rounded-full border border-line font-semibold text-muted transition-colors hover:bg-base disabled:cursor-not-allowed disabled:opacity-40"
     >
       ?
     </button>

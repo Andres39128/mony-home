@@ -8,6 +8,7 @@ import type { TransactionView } from "@/features/transactions/service";
 import type { InlineCategoryState } from "@/features/transactions/actions";
 import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
+import { FALLBACK_COLOR } from "@/features/analytics/transform";
 import { FieldError, FormError, inputClass } from "@/components/forms";
 
 export type MovementAction = (state: FormState, formData: FormData) => Promise<FormState>;
@@ -63,14 +64,14 @@ function Toggle({
   options: { value: string; label: string }[];
 }) {
   return (
-    <div className="inline-flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
+    <div className="inline-flex overflow-hidden rounded-lg border border-line">
       {options.map((option) => (
         <label
           key={option.value}
           className={`cursor-pointer px-4 py-2 text-sm font-medium transition-colors ${
             value === option.value
-              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-              : "bg-white text-zinc-600 hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              ? "bg-ink text-base"
+              : "bg-surface text-muted hover:bg-base"
           }`}
         >
           <input
@@ -122,7 +123,7 @@ export default function MovementForm({
   const [memberId, setMemberId] = useState(transaction?.memberId ?? currentUser.id);
   const [inlineOpen, setInlineOpen] = useState(false);
   const [inlineName, setInlineName] = useState("");
-  const [inlineColor, setInlineColor] = useState("#64748b");
+  const [inlineColor, setInlineColor] = useState(FALLBACK_COLOR);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [inlinePending, startInlineTransition] = useTransition();
   const [extraCategories, setExtraCategories] = useState<
@@ -189,7 +190,7 @@ export default function MovementForm({
         setExtraCategories((prev) => [...prev, newCategory]);
         setCategoryId(newCategory.id);
         setInlineName("");
-        setInlineColor("#64748b");
+        setInlineColor(FALLBACK_COLOR);
         setInlineError(null);
         setInlineOpen(false);
       } else {
@@ -237,7 +238,7 @@ export default function MovementForm({
       {mode === "edit" && transaction && <input type="hidden" name="id" value={transaction.id} />}
 
       <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Tipo</span>
+        <span className="text-sm font-medium text-muted">Tipo</span>
         <Toggle
           name="type"
           value={type}
@@ -252,7 +253,7 @@ export default function MovementForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Monto</span>
+          <span className="font-medium text-muted">Monto</span>
           <input
             ref={amountRef}
             name="amount"
@@ -265,7 +266,7 @@ export default function MovementForm({
           <FieldError message={state.fieldErrors?.amount} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Fecha</span>
+          <span className="font-medium text-muted">Fecha</span>
           <input
             ref={dateRef}
             type="date"
@@ -278,7 +279,7 @@ export default function MovementForm({
       </div>
 
       <div className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Categoría</span>
+        <span className="font-medium text-muted">Categoría</span>
         {inlineOpen ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
@@ -301,7 +302,7 @@ export default function MovementForm({
                 value={inlineColor}
                 onChange={(event) => setInlineColor(event.target.value)}
                 aria-label="Color de la categoría"
-                className="h-9 w-12 shrink-0 cursor-pointer rounded border border-zinc-300 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-800"
+                className="h-9 w-12 shrink-0 cursor-pointer rounded border border-line bg-surface p-1"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -309,14 +310,14 @@ export default function MovementForm({
                 type="button"
                 onClick={requestCreateCategory}
                 disabled={inlinePending}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                className="inline-flex min-h-11 items-center rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-base disabled:opacity-50"
               >
                 Crear categoría
               </button>
               <button
                 type="button"
                 onClick={() => setInlineOpen(false)}
-                className="text-sm text-zinc-500 underline-offset-2 hover:underline dark:text-zinc-400"
+                className="text-sm text-muted underline-offset-2 hover:underline"
               >
                 Cancelar
               </button>
@@ -354,7 +355,7 @@ export default function MovementForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Bolsa (opcional)</span>
+          <span className="font-medium text-muted">Bolsa (opcional)</span>
           <select
             name="envelopeId"
             value={envelopeId}
@@ -372,7 +373,7 @@ export default function MovementForm({
           <FieldError message={state.fieldErrors?.envelopeId} />
         </label>
         <div className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Integrante</span>
+          <span className="font-medium text-muted">Integrante</span>
           {isAdmin ? (
             <select
               name="memberId"
@@ -391,7 +392,7 @@ export default function MovementForm({
           ) : (
             <>
               <input type="hidden" name="memberId" value={currentUser.id} />
-              <span className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300">
+              <span className="rounded-lg border border-line bg-base px-3 py-2 text-muted">
                 {currentUser.name}
               </span>
             </>
@@ -401,7 +402,7 @@ export default function MovementForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Ámbito</span>
+          <span className="text-sm font-medium text-muted">Ámbito</span>
           <Toggle
             name="scope"
             value={scope}
@@ -414,7 +415,7 @@ export default function MovementForm({
           <FieldError message={state.fieldErrors?.scope} />
         </div>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Grupo (opcional)</span>
+          <span className="font-medium text-muted">Grupo (opcional)</span>
           <select
             name="groupId"
             value={groupId}
@@ -434,7 +435,7 @@ export default function MovementForm({
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Nota (opcional)</span>
+        <span className="font-medium text-muted">Nota (opcional)</span>
         <input
           ref={noteRef}
           name="note"
@@ -449,7 +450,7 @@ export default function MovementForm({
       {mode === "create" && state.ok && (
         <p
           role="status"
-          className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+          className="rounded-lg bg-sage px-3 py-2 text-sm text-ink"
         >
           Movimiento guardado.
         </p>
@@ -458,7 +459,7 @@ export default function MovementForm({
       <button
         type="submit"
         disabled={pending}
-        className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        className="inline-flex min-h-11 items-center self-start rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
       >
         {mode === "edit" ? "Guardar cambios" : "Guardar movimiento"}
       </button>

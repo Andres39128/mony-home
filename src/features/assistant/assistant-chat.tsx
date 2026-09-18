@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { askAssistantAction } from "@/features/assistant/actions";
+import { inputClass } from "@/components/forms";
 import {
   HISTORY_TURNS_SENT,
   QUESTION_MAX_LENGTH,
@@ -110,7 +111,7 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
         <p
           role="status"
           data-tour="asistente-cuota"
-          className="text-sm text-zinc-600 dark:text-zinc-400"
+          className="text-sm text-muted"
           aria-live="polite"
         >
           Te quedan <span className="font-mono font-semibold">{remaining}</span> de{" "}
@@ -118,7 +119,7 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
         </p>
         <p
           data-tour="asistente-limites"
-          className="text-xs text-zinc-400 dark:text-zinc-500"
+          className="text-xs text-muted"
         >
           El asistente solo ve agregados del mes, nunca tus movimientos individuales.
         </p>
@@ -126,10 +127,10 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
 
       <div
         ref={listRef}
-        className="flex max-h-[28rem] min-h-48 flex-col gap-3 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex max-h-[28rem] min-h-48 flex-col gap-3 overflow-y-auto rounded-2xl border border-line bg-surface p-4"
       >
         {messages.length === 0 && !pending && (
-          <p className="mx-auto my-auto text-center text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mx-auto my-auto text-center text-sm text-muted">
             Preguntá por tus gastos, presupuestos o bolsas de este mes.
           </p>
         )}
@@ -138,20 +139,20 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
             key={message.id}
             className={`max-w-[85%] rounded-2xl px-4 py-2 ${
               message.role === "user"
-                ? "self-end bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                : "self-start border border-zinc-200 bg-zinc-50 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+                ? "self-end bg-ink text-base"
+                : "self-start border border-line bg-base text-ink"
             }`}
           >
             <MessageText content={message.content} />
           </div>
         ))}
         {pending && (
-          <p role="status" aria-live="polite" className="self-start px-4 py-2 text-sm text-zinc-500 dark:text-zinc-400">
+          <p role="status" aria-live="polite" className="self-start px-4 py-2 text-sm text-muted">
             Pensando…
           </p>
         )}
         {error && (
-          <p role="alert" className="self-start rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+          <p role="alert" className="self-start rounded-lg bg-danger-fill px-3 py-2 text-sm text-danger-text">
             {error}
           </p>
         )}
@@ -172,12 +173,12 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
           maxLength={QUESTION_MAX_LENGTH}
           disabled={pending || exhausted}
           aria-label="Tu pregunta para el asistente"
-          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:border-zinc-100"
+          className={`${inputClass} disabled:opacity-50`}
         />
         <button
           type="submit"
           disabled={pending || exhausted || input.trim().length === 0}
-          className="shrink-0 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
         >
           Enviar
         </button>

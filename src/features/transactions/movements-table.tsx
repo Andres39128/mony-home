@@ -56,14 +56,14 @@ export default function MovementsTable({
       <FormError state={deleteState} />
 
       {rows.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-zinc-300 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+        <p className="rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-muted">
           No hay movimientos para este filtro.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
                 <th className="px-4 py-3 font-medium">Fecha</th>
                 <th className="px-4 py-3 font-medium">Categoría</th>
                 <th className="px-4 py-3 font-medium">Detalle</th>
@@ -83,9 +83,9 @@ export default function MovementsTable({
                 return (
                   <tr
                     key={row.id}
-                    className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60"
+                    className="border-b border-line last:border-0"
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    <td className="whitespace-nowrap px-4 py-3 text-muted">
                       {shortDate(row.date)}
                     </td>
                     <td className="px-4 py-3">
@@ -98,24 +98,24 @@ export default function MovementsTable({
                         {row.categoryName}
                       </span>
                     </td>
-                    <td className="max-w-48 truncate px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    <td className="max-w-48 truncate px-4 py-3 text-muted">
                       {row.note ?? "—"}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    <td className="whitespace-nowrap px-4 py-3 text-muted">
                       {row.memberName}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    <td className="whitespace-nowrap px-4 py-3 text-muted">
                       {row.envelopeName ?? "—"}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    <td className="whitespace-nowrap px-4 py-3 text-muted">
                       {row.groupName ?? "—"}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={
                           row.scope === "individual"
-                            ? "rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300"
-                            : "rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                            ? "rounded-full bg-honey px-2 py-0.5 text-xs font-medium text-ink"
+                            : "rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink"
                         }
                       >
                         {row.scope === "individual" ? "Individual" : "Común"}
@@ -124,8 +124,8 @@ export default function MovementsTable({
                     <td
                       className={`whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums ${
                         row.type === "income"
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-red-600 dark:text-red-400"
+                          ? "rounded-lg bg-sage/40 text-ink"
+                          : "rounded-lg bg-danger-fill/50 text-danger-text"
                       }`}
                     >
                       {row.type === "income" ? "+" : "−"}
@@ -137,7 +137,7 @@ export default function MovementsTable({
                           <button
                             type="button"
                             onClick={() => setEditingId(row.id)}
-                            className="text-sm font-medium text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
+                            className="inline-flex min-h-11 items-center text-sm font-medium text-muted underline-offset-2 hover:underline"
                           >
                             Editar
                           </button>
@@ -153,14 +153,14 @@ export default function MovementsTable({
                             <button
                               type="submit"
                               disabled={deletePending}
-                              className="text-sm font-medium text-red-600 underline-offset-2 hover:underline disabled:opacity-50 dark:text-red-400"
+                              className="inline-flex min-h-11 items-center rounded-md px-1 text-sm font-medium text-danger-text underline-offset-2 hover:bg-danger-fill/50 hover:underline disabled:opacity-50"
                             >
                               Borrar
                             </button>
                           </form>
                         </div>
                       ) : (
-                        <span className="text-xs text-zinc-400 dark:text-zinc-600">—</span>
+                        <span className="text-xs text-muted">—</span>
                       )}
                     </td>
                   </tr>
@@ -177,15 +177,15 @@ export default function MovementsTable({
             if (node && !node.open) node.showModal();
           }}
           onClose={() => setEditingId(null)}
-          className="m-auto max-h-[85vh] w-[44rem] max-w-[92vw] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900"
+          className="m-auto max-h-[85vh] w-[44rem] max-w-[92vw] overflow-y-auto rounded-2xl bg-surface p-6 shadow-xl backdrop:bg-black/40"
         >
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Editar movimiento</h2>
+            <h2 className="font-semibold text-ink">Editar movimiento</h2>
             <button
               type="button"
               onClick={() => setEditingId(null)}
               aria-label="Cerrar"
-              className="rounded-lg px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="inline-flex size-11 items-center justify-center rounded-lg text-muted hover:bg-base"
             >
               ✕
             </button>

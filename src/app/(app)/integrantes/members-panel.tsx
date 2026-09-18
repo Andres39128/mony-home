@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import type { MemberView, MemberFormState } from "@/features/members/service";
-import { EditDetails } from "@/components/forms";
+import { EditDetails, inputClass } from "@/components/forms";
 
 type MemberAction = (state: MemberFormState, formData: FormData) => Promise<MemberFormState>;
 
@@ -14,18 +14,15 @@ interface Props {
   deleteAction: MemberAction;
 }
 
-const inputClass =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:border-zinc-100";
-
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p className="text-xs text-red-600 dark:text-red-400">{message}</p>;
+  return <p className="text-xs text-danger-text">{message}</p>;
 }
 
 function FormError({ state }: { state: MemberFormState }) {
   if (!state.error) return null;
   return (
-    <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+    <p role="alert" className="rounded-lg bg-danger-fill px-3 py-2 text-sm text-danger-text">
       {state.error}
     </p>
   );
@@ -34,7 +31,7 @@ function FormError({ state }: { state: MemberFormState }) {
 function OkMessage({ state, text = "Cambios guardados." }: { state: MemberFormState; text?: string }) {
   if (!state.ok) return null;
   return (
-    <p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+    <p role="status" className="rounded-lg bg-sage px-3 py-2 text-sm text-ink">
       {text}
     </p>
   );
@@ -48,27 +45,27 @@ function CreateMemberForm({ action }: { action: MemberAction }) {
     <form
       action={formAction}
       data-tour="integrantes-crear"
-      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
-      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nuevo integrante</h2>
+      <h2 className="font-semibold text-ink">Nuevo integrante</h2>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Usuario</span>
+          <span className="font-medium text-muted">Usuario</span>
           <input name="username" required minLength={3} maxLength={32} className={inputClass} />
           <FieldError message={state.fieldErrors?.username} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+          <span className="font-medium text-muted">Nombre</span>
           <input name="name" required maxLength={80} className={inputClass} />
           <FieldError message={state.fieldErrors?.name} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Contraseña</span>
+          <span className="font-medium text-muted">Contraseña</span>
           <input name="password" type="password" required minLength={8} maxLength={128} className={inputClass} />
           <FieldError message={state.fieldErrors?.password} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Rol</span>
+          <span className="font-medium text-muted">Rol</span>
           <select name="role" defaultValue="member" className={inputClass}>
             <option value="member">Miembro</option>
             <option value="admin">Administrador</option>
@@ -80,7 +77,7 @@ function CreateMemberForm({ action }: { action: MemberAction }) {
       <button
         type="submit"
         disabled={pending}
-        className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        className="inline-flex min-h-11 items-center self-start rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
       >
         Crear integrante
       </button>
@@ -105,7 +102,7 @@ function EditMemberForm({
       summary={
         <>
           {member.name}{" "}
-          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+          <span className="text-sm font-normal text-muted">
             ({member.username})
           </span>
         </>
@@ -115,12 +112,12 @@ function EditMemberForm({
         <input type="hidden" name="id" value={member.id} />
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+            <span className="font-medium text-muted">Nombre</span>
             <input name="name" defaultValue={member.name} required maxLength={80} className={inputClass} />
             <FieldError message={state.fieldErrors?.name} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">Rol</span>
+            <span className="font-medium text-muted">Rol</span>
             <select name="role" defaultValue={member.role} className={inputClass}>
               <option value="member">Miembro</option>
               <option value="admin">Administrador</option>
@@ -128,7 +125,7 @@ function EditMemberForm({
             <FieldError message={state.fieldErrors?.role} />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="font-medium text-muted">
               Nueva contraseña (opcional)
             </span>
             <input name="newPassword" type="password" minLength={8} maxLength={128} className={inputClass} />
@@ -139,9 +136,9 @@ function EditMemberForm({
               name="isActive"
               type="checkbox"
               defaultChecked={member.isActive}
-              className="size-4 rounded border-zinc-300"
+              className="size-4 rounded border-line"
             />
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">Activo</span>
+            <span className="font-medium text-muted">Activo</span>
           </label>
         </div>
         <FormError state={state} />
@@ -149,19 +146,19 @@ function EditMemberForm({
         <button
           type="submit"
           disabled={pending}
-          className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="inline-flex min-h-11 items-center self-start rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
         >
           Guardar cambios
         </button>
       </form>
-      <form action={deleteFormAction} className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
+      <form action={deleteFormAction} className="border-t border-line pt-4">
         <input type="hidden" name="id" value={member.id} />
         <FormError state={deleteState} />
         <OkMessage state={deleteState} text="Integrante eliminado." />
         <button
           type="submit"
           disabled={deletePending}
-          className="self-start rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+          className="inline-flex min-h-11 items-center self-start rounded-lg border border-danger-fill px-4 py-2 text-sm font-medium text-danger-text transition-colors hover:bg-danger-fill/50 disabled:opacity-50"
         >
           Eliminar
         </button>
@@ -173,8 +170,8 @@ function EditMemberForm({
 export default function MembersPanel({ members, isAdmin, createAction, updateAction, deleteAction }: Props) {
   return (
     <div className="flex flex-col gap-6">
-      <table className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-white text-left text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/50 dark:text-zinc-400">
+      <table className="w-full overflow-hidden rounded-2xl border border-line bg-surface text-left text-sm shadow-sm">
+        <thead className="bg-base text-xs uppercase tracking-wide text-muted">
           <tr>
             <th className="px-6 py-3 font-medium">Nombre</th>
             <th className="px-6 py-3 font-medium">Usuario</th>
@@ -182,18 +179,18 @@ export default function MembersPanel({ members, isAdmin, createAction, updateAct
             <th className="px-6 py-3 font-medium">Estado</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody className="divide-y divide-line">
           {members.map((member) => (
             <tr key={member.id}>
-              <td className="px-6 py-3 font-medium text-zinc-900 dark:text-zinc-50">{member.name}</td>
-              <td className="px-6 py-3 text-zinc-600 dark:text-zinc-400">{member.username}</td>
-              <td className="px-6 py-3 text-zinc-600 dark:text-zinc-400">{ROLE_LABELS[member.role]}</td>
+              <td className="px-6 py-3 font-medium text-ink">{member.name}</td>
+              <td className="px-6 py-3 text-muted">{member.username}</td>
+              <td className="px-6 py-3 text-muted">{ROLE_LABELS[member.role]}</td>
               <td className="px-6 py-3">
                 <span
                   className={
                     member.isActive
-                      ? "rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                      : "rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                      ? "rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-ink"
+                      : "rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink"
                   }
                 >
                   {member.isActive ? "Activo" : "Inactivo"}

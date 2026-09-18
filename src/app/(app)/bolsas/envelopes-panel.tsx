@@ -31,11 +31,11 @@ interface Props {
 /** "Común" / "Individual · {member}" badge shown in list and forms. */
 function ScopeBadge({ envelope }: { envelope: EnvelopeView }) {
   return envelope.scope === "common" ? (
-    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+    <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
       Común
     </span>
   ) : (
-    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+    <span className="rounded-full bg-honey px-2 py-0.5 text-xs font-medium text-ink">
       Individual · {envelope.memberName ?? "?"}
     </span>
   );
@@ -53,7 +53,7 @@ function EnvelopeFields({
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+        <span className="font-medium text-muted">Nombre</span>
         <input
           name="name"
           defaultValue={envelope?.name}
@@ -64,7 +64,7 @@ function EnvelopeFields({
         <FieldError message={state.fieldErrors?.name} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Monto mensual</span>
+        <span className="font-medium text-muted">Monto mensual</span>
         <input
           name="monthlyAmount"
           defaultValue={envelope ? formatCents(envelope.monthlyAmountCents) : undefined}
@@ -76,7 +76,7 @@ function EnvelopeFields({
         <FieldError message={state.fieldErrors?.monthlyAmount} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">Tipo</span>
+        <span className="font-medium text-muted">Tipo</span>
         <select name="scope" defaultValue={envelope?.scope ?? "common"} className={inputClass}>
           <option value="common">Común</option>
           <option value="individual">Individual</option>
@@ -84,7 +84,7 @@ function EnvelopeFields({
         <FieldError message={state.fieldErrors?.scope} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+        <span className="font-medium text-muted">
           Integrante (solo individuales)
         </span>
         <select name="memberId" defaultValue={envelope?.memberId ?? ""} className={inputClass}>
@@ -113,9 +113,9 @@ function CreateEnvelopeForm({
     <form
       action={formAction}
       data-tour="bolsas-crear"
-      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
-      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nueva bolsa</h2>
+      <h2 className="font-semibold text-ink">Nueva bolsa</h2>
       <EnvelopeFields state={state} members={members} />
       <FormError state={state} />
       <SubmitButton pending={pending}>Crear bolsa</SubmitButton>
@@ -144,11 +144,11 @@ function EditEnvelopeForm({
     <EditDetails
       summary={
         <>
-          <span className={envelope.isActive ? "" : "text-zinc-400 dark:text-zinc-500"}>
+          <span className={envelope.isActive ? "" : "text-muted"}>
             {envelope.name}
           </span>
           <ScopeBadge envelope={envelope} />
-          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+          <span className="text-sm font-normal text-muted">
             {formatCents(envelope.monthlyAmountCents)}/mes
           </span>
           <span className="ml-auto">
@@ -164,7 +164,7 @@ function EditEnvelopeForm({
         <OkMessage state={state} />
         <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
       </form>
-      <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+      <div className="flex flex-wrap items-start gap-3 border-t border-line pt-4">
         <form action={toggleFormAction} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={envelope.id} />
           <FormError state={toggleState} />
@@ -205,23 +205,23 @@ export default function EnvelopesPanel({
           return (
             <li
               key={envelope.id}
-              className={`flex flex-col gap-2 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+              className={`flex flex-col gap-2 rounded-2xl border border-line bg-surface px-6 py-4 shadow-sm ${
                 envelope.isActive ? "" : "opacity-60"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-zinc-900 dark:text-zinc-50">{envelope.name}</span>
+                <span className="font-medium text-ink">{envelope.name}</span>
                 <ScopeBadge envelope={envelope} />
               </div>
               <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">
+                <span className="text-muted">
                   {formatCents(envelope.monthlyAmountCents)}/mes
                 </span>
                 <ActiveBadge active={envelope.isActive} />
               </div>
               {month && (
-                <div className="flex flex-col gap-1.5 border-t border-zinc-100 pt-2 dark:border-zinc-800">
-                  <div className="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <div className="flex flex-col gap-1.5 border-t border-line pt-2">
+                  <div className="flex items-center justify-between gap-2 text-xs text-muted">
                     <span>
                       Este mes: {formatCents(month.spentCents)} de{" "}
                       {formatCents(month.plannedCents)}
@@ -232,8 +232,8 @@ export default function EnvelopesPanel({
                   <span
                     className={`text-xs ${
                       month.remainingCents < 0
-                        ? "font-medium text-red-600 dark:text-red-400"
-                        : "text-zinc-500 dark:text-zinc-400"
+                        ? "font-medium text-danger-text"
+                        : "text-muted"
                     }`}
                   >
                     Restante: {formatCents(month.remainingCents)}

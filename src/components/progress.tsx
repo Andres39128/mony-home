@@ -6,9 +6,9 @@ import type { ProgressStatus } from "@/features/budgets/progress";
  * (ok / warn >= 75% / over >= 100%) so every screen agrees on the semantics.
  */
 const STATUS_CLASS: Record<ProgressStatus, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  over: "bg-red-500",
+  ok: "bg-sage",
+  warn: "bg-honey",
+  over: "bg-danger-fill",
 };
 
 export function ProgressBar({ pct, status }: { pct: number; status: ProgressStatus }) {
@@ -19,7 +19,7 @@ export function ProgressBar({ pct, status }: { pct: number; status: ProgressStat
       aria-valuenow={width}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
+      className="h-2 w-full overflow-hidden rounded-full bg-line"
     >
       <div
         className={`h-full rounded-full transition-[width] ${STATUS_CLASS[status]}`}

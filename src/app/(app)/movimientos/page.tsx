@@ -12,6 +12,7 @@ import {
 import MovementsTable from "@/features/transactions/movements-table";
 import NewMovementDialog from "@/features/transactions/new-movement-dialog";
 import { formatCents } from "@/lib/money";
+import { Card } from "@/components/card";
 import { inputClass } from "@/components/forms";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -26,6 +27,11 @@ function envelopeFilterLabel(envelope: { name: string; scope: string; memberName
     ? `Común · ${envelope.name}`
     : `Individual · ${envelope.name} (${envelope.memberName ?? "?"})`;
 }
+
+/** Colored money chips: pastel fill + ink/danger text, legible on both themes. */
+const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-ink";
+const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text";
+const CHIP_WEALTH = "w-fit rounded-lg bg-honey px-2 py-0.5 text-ink";
 
 export default async function MovimientosPage({
   searchParams,
@@ -54,15 +60,15 @@ export default async function MovimientosPage({
 
   const balanceClass =
     totals.balanceCents > 0
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? CHIP_WEALTH
       : totals.balanceCents < 0
-        ? "text-red-600 dark:text-red-400"
-        : "text-zinc-900 dark:text-zinc-50";
+        ? CHIP_EXPENSE
+        : "text-ink";
 
   return (
     <section className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">
           Movimientos
         </h1>
         <NewMovementDialog
@@ -83,14 +89,14 @@ export default async function MovimientosPage({
         method="get"
         action="/movimientos"
         data-tour="movimientos-filtros"
-        className="grid items-end gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7 dark:border-zinc-800 dark:bg-zinc-900"
+        className="grid items-end gap-3 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7"
       >
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Mes</span>
+          <span className="font-medium text-muted">Mes</span>
           <input type="month" name="month" defaultValue={filters.month} className={inputClass} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Categoría</span>
+          <span className="font-medium text-muted">Categoría</span>
           <select name="categoryId" defaultValue={filters.categoryId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.categories.map((category) => (
@@ -102,7 +108,7 @@ export default async function MovimientosPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Integrante</span>
+          <span className="font-medium text-muted">Integrante</span>
           <select name="memberId" defaultValue={filters.memberId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.members.map((member) => (
@@ -113,7 +119,7 @@ export default async function MovimientosPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Bolsa</span>
+          <span className="font-medium text-muted">Bolsa</span>
           <select name="envelopeId" defaultValue={filters.envelopeId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.envelopes.map((envelope) => (
@@ -124,7 +130,7 @@ export default async function MovimientosPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Grupo</span>
+          <span className="font-medium text-muted">Grupo</span>
           <select name="groupId" defaultValue={filters.groupId ?? ""} className={inputClass}>
             <option value="">—</option>
             {options.groups.map((group) => (
@@ -136,7 +142,7 @@ export default async function MovimientosPage({
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Tipo</span>
+          <span className="font-medium text-muted">Tipo</span>
           <select name="type" defaultValue={filters.type ?? ""} className={inputClass}>
             <option value="">—</option>
             <option value="income">Ingreso</option>
@@ -146,13 +152,13 @@ export default async function MovimientosPage({
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
           >
             Filtrar
           </button>
           <Link
             href="/movimientos"
-            className="text-sm text-zinc-500 underline-offset-2 hover:underline dark:text-zinc-400"
+            className="inline-flex min-h-11 items-center text-sm text-muted underline-offset-2 hover:underline"
           >
             Limpiar filtros
           </Link>
@@ -160,24 +166,24 @@ export default async function MovimientosPage({
       </form>
 
       <div data-tour="movimientos-totales" className="grid gap-4 sm:grid-cols-3">
-        <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Ingresos</h2>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+        <Card className="p-5">
+          <h2 className="text-sm font-medium text-muted">Ingresos</h2>
+          <p className={`mt-1 text-2xl font-semibold tabular-nums ${CHIP_INCOME}`}>
             {formatCents(totals.incomeCents)}
           </p>
-        </article>
-        <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Gastos</h2>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-red-600 dark:text-red-400">
+        </Card>
+        <Card className="p-5">
+          <h2 className="text-sm font-medium text-muted">Gastos</h2>
+          <p className={`mt-1 text-2xl font-semibold tabular-nums ${CHIP_EXPENSE}`}>
             {formatCents(totals.expenseCents)}
           </p>
-        </article>
-        <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Saldo</h2>
+        </Card>
+        <Card className="p-5">
+          <h2 className="text-sm font-medium text-muted">Saldo</h2>
           <p className={`mt-1 text-2xl font-semibold tabular-nums ${balanceClass}`}>
             {formatCents(totals.balanceCents)}
           </p>
-        </article>
+        </Card>
       </div>
 
       <div data-tour="movimientos-tabla">

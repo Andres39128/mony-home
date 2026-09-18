@@ -15,8 +15,8 @@ export default async function AssistantPage() {
   return (
     <section className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">Asistente</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <h1 className="text-2xl font-bold text-ink">Asistente</h1>
+        <p className="text-sm text-muted">
           Preguntas y respuestas sobre las finanzas del hogar de este mes.
         </p>
       </header>

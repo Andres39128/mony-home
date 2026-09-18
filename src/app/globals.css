@@ -1,26 +1,53 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: the anti-FOUC script in the root layout toggles
+   `.dark` on <html> before paint (localStorage > prefers-color-scheme). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --base: #faf7f0;
+  --surface: #fffdf8;
+  --ink: #1a2530;
+  --muted: #4a5a68;
+  --line: #e5dfd2;
+  /* Accent pastels are constant in both themes; ink text sits on top. */
+  --mint: #a8dadc;
+  --honey: #ffe5a3;
+  --sage: #c7e9c0;
+  --danger-fill: #f6cfc9;
+  --danger-text: #8c3b34;
+}
+
+.dark {
+  --base: #0f1922;
+  --surface: #1a2530;
+  --ink: #edeae0;
+  --muted: #9aa8b5;
+  --line: #2a3a48;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-base: var(--base);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-mint: var(--mint);
+  --color-honey: var(--honey);
+  --color-sage: var(--sage);
+  --color-danger-fill: var(--danger-fill);
+  --color-danger-text: var(--danger-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background: var(--base);
+  color: var(--ink);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Keyboard focus ring for every interactive element; follows the theme. */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }

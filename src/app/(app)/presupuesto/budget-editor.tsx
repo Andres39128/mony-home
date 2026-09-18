@@ -30,15 +30,15 @@ export default function BudgetEditor({ month, rows, setAction, copyAction }: Pro
   const [copyState, copyFormAction, copyPending] = useActionState(copyAction, {});
 
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Editar presupuestos</h2>
+    <section className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm">
+      <h2 className="font-semibold text-ink">Editar presupuestos</h2>
 
       <form action={formAction} className="flex flex-col gap-4">
         <input type="hidden" name="month" value={month} />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {rows.map((row) => (
             <label key={row.categoryId} className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-zinc-700 dark:text-zinc-300">{row.categoryName}</span>
+              <span className="font-medium text-muted">{row.categoryName}</span>
               <input
                 name={`amounts.${row.categoryId}`}
                 defaultValue={row.plannedCents === 0 ? "" : formatCents(row.plannedCents)}
@@ -55,7 +55,7 @@ export default function BudgetEditor({ month, rows, setAction, copyAction }: Pro
         <SubmitButton pending={pending}>Guardar presupuesto</SubmitButton>
       </form>
 
-      <form action={copyFormAction} className="flex flex-col gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+      <form action={copyFormAction} className="flex flex-col gap-2 border-t border-line pt-4">
         <input type="hidden" name="month" value={month} />
         <FormError state={copyState} />
         <OkMessage state={copyState} text="Presupuestos copiados del mes anterior." />

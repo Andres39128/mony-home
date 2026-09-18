@@ -13,17 +13,18 @@ import type {
 } from "@/features/analytics/service";
 
 /** Used when a category row carries an empty/invalid color. */
-export const FALLBACK_COLOR = "#94a3b8";
+export const FALLBACK_COLOR = "#7c8b96";
 
 /**
  * Series colors for the two-series charts; hex constants (Recharts needs
- * real colors, not Tailwind class names) matching the KPI palette.
+ * real colors, not Tailwind class names). Mid-tones picked to stay legible
+ * on both the light (marfil) and dark (azul noche) backgrounds.
  */
 export const SERIES_COLORS = {
-  income: "#10b981",
-  expense: "#ef4444",
-  planned: "#6366f1",
-  actual: "#f59e0b",
+  income: "#58a36b",
+  expense: "#c0564a",
+  planned: "#4fa3a8",
+  actual: "#d9a441",
 } as const;
 
 const MONTH_RE = /^\d{4}-\d{2}$/;

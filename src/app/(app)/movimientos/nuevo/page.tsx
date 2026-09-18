@@ -16,10 +16,10 @@ export default async function NuevoMovimientoPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">
         Nuevo movimiento
       </h1>
-      <div className="max-w-2xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="max-w-2xl rounded-2xl border border-line bg-surface p-6 shadow-sm">
         <MovementForm
           mode="create"
           categories={options.categories}
@@ -35,7 +35,7 @@ export default async function NuevoMovimientoPage() {
       </div>
       <Link
         href="/movimientos"
-        className="text-sm text-zinc-500 underline-offset-2 hover:underline dark:text-zinc-400"
+        className="text-sm text-muted underline-offset-2 hover:underline"
       >
         ← Volver a movimientos
       </Link>
