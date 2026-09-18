@@ -90,6 +90,8 @@ export interface TransactionFilters {
   envelopeId?: string;
   groupId?: string;
   type?: "income" | "expense";
+  /** Ámbito: household-wide or personal movements (dashboard filter). */
+  scope?: "individual" | "common";
 }
 
 const viewColumns = {
@@ -129,7 +131,11 @@ function monthRange(month: string): { start: string; end: string } | null {
   return { start: `${month}-01`, end };
 }
 
-function filtersWhere(filters: TransactionFilters): SQL | undefined {
+/**
+ * WHERE clause for the shared movement filters. Exported so the analytics
+ * aggregations build IDENTICAL conditions instead of a diverging copy.
+ */
+export function filtersWhere(filters: TransactionFilters): SQL | undefined {
   const conds: (SQL | undefined)[] = [];
   // Empty strings ( untouched GET-form selects) count as "no filter".
   if (filters.month) {
@@ -143,6 +149,7 @@ function filtersWhere(filters: TransactionFilters): SQL | undefined {
   if (filters.envelopeId) conds.push(eq(transactions.envelopeId, filters.envelopeId));
   if (filters.groupId) conds.push(eq(transactions.groupId, filters.groupId));
   if (filters.type) conds.push(eq(transactions.type, filters.type));
+  if (filters.scope) conds.push(eq(transactions.scope, filters.scope));
   const clean = conds.filter((c): c is SQL => c !== undefined);
   return clean.length > 0 ? and(...clean) : undefined;
 }
