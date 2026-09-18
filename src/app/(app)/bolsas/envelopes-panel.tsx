@@ -1,9 +1,10 @@
 "use client";
 
 import { useActionState } from "react";
-import type { EnvelopeView } from "@/features/envelopes/service";
+import type { EnvelopeProgressView, EnvelopeView } from "@/features/envelopes/service";
 import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
+import { ProgressBar } from "@/components/progress";
 import {
   ActiveBadge,
   FieldError,
@@ -17,6 +18,7 @@ type EnvelopeAction = (state: FormState, formData: FormData) => Promise<FormStat
 
 interface Props {
   envelopes: EnvelopeView[];
+  progress: EnvelopeProgressView[];
   members: { id: string; name: string }[];
   isAdmin: boolean;
   createAction: EnvelopeAction;
@@ -182,6 +184,7 @@ function EditEnvelopeForm({
 
 export default function EnvelopesPanel({
   envelopes,
+  progress,
   members,
   isAdmin,
   createAction,
@@ -189,28 +192,54 @@ export default function EnvelopesPanel({
   toggleAction,
   deleteAction,
 }: Props) {
+  const progressById = new Map(progress.map((row) => [row.id, row]));
+
   return (
     <div className="flex flex-col gap-6">
       <ul className="grid gap-3 sm:grid-cols-2">
-        {envelopes.map((envelope) => (
-          <li
-            key={envelope.id}
-            className={`flex flex-col gap-2 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
-              envelope.isActive ? "" : "opacity-60"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-medium text-zinc-900 dark:text-zinc-50">{envelope.name}</span>
-              <ScopeBadge envelope={envelope} />
-            </div>
-            <div className="flex items-center justify-between gap-2 text-sm">
-              <span className="text-zinc-600 dark:text-zinc-400">
-                {formatCents(envelope.monthlyAmountCents)}/mes
-              </span>
-              <ActiveBadge active={envelope.isActive} />
-            </div>
-          </li>
-        ))}
+        {envelopes.map((envelope) => {
+          const month = progressById.get(envelope.id);
+          return (
+            <li
+              key={envelope.id}
+              className={`flex flex-col gap-2 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+                envelope.isActive ? "" : "opacity-60"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-zinc-900 dark:text-zinc-50">{envelope.name}</span>
+                <ScopeBadge envelope={envelope} />
+              </div>
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-zinc-600 dark:text-zinc-400">
+                  {formatCents(envelope.monthlyAmountCents)}/mes
+                </span>
+                <ActiveBadge active={envelope.isActive} />
+              </div>
+              {month && (
+                <div className="flex flex-col gap-1.5 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                  <div className="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span>
+                      Este mes: {formatCents(month.spentCents)} de{" "}
+                      {formatCents(month.plannedCents)}
+                    </span>
+                    <span className="tabular-nums">{month.pct}%</span>
+                  </div>
+                  <ProgressBar pct={month.pct} status={month.status} />
+                  <span
+                    className={`text-xs ${
+                      month.remainingCents < 0
+                        ? "font-medium text-red-600 dark:text-red-400"
+                        : "text-zinc-500 dark:text-zinc-400"
+                    }`}
+                  >
+                    Restante: {formatCents(month.remainingCents)}
+                  </span>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       {isAdmin && (

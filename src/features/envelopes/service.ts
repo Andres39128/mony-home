@@ -7,13 +7,19 @@
  * Amounts arrive as free text and ALWAYS go through money.parseAmountToCents
  * (R2) — raw numbers never cross the form boundary.
  */
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gte, lte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
-import { envelopes, users } from "@/db/schema";
+import { envelopes, transactions, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
+import { todayIso } from "@/features/transactions/service";
+import {
+  computeProgress,
+  monthBounds,
+  type ProgressStatus,
+} from "@/features/budgets/progress";
 
 export interface EnvelopeView {
   id: string;
@@ -77,6 +83,69 @@ export async function listEnvelopes(db: Database): Promise<EnvelopeView[]> {
     .leftJoin(users, eq(envelopes.memberId, users.id))
     // Common first (enum ordinals would sort 'individual' first), then by name.
     .orderBy(sql`case when ${envelopes.scope} = 'common' then 0 else 1 end`, asc(envelopes.name));
+}
+
+export interface EnvelopeProgressView {
+  id: string;
+  name: string;
+  scope: "individual" | "common";
+  memberName: string | null;
+  plannedCents: number;
+  spentCents: number;
+  pct: number;
+  remainingCents: number;
+  status: ProgressStatus;
+}
+
+/**
+ * Monthly progress per ACTIVE envelope: spent = expense transactions with
+ * that envelope within the month (inclusive bounds); planned = the envelope's
+ * monthly amount. The math is the SHARED computeProgress from budgets —
+ * one source of truth for thresholds and divide-by-zero.
+ */
+export async function monthlyProgress(
+  db: Database,
+  month: string = todayIso().slice(0, 7),
+): Promise<EnvelopeProgressView[]> {
+  const bounds = monthBounds(month);
+  if (!bounds) return [];
+
+  const rows = await db
+    .select({
+      id: envelopes.id,
+      name: envelopes.name,
+      scope: envelopes.scope,
+      memberName: users.name,
+      plannedCents: envelopes.monthlyAmountCents,
+      spent: sum(transactions.amountCents),
+    })
+    .from(envelopes)
+    .leftJoin(users, eq(envelopes.memberId, users.id))
+    .leftJoin(
+      transactions,
+      and(
+        eq(transactions.envelopeId, envelopes.id),
+        eq(transactions.type, "expense"),
+        gte(transactions.date, bounds.start),
+        lte(transactions.date, bounds.end),
+      ),
+    )
+    .where(eq(envelopes.isActive, true))
+    .groupBy(envelopes.id, users.name)
+    .orderBy(sql`case when ${envelopes.scope} = 'common' then 0 else 1 end`, asc(envelopes.name));
+
+  return rows.map((row) => {
+    const spentCents = Number(row.spent ?? 0);
+    return {
+      id: row.id,
+      name: row.name,
+      scope: row.scope,
+      memberName: row.memberName,
+      plannedCents: row.plannedCents,
+      spentCents,
+      ...computeProgress(row.plannedCents, spentCents),
+    };
+  });
 }
 
 /** Returns null when the free-text amount cannot be parsed (typed error path). */

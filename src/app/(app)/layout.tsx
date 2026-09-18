@@ -5,12 +5,10 @@ import { logoutAction } from "@/features/auth/actions";
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
-/** Routes landing in later phases — rendered as inert text, not dead links. */
-const UPCOMING_LINKS = ["Presupuesto"] as const;
-
 const NAV_LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/movimientos", label: "Movimientos" },
+  { href: "/presupuesto", label: "Presupuesto" },
   { href: "/integrantes", label: "Integrantes" },
   { href: "/categorias", label: "Categorías" },
   { href: "/bolsas", label: "Bolsas" },
@@ -33,11 +31,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               >
                 {link.label}
               </Link>
-            ))}
-            {UPCOMING_LINKS.map((label) => (
-              <span key={label} className="text-zinc-400 dark:text-zinc-600">
-                {label}
-              </span>
             ))}
           </nav>
           <div className="flex items-center gap-3 text-sm">

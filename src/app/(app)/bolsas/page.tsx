@@ -1,6 +1,6 @@
 import { requireUser } from "@/features/auth/session";
 import { getDb } from "@/db";
-import { listEnvelopes } from "@/features/envelopes/service";
+import { listEnvelopes, monthlyProgress } from "@/features/envelopes/service";
 import { listMembers } from "@/features/members/service";
 import {
   createEnvelopeAction,
@@ -12,9 +12,10 @@ import EnvelopesPanel from "./envelopes-panel";
 
 export default async function BolsasPage() {
   const user = await requireUser();
-  const [envelopes, members] = await Promise.all([
+  const [envelopes, members, progress] = await Promise.all([
     listEnvelopes(getDb()),
     listMembers(getDb()),
+    monthlyProgress(getDb()),
   ]);
 
   return (
@@ -24,6 +25,7 @@ export default async function BolsasPage() {
       </h1>
       <EnvelopesPanel
         envelopes={envelopes}
+        progress={progress}
         members={members.map((m) => ({ id: m.id, name: m.name }))}
         isAdmin={user.role === "admin"}
         createAction={createEnvelopeAction}

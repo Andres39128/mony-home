@@ -9,11 +9,13 @@ import {
   envelopeSchema,
   createEnvelope,
   listEnvelopes,
+  monthlyProgress,
   removeEnvelope,
   toggleEnvelopeActive,
   updateEnvelope,
   type EnvelopeInput,
 } from "@/features/envelopes/service";
+import { todayIso } from "@/features/transactions/service";
 import type { SessionUser } from "@/lib/auth";
 
 /**
@@ -210,5 +212,150 @@ describe("envelopes service (integration on PGlite)", () => {
         envelopeSchema.safeParse({ ...base, memberId, monthlyAmount: "" }).success,
       ).toBe(false);
     });
+  });
+});
+
+/**
+ * monthlyProgress suite: exact-cent spent per envelope for a month, shared
+ * progress math (over-budget → negative remaining), inactive exclusion and
+ * member attribution — isolated database from the CRUD suite above.
+ */
+describe("envelopes monthlyProgress (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let anaId: string;
+  let betoId: string;
+  let categoryId: string;
+  let mercadoId: string;
+  let anaEnvelopeId: string;
+  let betoEnvelopeId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [ana, beto] = await db
+      .insert(users)
+      .values([
+        { username: "ana", name: "Ana", passwordHash: "x" },
+        { username: "beto", name: "Beto", passwordHash: "x" },
+      ])
+      .returning();
+    anaId = ana.id;
+    betoId = beto.id;
+
+    const [category] = await db
+      .insert(categories)
+      .values({ name: "Varios", kind: "expense" })
+      .returning();
+    categoryId = category.id;
+
+    const inserted = await db
+      .insert(envelopes)
+      .values([
+        { name: "Mercado", scope: "common", monthlyAmountCents: 100000 },
+        { name: "Gastos de Ana", scope: "individual", memberId: anaId, monthlyAmountCents: 50000 },
+        { name: "Gastos de Beto", scope: "individual", memberId: betoId, monthlyAmountCents: 10000 },
+        { name: "Vacía", scope: "common", monthlyAmountCents: 30000 },
+        {
+          name: "Cerrada",
+          scope: "common",
+          monthlyAmountCents: 99900,
+          isActive: false,
+        },
+      ])
+      .returning();
+    const byName = new Map(inserted.map((row) => [row.name, row.id]));
+    mercadoId = byName.get("Mercado")!;
+    anaEnvelopeId = byName.get("Gastos de Ana")!;
+    betoEnvelopeId = byName.get("Gastos de Beto")!;
+
+    await db.insert(transactions).values([
+      // Common envelope: two expenses, exact cents 25050 + 12525 = 37575.
+      { date: "2026-09-03", amountCents: 25050, type: "expense", categoryId, memberId: anaId, envelopeId: mercadoId },
+      { date: "2026-09-30", amountCents: 12525, type: "expense", categoryId, memberId: betoId, envelopeId: mercadoId },
+      // Other month: must NOT count towards September.
+      { date: "2026-10-05", amountCents: 77777, type: "expense", categoryId, memberId: anaId, envelopeId: mercadoId },
+      // Individual envelope with member attribution.
+      { date: "2026-09-08", amountCents: 25000, type: "expense", categoryId, memberId: anaId, envelopeId: anaEnvelopeId },
+      // Over budget: 15000 against a 10000 plan.
+      { date: "2026-09-15", amountCents: 15000, type: "expense", categoryId, memberId: betoId, envelopeId: betoEnvelopeId },
+      // Inactive envelope spending exists but must not surface.
+      { date: "2026-09-15", amountCents: 12345, type: "expense", categoryId, memberId: anaId, envelopeId: byName.get("Cerrada")! },
+    ]);
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("computes exact cents, over-budget states and excludes inactive envelopes", async () => {
+    const progress = await monthlyProgress(appDb, "2026-09");
+    // Inactive envelopes are excluded; common sorts first.
+    expect(progress.map((row) => row.name)).toEqual([
+      "Mercado",
+      "Vacía",
+      "Gastos de Ana",
+      "Gastos de Beto",
+    ]);
+
+    const byName = new Map(progress.map((row) => [row.name, row]));
+    expect(byName.get("Mercado")).toMatchObject({
+      scope: "common",
+      memberName: null,
+      plannedCents: 100000,
+      spentCents: 37575,
+      pct: 37.57,
+      remainingCents: 62425,
+      status: "ok",
+    });
+    // Envelope without movements this month → spent 0.
+    expect(byName.get("Vacía")).toMatchObject({
+      plannedCents: 30000,
+      spentCents: 0,
+      pct: 0,
+      remainingCents: 30000,
+      status: "ok",
+    });
+    // Member attribution for individual envelopes.
+    expect(byName.get("Gastos de Ana")).toMatchObject({
+      scope: "individual",
+      memberName: "Ana",
+      plannedCents: 50000,
+      spentCents: 25000,
+      status: "ok",
+    });
+    // Over budget: > 100% progress and negative remaining.
+    expect(byName.get("Gastos de Beto")).toMatchObject({
+      memberName: "Beto",
+      plannedCents: 10000,
+      spentCents: 15000,
+      pct: 150,
+      remainingCents: -5000,
+      status: "over",
+    });
+  });
+
+  it("defaults to the current month", async () => {
+    const today = todayIso();
+    const [category] = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.name, "Varios"));
+    await db.insert(transactions).values({
+      date: today,
+      amountCents: 4321,
+      type: "expense",
+      categoryId: category.id,
+      memberId: anaId,
+      envelopeId: mercadoId,
+    });
+
+    const progress = await monthlyProgress(appDb);
+    const mercado = progress.find((row) => row.id === mercadoId);
+    expect(mercado).toMatchObject({ spentCents: 37575 + 4321 });
+
+    // Cleanup so the dated suite above stays reproducible.
+    await db.delete(transactions).where(eq(transactions.amountCents, 4321));
   });
 });
