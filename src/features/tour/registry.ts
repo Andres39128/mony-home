@@ -54,9 +54,9 @@ export const TOURS: Record<string, readonly TourStep[]> = {
     {
       id: "dashboard-patrimonio",
       element: "dashboard-patrimonio",
-      title: "Patrimonio",
+      title: "Patrimonio neto",
       description:
-        "Lo que tenés ahorrado e invertido en total. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Ahorro.",
+        "Lo que tenés ahorrado e invertido, menos lo que debés en préstamos. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Ahorro.",
     },
     {
       id: "dashboard-bolsas",
@@ -122,6 +122,43 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       title: "Nueva meta (admin)",
       description:
         "Formulario para crear una meta de ahorro o una inversión del hogar, común o individual.",
+    },
+  ],
+  "/prestamos": [
+    {
+      id: "prestamos-deuda",
+      element: "prestamos-deuda",
+      title: "Deuda total",
+      description:
+        "Todo lo que el hogar debe, sumando cada préstamo pendiente. También acá está la cantidad de préstamos activos.",
+    },
+    {
+      id: "prestamos-tarjeta",
+      element: "prestamos-tarjeta",
+      title: "Préstamos",
+      description:
+        "Cada tarjeta, línea de inversión, hipoteca u otra deuda muestra su entidad, su capital y cuánto falta pagar. Los pagos se reflejan como gastos en Movimientos.",
+    },
+    {
+      id: "prestamos-pago",
+      element: "prestamos-pago",
+      title: "Pago rápido",
+      description:
+        "Escribí el monto y presioná Enter: el pago se registra y la deuda baja al instante.",
+    },
+    {
+      id: "prestamos-interes",
+      element: "prestamos-interes",
+      title: "Intereses automáticos",
+      description:
+        "Los préstamos con TNA generan intereses automáticamente cada mes sobre el saldo pendiente: si pagás más, el próximo interés es más chico.",
+    },
+    {
+      id: "prestamos-historial",
+      element: "prestamos-historial",
+      title: "Historial",
+      description:
+        "Abrí el historial para ver cada pago e interés del préstamo, con la fecha y el integrante que pagó.",
     },
   ],
   "/movimientos": [

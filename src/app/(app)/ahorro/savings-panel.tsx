@@ -673,7 +673,7 @@ export default function SavingsPanel({
         className="grid gap-4 sm:grid-cols-3"
       >
         {[
-          { label: "Patrimonio total", cents: patrimony.totalCents, accent: true },
+          { label: "Patrimonio neto", cents: patrimony.totalCents, accent: true },
           { label: "Ahorro", cents: patrimony.savingsCents, accent: false },
           { label: "Inversión", cents: patrimony.investmentsCents, accent: false },
         ].map((item) => (

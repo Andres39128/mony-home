@@ -8,6 +8,7 @@ import { TourSheetRow } from "@/features/tour/tour-launcher";
 import {
   ArrowsIcon,
   ChartIcon,
+  CreditCardIcon,
   GridIcon,
   HelpIcon,
   HomeIcon,
@@ -29,6 +30,7 @@ const TABS = [
 ] as const;
 
 const MENU_LINKS = [
+  { href: "/prestamos", label: "Préstamos", Icon: CreditCardIcon },
   { href: "/asistente", label: "Asistente", Icon: SparklesIcon },
   { href: "/integrantes", label: "Integrantes", Icon: UsersIcon },
   { href: "/categorias", label: "Categorías", Icon: TagIcon },

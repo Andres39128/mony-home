@@ -362,15 +362,16 @@ export default async function DashboardPage({
           </KpiCard>
         </div>
 
-        {/* Visually distinct strip: money that is saved, not spent — fed by
-            the savings ledger, never the movements stats. */}
+        {/* Visually distinct strip: NET worth — money saved minus money owed —
+            fed by the savings ledger and the loans ledger, never the movements
+            stats. Debts surface in red when there is anything outstanding. */}
         <Link
           href="/ahorro"
           data-tour="dashboard-patrimonio"
-          className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey-soft p-5 shadow-sm transition-colors hover:brightness-95"
+          className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey/40 p-5 shadow-sm transition-colors hover:bg-honey/60"
         >
           <h2 className="text-sm font-medium text-ink">
-            Patrimonio
+            Patrimonio neto
           </h2>
           <p className="text-2xl font-semibold tabular-nums text-ink">
             {formatCents(patrimony.totalCents)}
@@ -378,6 +379,14 @@ export default async function DashboardPage({
           <p className="text-sm text-ink">
             Ahorro {formatCents(patrimony.savingsCents)} · Inversión{" "}
             {formatCents(patrimony.investmentsCents)}
+            {patrimony.debtCents > 0 && (
+              <>
+                {" · "}
+                <span className="font-medium text-danger-text">
+                  Deudas: {formatCents(patrimony.debtCents)}
+                </span>
+              </>
+            )}
           </p>
         </Link>
       </div>
