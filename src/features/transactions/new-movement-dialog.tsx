@@ -8,6 +8,8 @@ import type { MovementFormOptions } from "@/features/transactions/form-options";
 interface Props extends MovementFormOptions {
   currentUser: { id: string; name: string; role: "admin" | "member" };
   serverToday: string;
+  /** Optional data-tour anchor id for the guided tour (on the open button). */
+  tourId?: string;
   createAction: MovementAction;
   createCategoryAction: (
     state: InlineCategoryState,
@@ -27,6 +29,7 @@ export default function NewMovementDialog({
   members,
   groups,
   serverToday,
+  tourId,
   createAction,
   createCategoryAction,
 }: Props) {
@@ -56,6 +59,7 @@ export default function NewMovementDialog({
     <>
       <button
         type="button"
+        data-tour={tourId}
         onClick={() => setOpen(true)}
         className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
       >

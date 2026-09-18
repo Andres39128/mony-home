@@ -109,13 +109,17 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
       <div className="flex items-center justify-between gap-3">
         <p
           role="status"
+          data-tour="asistente-cuota"
           className="text-sm text-zinc-600 dark:text-zinc-400"
           aria-live="polite"
         >
           Te quedan <span className="font-mono font-semibold">{remaining}</span> de{" "}
           <span className="font-mono">{limit}</span> preguntas hoy
         </p>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+        <p
+          data-tour="asistente-limites"
+          className="text-xs text-zinc-400 dark:text-zinc-500"
+        >
           El asistente solo ve agregados del mes, nunca tus movimientos individuales.
         </p>
       </div>
@@ -154,6 +158,7 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
       </div>
 
       <form
+        data-tour="asistente-input"
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();

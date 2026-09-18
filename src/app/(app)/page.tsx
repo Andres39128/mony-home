@@ -81,16 +81,20 @@ function ChartCard({
   title,
   wide = false,
   emptyMessage,
+  tourId,
   children,
 }: {
   title: string;
   wide?: boolean;
   /** When set, renders the empty state instead of the chart. */
   emptyMessage: string | null;
+  /** Optional data-tour anchor for the guided tour. */
+  tourId?: string;
   children: React.ReactNode;
 }) {
   return (
     <article
+      data-tour={tourId}
       className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
         wide ? "lg:col-span-2" : ""
       }`}
@@ -182,6 +186,7 @@ export default async function DashboardPage({
       <form
         method="get"
         action="/"
+        data-tour="dashboard-filtros"
         className="grid items-end gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7 dark:border-zinc-800 dark:bg-zinc-900"
       >
         <label className="flex flex-col gap-1 text-sm">
@@ -258,7 +263,7 @@ export default async function DashboardPage({
         </div>
       </form>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="dashboard-kpis" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           title="Ingresos"
           value={formatCents(totals.incomeCents)}
@@ -287,6 +292,7 @@ export default async function DashboardPage({
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard
           title="Gastos por categoría"
+          tourId="dashboard-donut"
           emptyMessage={donutData.length === 0 ? "Sin gastos en el período" : null}
         >
           <CategoryDonut
@@ -298,6 +304,7 @@ export default async function DashboardPage({
 
         <ChartCard
           title="Ingresos vs Gastos · últimos 12 meses"
+          tourId="dashboard-barras"
           emptyMessage={hasFlowData(barsData) ? null : "Sin datos en el período"}
         >
           <MonthlyBars data={barsData} drillQuery={barsQuery} />
@@ -306,6 +313,7 @@ export default async function DashboardPage({
         <ChartCard
           wide
           title={`Presupuesto acumulado vs gasto acumulado · ${month.slice(0, 4)}`}
+          tourId="dashboard-acumulado"
           emptyMessage={hasCumulativeData(linesData) ? null : "Sin datos en el período"}
         >
           <BudgetLines data={linesData} />
@@ -314,6 +322,7 @@ export default async function DashboardPage({
         <ChartCard
           wide
           title={`Bolsas de ${month}`}
+          tourId="dashboard-bolsas"
           emptyMessage={envelopeRows.length === 0 ? "Sin bolsas activas" : null}
         >
           <ul className="flex flex-col gap-4">

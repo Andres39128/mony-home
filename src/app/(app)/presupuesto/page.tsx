@@ -66,7 +66,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
         </button>
       </form>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="presupuesto-resumen" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Presupuestado</h2>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
@@ -104,7 +104,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
         </article>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div data-tour="presupuesto-tabla" className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <table className="w-full text-sm">
           <thead className="border-b border-zinc-200 text-left text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
             <tr>
@@ -160,16 +160,18 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
       </div>
 
       {isAdmin && (
-        <BudgetEditor
-          month={month}
-          rows={view.rows.map(({ categoryId, categoryName, plannedCents }) => ({
-            categoryId,
-            categoryName,
-            plannedCents,
-          }))}
-          setAction={setBudgetsAction}
-          copyAction={copyPreviousBudgetAction}
-        />
+        <div data-tour="presupuesto-editor">
+          <BudgetEditor
+            month={month}
+            rows={view.rows.map(({ categoryId, categoryName, plannedCents }) => ({
+              categoryId,
+              categoryName,
+              plannedCents,
+            }))}
+            setAction={setBudgetsAction}
+            copyAction={copyPreviousBudgetAction}
+          />
+        </div>
       )}
     </section>
   );

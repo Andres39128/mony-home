@@ -112,6 +112,7 @@ function CreateEnvelopeForm({
   return (
     <form
       action={formAction}
+      data-tour="bolsas-crear"
       className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
     >
       <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nueva bolsa</h2>
@@ -198,7 +199,7 @@ export default function EnvelopesPanel({
 
   return (
     <div className="flex flex-col gap-6">
-      <ul className="grid gap-3 sm:grid-cols-2">
+      <ul data-tour="bolsas-lista" className="grid gap-3 sm:grid-cols-2">
         {envelopes.map((envelope) => {
           const month = progressById.get(envelope.id);
           return (
@@ -247,7 +248,7 @@ export default function EnvelopesPanel({
       {isAdmin && (
         <>
           <CreateEnvelopeForm action={createAction} members={members} />
-          <div className="flex flex-col gap-3">
+          <div data-tour="bolsas-editar" className="flex flex-col gap-3">
             {envelopes.map((envelope) => (
               <EditEnvelopeForm
                 key={envelope.id}

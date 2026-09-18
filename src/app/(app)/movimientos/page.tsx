@@ -66,6 +66,7 @@ export default async function MovimientosPage({
           Movimientos
         </h1>
         <NewMovementDialog
+          tourId="movimientos-nuevo"
           currentUser={user}
           categories={options.categories}
           envelopes={options.envelopes}
@@ -81,6 +82,7 @@ export default async function MovimientosPage({
       <form
         method="get"
         action="/movimientos"
+        data-tour="movimientos-filtros"
         className="grid items-end gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7 dark:border-zinc-800 dark:bg-zinc-900"
       >
         <label className="flex flex-col gap-1 text-sm">
@@ -157,7 +159,7 @@ export default async function MovimientosPage({
         </div>
       </form>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div data-tour="movimientos-totales" className="grid gap-4 sm:grid-cols-3">
         <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Ingresos</h2>
           <p className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
@@ -178,18 +180,20 @@ export default async function MovimientosPage({
         </article>
       </div>
 
-      <MovementsTable
-        rows={rows}
-        currentUser={user}
-        categories={options.categories}
-        envelopes={options.envelopes}
-        members={options.members}
-        groups={options.groups}
-        serverToday={today}
-        updateAction={updateMovementAction}
-        deleteAction={deleteMovementAction}
-        createCategoryAction={createCategoryInlineAction}
-      />
+      <div data-tour="movimientos-tabla">
+        <MovementsTable
+          rows={rows}
+          currentUser={user}
+          categories={options.categories}
+          envelopes={options.envelopes}
+          members={options.members}
+          groups={options.groups}
+          serverToday={today}
+          updateAction={updateMovementAction}
+          deleteAction={deleteMovementAction}
+          createCategoryAction={createCategoryInlineAction}
+        />
+      </div>
     </section>
   );
 }

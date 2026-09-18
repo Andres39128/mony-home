@@ -45,7 +45,11 @@ const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 function CreateMemberForm({ action }: { action: MemberAction }) {
   const [state, formAction, pending] = useActionState(action, {});
   return (
-    <form action={formAction} className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <form
+      action={formAction}
+      data-tour="integrantes-crear"
+      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+    >
       <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nuevo integrante</h2>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
@@ -203,7 +207,7 @@ export default function MembersPanel({ members, isAdmin, createAction, updateAct
       {isAdmin && (
         <>
           <CreateMemberForm action={createAction} />
-          <div className="flex flex-col gap-3">
+          <div data-tour="integrantes-editar" className="flex flex-col gap-3">
             {members.map((member) => (
               <EditMemberForm
                 key={member.id}

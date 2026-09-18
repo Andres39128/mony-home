@@ -69,6 +69,7 @@ function CreateGroupForm({ action }: { action: GroupAction }) {
   return (
     <form
       action={formAction}
+      data-tour="grupos-crear"
       className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
     >
       <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nuevo grupo</h2>
@@ -176,7 +177,7 @@ export default function GroupsPanel({
           Todavía no hay grupos creados.
         </p>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul data-tour="grupos-lista" className="flex flex-col gap-3">
           {groups.map((group) =>
             isAdmin ? (
               <GroupRow

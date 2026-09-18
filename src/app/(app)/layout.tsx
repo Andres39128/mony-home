@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireUser } from "@/features/auth/session";
 import { logoutAction } from "@/features/auth/actions";
+import TourLauncher from "@/features/tour/tour-launcher";
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
@@ -35,6 +36,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="flex items-center gap-3 text-sm">
+            <TourLauncher />
             <span className="text-zinc-600 dark:text-zinc-400">
               {user.name} · {ROLE_LABELS[user.role]}
             </span>

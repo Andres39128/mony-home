@@ -101,6 +101,7 @@ function CreateCategoryForm({ action }: { action: CategoryAction }) {
   return (
     <form
       action={formAction}
+      data-tour="categorias-crear"
       className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
     >
       <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nueva categoría</h2>
@@ -175,7 +176,7 @@ export default function CategoriesPanel({
 }: Props) {
   return (
     <div className="flex flex-col gap-8">
-      {SECTIONS.map((section) => {
+      {SECTIONS.map((section, sectionIndex) => {
         const items = categories.filter((c) => c.kind === section.kind);
         return (
           <div key={section.kind} className="flex flex-col gap-3">
@@ -187,7 +188,10 @@ export default function CategoriesPanel({
                 Todavía no hay categorías en esta sección.
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul
+                data-tour={sectionIndex === 0 ? "categorias-editar" : undefined}
+                className="flex flex-col gap-2"
+              >
                 {items.map((category) =>
                   isAdmin ? (
                     <li key={category.id}>
