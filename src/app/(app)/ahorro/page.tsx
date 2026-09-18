@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
-import { getPatrimony, listGoals } from "@/features/savings/service";
+import { getPatrimony, listContributions, listGoals } from "@/features/savings/service";
 import { listMembers } from "@/features/members/service";
 import {
   addContributionAction,
@@ -14,11 +14,22 @@ import SavingsPanel from "./savings-panel";
 
 export default async function AhorroPage() {
   const user = await requireUser();
-  const [goals, members, patrimony] = await Promise.all([
-    listGoals(getDb()),
+  // listGoals FIRST: it triggers the lazy interest catch-up, so the history
+  // query below is guaranteed to see the freshly materialized entries.
+  const goals = await listGoals(getDb());
+  const [members, patrimony, contributions] = await Promise.all([
     listMembers(getDb()),
     getPatrimony(getDb()),
+    listContributions(getDb()),
   ]);
+
+  // One query for every card's collapsible history, grouped here.
+  const contributionsByGoal: Record<string, typeof contributions> = {};
+  for (const entry of contributions) {
+    const list = contributionsByGoal[entry.goalId] ?? [];
+    list.push(entry);
+    contributionsByGoal[entry.goalId] = list;
+  }
 
   return (
     <section className="flex flex-col gap-6">
@@ -34,6 +45,7 @@ export default async function AhorroPage() {
           investmentsCents: patrimony.investmentsCents,
           totalCents: patrimony.totalCents,
         }}
+        contributionsByGoal={contributionsByGoal}
         createAction={createGoalAction}
         updateAction={updateGoalAction}
         toggleAction={toggleGoalAction}

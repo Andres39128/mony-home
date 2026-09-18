@@ -1,10 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import type { GoalView } from "@/features/savings/service";
+import type { ContributionView, GoalView } from "@/features/savings/service";
 import {
   computeGoalProgress,
   computeInvestmentReturn,
+  formatRatePercent,
   investmentValueCents,
   monthsUntilDeadline,
 } from "@/features/savings/math";
@@ -28,6 +29,7 @@ interface Props {
   members: { id: string; name: string }[];
   isAdmin: boolean;
   patrimony: { savingsCents: number; investmentsCents: number; totalCents: number };
+  contributionsByGoal: Record<string, ContributionView[]>;
   createAction: SavingsAction;
   updateAction: SavingsAction;
   toggleAction: SavingsAction;
@@ -46,6 +48,102 @@ function ScopeBadge({ goal }: { goal: GoalView }) {
     <span className="rounded-full bg-honey px-2 py-0.5 text-xs font-medium text-ink">
       Individual · {goal.memberName ?? "?"}
     </span>
+  );
+}
+
+/** Yield badge: the goal's annual nominal rate (TNA). */
+function RateBadge({ goal }: { goal: GoalView }) {
+  if (goal.annualRateBp === null) return null;
+  return (
+    <span className="rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-ink">
+      TNA {formatRatePercent(goal.annualRateBp)}%
+    </span>
+  );
+}
+
+/** Where the money is held + how much yield it generated so far. */
+function YieldLine({ goal }: { goal: GoalView }) {
+  if (goal.institution === null && goal.interestTotalCents <= 0) return null;
+  return (
+    <p className="text-xs text-muted">
+      {goal.institution !== null && <span>Guardado en: {goal.institution}</span>}
+      {goal.institution !== null && goal.interestTotalCents > 0 && <span> · </span>}
+      {goal.interestTotalCents > 0 && (
+        <span className="font-medium text-ink">
+          Generó: {formatCents(goal.interestTotalCents)}
+        </span>
+      )}
+    </p>
+  );
+}
+
+const KIND_LABELS = {
+  deposit: "Depósito",
+  withdrawal: "Retiro",
+  interest: "Interés",
+} as const;
+
+/**
+ * Per-goal collapsible history of every ledger entry. Interest rows carry
+ * the "Interés" badge and no member attribution; deposit/withdrawal mirrors
+ * are NOT listed here — those live in /movimientos.
+ */
+function ContributionHistory({ entries }: { entries: ContributionView[] }) {
+  if (entries.length === 0) {
+    return <p className="text-xs text-muted">Sin movimientos registrados todavía.</p>;
+  }
+  const dateFormatter = new Intl.DateTimeFormat("es-AR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  // Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
+  // UTC-3 rendering never shifts the day backwards.
+  const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
+  return (
+    <ul className="flex flex-col divide-y divide-line">
+      {entries.map((entry) => (
+        <li key={entry.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+          <span className="tabular-nums text-muted">
+            {dateFormatter.format(asLocalDate(entry.date))}
+          </span>
+          {entry.kind === "interest" ? (
+            <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
+              Interés
+            </span>
+          ) : (
+            <span className="text-muted">{KIND_LABELS[entry.kind]}</span>
+          )}
+          <span className="ml-auto font-medium tabular-nums text-ink">
+            {entry.kind === "withdrawal" ? "−" : "+"}
+            {formatCents(entry.amountCents)}
+          </span>
+          <span className="w-full text-xs text-muted sm:w-auto">
+            {entry.memberName ?? entry.note ?? ""}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Collapsible wrapper so cards stay compact until the member wants detail. */
+function HistoryDetails({ entries }: { entries: ContributionView[] }) {
+  return (
+    <details className="group border-t border-line pt-3">
+      <summary className="cursor-pointer list-none text-xs font-medium text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span
+          aria-hidden
+          className="mr-1 inline-block transition-transform group-open:rotate-90"
+        >
+          ▸
+        </span>
+        Historial ({entries.length})
+      </summary>
+      <div className="pt-2">
+        <ContributionHistory entries={entries} />
+      </div>
+    </details>
   );
 }
 
@@ -171,11 +269,13 @@ function GoalCard({
   contributionAction,
   autoFocusContribution,
   tourId,
+  entries,
 }: {
   goal: GoalView;
   contributionAction: SavingsAction;
   autoFocusContribution: boolean;
   tourId?: string;
+  entries: ContributionView[];
 }) {
   const progress = computeGoalProgress(goal.netCents, goal.targetCents);
   return (
@@ -187,6 +287,9 @@ function GoalCard({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium text-ink">{goal.name}</span>
         <ScopeBadge goal={goal} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <RateBadge goal={goal} />
       </div>
       {progress ? (
         <div className="flex flex-col gap-1.5">
@@ -206,12 +309,14 @@ function GoalCard({
           Acumulado: {formatCents(goal.netCents)}
         </p>
       )}
+      <YieldLine goal={goal} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <DeadlineLabel deadline={goal.deadline} />
         <span className="text-xs text-muted">
           {goal.contributionCount} {goal.contributionCount === 1 ? "aporte" : "aportes"}
         </span>
       </div>
+      <HistoryDetails entries={entries} />
       {goal.isActive && (
         <QuickContributionForm
           goal={goal}
@@ -231,6 +336,7 @@ function InvestmentCard({
   valueAction,
   autoFocusContribution,
   valueTourId,
+  entries,
 }: {
   goal: GoalView;
   isAdmin: boolean;
@@ -238,6 +344,7 @@ function InvestmentCard({
   valueAction: SavingsAction;
   autoFocusContribution: boolean;
   valueTourId?: string;
+  entries: ContributionView[];
 }) {
   const returnValue = computeInvestmentReturn(goal.netCents, goal.currentValueCents);
   const valueCents = investmentValueCents(goal.netCents, goal.currentValueCents);
@@ -258,7 +365,10 @@ function InvestmentCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium text-ink">{goal.name}</span>
-        <ScopeBadge goal={goal} />
+        <div className="flex flex-wrap items-center gap-2">
+          <ScopeBadge goal={goal} />
+          <RateBadge goal={goal} />
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
@@ -287,6 +397,7 @@ function InvestmentCard({
           </p>
         </div>
       </div>
+      <YieldLine goal={goal} />
       {goal.valueUpdatedAt && (
         <p className="text-xs text-muted">
           actualizado{" "}
@@ -318,6 +429,7 @@ function InvestmentCard({
           <OkMessage state={valueState} text="Valor actualizado." />
         </form>
       )}
+      <HistoryDetails entries={entries} />
       {goal.isActive && (
         <QuickContributionForm
           goal={goal}
@@ -421,6 +533,32 @@ function GoalFields({
           <FieldError message={state.fieldErrors?.currentValue} />
         </label>
       )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">¿Dónde se guarda?</span>
+          <input
+            name="institution"
+            maxLength={64}
+            placeholder="banco, billetera, fondo…"
+            defaultValue={goal?.institution ?? undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.institution} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">
+            Rentabilidad anual TNA % (opcional)
+          </span>
+          <input
+            name="annualRate"
+            inputMode="decimal"
+            placeholder="35,5"
+            defaultValue={goal?.annualRateBp != null ? formatRatePercent(goal.annualRateBp) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.annualRate} />
+        </label>
+      </div>
     </div>
   );
 }
@@ -514,6 +652,7 @@ export default function SavingsPanel({
   members,
   isAdmin,
   patrimony,
+  contributionsByGoal,
   createAction,
   updateAction,
   toggleAction,
@@ -570,6 +709,7 @@ export default function SavingsPanel({
               contributionAction={contributionAction}
               autoFocusContribution={goal.id === firstActiveId}
               tourId={goal.id === firstActiveId ? "ahorro-aporte" : undefined}
+              entries={contributionsByGoal[goal.id] ?? []}
             />
           ))}
         </ul>
@@ -589,6 +729,7 @@ export default function SavingsPanel({
               valueAction={valueAction}
               autoFocusContribution={false}
               valueTourId={isAdmin && index === 0 && goal.isActive ? "ahorro-valor" : undefined}
+              entries={contributionsByGoal[goal.id] ?? []}
             />
           ))}
         </ul>
