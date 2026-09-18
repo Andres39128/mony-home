@@ -4,7 +4,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { savingsContributions, savingsGoals, users } from "@/db/schema";
+import { categories, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import {
   addContribution,
   computeGoalProgress,
@@ -15,7 +15,7 @@ import {
   getPatrimony,
   goalSchema,
   investmentValueCents,
-  listContributionsByGoal,
+  listContributions,
   listGoals,
   monthsUntilDeadline,
   removeGoal,
@@ -25,14 +25,14 @@ import {
   type ContributionInput,
   type GoalInput,
 } from "@/features/savings/service";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso, transactionTotals } from "@/features/transactions/service";
 import type { SessionUser } from "@/lib/auth";
 
 /**
  * Savings service suite: goal CRUD + scope CHECK, contribution net math in
- * exact cents, member pinning, investment valuation/return, patrimony
- * aggregation and the full admin/member authorization matrix — against
- * in-memory Postgres with the real migrations.
+ * exact cents, member pinning, mirror transactions (R1), investment
+ * valuation/return, patrimony aggregation and the full admin/member
+ * authorization matrix — against in-memory Postgres with the real migrations.
  */
 
 const savingsInput: GoalInput = {
@@ -43,6 +43,8 @@ const savingsInput: GoalInput = {
   target: "1500",
   deadline: "",
   currentValue: "",
+  institution: "",
+  annualRate: "",
 };
 
 const investmentInput: GoalInput = {
@@ -53,6 +55,8 @@ const investmentInput: GoalInput = {
   target: "",
   deadline: "",
   currentValue: "",
+  institution: "",
+  annualRate: "",
 };
 
 /** Empty date mirrors the zod transform: "" → today. */
@@ -93,6 +97,14 @@ describe("savings helpers (pure)", () => {
   });
 });
 
+/** Mirror categories (R1): contribute() writes movements under these names. */
+async function seedMirrorCategories(db: PgliteDatabase): Promise<void> {
+  await db.insert(categories).values([
+    { name: "Ahorro e inversión", kind: "expense" },
+    { name: "Recupero de ahorro", kind: "income" },
+  ]);
+}
+
 describe("savings goals CRUD (integration on PGlite)", () => {
   let db: PgliteDatabase;
   let appDb: Database;
@@ -104,6 +116,7 @@ describe("savings goals CRUD (integration on PGlite)", () => {
   beforeAll(async () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
+    await seedMirrorCategories(db);
     const [row] = await db
       .insert(users)
       .values({ username: "admin", name: "Admin", passwordHash: "x", role: "admin" })
@@ -319,7 +332,7 @@ describe("savings goals CRUD (integration on PGlite)", () => {
       { goalId: row.id, memberId, kind: "deposit", amountCents: 2345, date: "2026-05-02" },
     ]);
 
-    const list = await listContributionsByGoal(appDb, row.id);
+    const list = await listContributions(appDb, row.id);
     expect(list).toHaveLength(4);
     expect(list[0]?.date).toBe(todayIso());
     expect(list.slice(-2).map((c) => [c.date, c.memberName, c.amountCents, c.kind])).toEqual([
@@ -430,5 +443,201 @@ describe("investments, valuation and patrimony (integration on PGlite)", () => {
 
     // Restore so the previous test stays reproducible if reordered.
     await toggleGoalActive(appDb, admin, ahorro.id);
+  });
+});
+
+describe("mirror transactions and yield inputs (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let admin: SessionUser;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    await seedMirrorCategories(db);
+    const [row] = await db
+      .insert(users)
+      .values({ username: "admin2", name: "Admin2", passwordHash: "x", role: "admin" })
+      .returning();
+    await db
+      .insert(users)
+      .values({ username: "nico", name: "Nico", passwordHash: "x", role: "member" });
+    admin = { id: row.id, username: row.username, name: row.name, role: row.role };
+
+    expect(
+      await createGoal(appDb, admin, {
+        ...savingsInput,
+        name: "Espejo",
+        institution: "Banco Nación",
+        annualRate: "35,5",
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  const mirrorGoal = async () => {
+    const [row] = await db.select().from(savingsGoals).where(eq(savingsGoals.name, "Espejo"));
+    return row;
+  };
+
+  it("persists institution and AR-tolerant rate ('35,5' → 3550 bp)", async () => {
+    const goal = await mirrorGoal();
+    expect(goal).toMatchObject({ institution: "Banco Nación", annualRateBp: 3550 });
+
+    // Zod: institution length, rate bounds and empty → null.
+    expect(goalSchema.safeParse({ ...savingsInput, institution: "x".repeat(65) }).success).toBe(false);
+    expect(goalSchema.safeParse({ ...savingsInput, annualRate: "1000" }).success).toBe(true);
+    expect(goalSchema.safeParse({ ...savingsInput, annualRate: "1000,01" }).success).toBe(true);
+    const parsed = goalSchema.parse({ ...savingsInput, annualRate: "" });
+    expect(parsed.annualRate).toBe("");
+
+    const [noRate] = await db
+      .insert(savingsGoals)
+      .values({ name: "SinTasa", kind: "savings", scope: "common", institution: null, annualRateBp: null })
+      .returning();
+    expect(noRate.annualRateBp).toBeNull();
+
+    // Service caps: >1000% and garbage → typed invalid_rate.
+    expect(
+      await createGoal(appDb, admin, { ...savingsInput, name: "R1", annualRate: "1000,01" }),
+    ).toEqual({ ok: false, error: "invalid_rate" });
+    expect(
+      await createGoal(appDb, admin, { ...savingsInput, name: "R2", annualRate: "mucho" }),
+    ).toEqual({ ok: false, error: "invalid_rate" });
+    expect(
+      await createGoal(appDb, admin, { ...savingsInput, name: "R3", annualRate: "999,99" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("deposits mirror an expense; withdrawals mirror an income (R1)", async () => {
+    const goal = await mirrorGoal();
+
+    expect(await addContribution(appDb, admin, goal.id, deposit("100", "2026-09-10"))).toEqual({
+      ok: true,
+    });
+    expect(
+      await addContribution(appDb, admin, goal.id, {
+        ...deposit("40", "2026-09-15"),
+        kind: "withdrawal",
+      }),
+    ).toEqual({ ok: true });
+
+    const movements = await db
+      .select({
+        type: transactions.type,
+        amountCents: transactions.amountCents,
+        date: transactions.date,
+        note: transactions.note,
+        scope: transactions.scope,
+        memberId: transactions.memberId,
+        categoryName: categories.name,
+      })
+      .from(transactions)
+      .innerJoin(categories, eq(transactions.categoryId, categories.id))
+      .where(eq(transactions.scope, goal.scope));
+
+    const depositMirror = movements.find((m) => m.note === "Aporte a Espejo");
+    expect(depositMirror).toMatchObject({
+      type: "expense",
+      amountCents: 10_000,
+      date: "2026-09-10",
+      scope: "common",
+      memberId: admin.id,
+      categoryName: "Ahorro e inversión",
+    });
+    const withdrawalMirror = movements.find((m) => m.note === "Retiro de Espejo");
+    expect(withdrawalMirror).toMatchObject({
+      type: "income",
+      amountCents: 4_000,
+      date: "2026-09-15",
+      categoryName: "Recupero de ahorro",
+    });
+
+    // R1 proof: totals see the mirrors — Saldo dropped by the deposit.
+    const totals = await transactionTotals(appDb);
+    expect(totals.expenseCents).toBeGreaterThanOrEqual(10_000);
+    expect(totals.balanceCents).toBe(totals.incomeCents - totals.expenseCents);
+  });
+
+  it("links every mirror to its contribution and cascades on delete", async () => {
+    const goal = await mirrorGoal();
+    const contributionsBefore = await db
+      .select({ id: savingsContributions.id })
+      .from(savingsContributions)
+      .where(eq(savingsContributions.goalId, goal.id));
+    const linked = await db
+      .select({ contributionId: transactions.savingsContributionId })
+      .from(transactions)
+      .where(eq(transactions.scope, goal.scope));
+    expect(new Set(linked.map((l) => l.contributionId))).toEqual(
+      new Set(contributionsBefore.map((c) => c.id)),
+    );
+
+    // Interest rows never mirror: insert one directly, mirror count unchanged.
+    await db.insert(savingsContributions).values({
+      goalId: goal.id,
+      kind: "interest",
+      amountCents: 999,
+      date: "2026-09-01",
+    });
+    const mirrorsForGoal = await db
+      .select({ note: transactions.note })
+      .from(transactions)
+      .where(eq(transactions.scope, goal.scope));
+    expect(mirrorsForGoal.map((m) => m.note).sort()).toEqual([
+      "Aporte a Espejo",
+      "Retiro de Espejo",
+    ]);
+
+    // Deleting a contribution removes its mirror via FK CASCADE.
+    const [first] = contributionsBefore;
+    await db.delete(savingsContributions).where(eq(savingsContributions.id, first.id));
+    const after = await db.select().from(transactions);
+    expect(
+      after.filter((t) => t.savingsContributionId === first.id),
+    ).toHaveLength(0);
+  });
+});
+
+describe("mirror without system categories (isolated DB)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let admin: SessionUser;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [row] = await db
+      .insert(users)
+      .values({ username: "solo-admin", passwordHash: "x", name: "S", role: "admin" })
+      .returning();
+    admin = { id: row.id, username: row.username, name: row.name, role: row.role };
+    expect(
+      await createGoal(appDb, admin, { ...savingsInput, name: "SinCategorias" }),
+    ).toEqual({ ok: true });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("fails typed and atomically when the mirror categories do not exist", async () => {
+    const [fresh] = await db.select().from(savingsGoals).where(eq(savingsGoals.name, "SinCategorias"));
+
+    // No categories seeded at all → contribute() cannot write the mirror.
+    expect(await addContribution(appDb, admin, fresh.id, deposit("50"))).toEqual({
+      ok: false,
+      error: "system_category_missing",
+    });
+    const leftovers = await db
+      .select()
+      .from(savingsContributions)
+      .where(eq(savingsContributions.goalId, fresh.id));
+    expect(leftovers).toHaveLength(0); // nothing half-written
   });
 });

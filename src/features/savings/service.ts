@@ -11,16 +11,15 @@
  * Contributions are a ledger SEPARATE from transactions: saving is neither
  * income nor expense and must never pollute those stats.
  */
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { savingsContributions, savingsGoals, users } from "@/db/schema";
+import { categories, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/features/transactions/service";
-// Pure math lives in a client-safe module; re-exported here so the service
-// stays the single import surface for server-side callers and tests.
+import { catchUpAllInterest } from "./accrual";
 // Pure math lives in a client-safe module; re-exported here so the service
 // stays the single import surface for server-side callers and tests.
 export {
@@ -51,6 +50,10 @@ export const goalSchema = z
     target: optionalAmount,
     deadline: z.union([z.iso.date({ message: "La fecha no es válida" }), z.literal("")]),
     currentValue: optionalAmount,
+    /** Where the money is held ("banco", "billetera"…); empty string = unset. */
+    institution: z.union([z.string().trim().max(64, "Máximo 64 caracteres"), z.literal("")]),
+    /** AR-tolerant annual percent ("35,5" = 35,5% TNA); empty string = no yield. */
+    annualRate: optionalAmount,
   })
   .refine((v) => v.scope !== "individual" || v.memberId !== "", {
     message: "Las metas individuales requieren un integrante.",
@@ -101,20 +104,29 @@ export interface GoalView {
   deadline: string | null;
   currentValueCents: number | null;
   valueUpdatedAt: Date | null;
+  /** Where the money is held; null = unset. */
+  institution: string | null;
+  /** Annual nominal rate in bp; null = no yield. */
+  annualRateBp: number | null;
+  /** Sum of interest entries — what the goal has generated so far. */
+  interestTotalCents: number;
   isActive: boolean;
-  /** deposits − withdrawals across all months (exact cents). */
+  /** deposits − withdrawals + interest across all months (exact cents). */
   netCents: number;
   contributionCount: number;
 }
 
 export interface ContributionView {
   id: string;
-  kind: "deposit" | "withdrawal";
+  /** Owning goal — lets one query feed every card's collapsible history. */
+  goalId: string;
+  kind: "deposit" | "withdrawal" | "interest";
   amountCents: number;
   date: string;
   note: string | null;
-  memberId: string;
-  memberName: string;
+  /** null on interest rows (yield belongs to the pool, not a member). */
+  memberId: string | null;
+  memberName: string | null;
 }
 
 export interface PatrimonyBreakdown {
@@ -137,6 +149,10 @@ export interface Patrimony {
 // ---------------------------------------------------------------------------
 
 export async function listGoals(db: Database): Promise<GoalView[]> {
+  // Lazy catch-up first so every read path (list, patrimony, detail) shows
+  // interest that has accrued up to now. No-op without rate-bearing goals.
+  await catchUpAllInterest(db);
+
   const rows = await db
     .select({
       id: savingsGoals.id,
@@ -149,8 +165,11 @@ export async function listGoals(db: Database): Promise<GoalView[]> {
       deadline: savingsGoals.deadline,
       currentValueCents: savingsGoals.currentValueCents,
       valueUpdatedAt: savingsGoals.valueUpdatedAt,
+      institution: savingsGoals.institution,
+      annualRateBp: savingsGoals.annualRateBp,
       isActive: savingsGoals.isActive,
-      net: sql<string | null>`coalesce(sum(case when ${savingsContributions.kind} = 'deposit' then ${savingsContributions.amountCents} else -${savingsContributions.amountCents} end), 0)`,
+      net: sql<string | null>`coalesce(sum(case ${savingsContributions.kind} when 'deposit' then ${savingsContributions.amountCents} when 'withdrawal' then -${savingsContributions.amountCents} else ${savingsContributions.amountCents} end), 0)`,
+      interestTotal: sql<string | null>`coalesce(sum(case when ${savingsContributions.kind} = 'interest' then ${savingsContributions.amountCents} else 0 end), 0)`,
       contributionCount: sql<string | null>`count(${savingsContributions.id})`,
     })
     .from(savingsGoals)
@@ -168,6 +187,7 @@ export async function listGoals(db: Database): Promise<GoalView[]> {
     ...row,
     memberName: row.memberName ?? null,
     netCents: Number(row.net ?? 0),
+    interestTotalCents: Number(row.interestTotal ?? 0),
     contributionCount: Number(row.contributionCount ?? 0),
   }));
 }
@@ -192,7 +212,24 @@ function parseOptionalCents(
   return { cents };
 }
 
-function goalValues(input: GoalInput, targetCents: number | null) {
+/**
+ * AR-tolerant annual percent → basis points. Reuses the sanctioned money
+ * parser: percent cents ARE basis points ("35,5" → 3550 bp, "70" → 7000).
+ * Empty = null = no yield; caps at 1000% TNA (100000 bp).
+ */
+function parseOptionalRate(rate: string): { bp: number | null } | { error: "invalid_rate" } {
+  if (rate === "") return { bp: null };
+  let bp: number;
+  try {
+    bp = parseAmountToCents(rate);
+  } catch {
+    return { error: "invalid_rate" };
+  }
+  if (bp < 0 || bp > 100000) return { error: "invalid_rate" };
+  return { bp };
+}
+
+function goalValues(input: GoalInput, targetCents: number | null, rateBp: number | null) {
   return {
     name: input.name,
     kind: input.kind,
@@ -200,6 +237,8 @@ function goalValues(input: GoalInput, targetCents: number | null) {
     memberId: input.scope === "individual" ? input.memberId : null,
     targetCents: input.kind === "savings" ? targetCents : null,
     deadline: input.kind === "savings" && input.deadline !== "" ? input.deadline : null,
+    institution: input.institution !== "" ? input.institution : null,
+    annualRateBp: rateBp,
   };
 }
 
@@ -210,6 +249,7 @@ export type GoalResult =
       error:
         | "invalid_target"
         | "invalid_current_value"
+        | "invalid_rate"
         | "member_not_found"
         | "goal_not_found"
         | "has_contributions"
@@ -242,10 +282,12 @@ export async function createGoal(
   if ("error" in target) return { ok: false, error: target.error };
   const value = parseOptionalCents(input.currentValue, "invalid_current_value");
   if ("error" in value) return { ok: false, error: value.error };
+  const rate = parseOptionalRate(input.annualRate);
+  if ("error" in rate) return { ok: false, error: rate.error };
 
   try {
     await db.insert(savingsGoals).values({
-      ...goalValues(input, target.cents),
+      ...goalValues(input, target.cents, rate.bp),
       currentValueCents: input.kind === "investment" ? value.cents : null,
       valueUpdatedAt: input.kind === "investment" && value.cents !== null ? new Date() : null,
     });
@@ -270,6 +312,8 @@ export async function updateGoal(
   if ("error" in target) return { ok: false, error: target.error };
   const value = parseOptionalCents(input.currentValue, "invalid_current_value");
   if ("error" in value) return { ok: false, error: value.error };
+  const rate = parseOptionalRate(input.annualRate);
+  if ("error" in rate) return { ok: false, error: rate.error };
 
   const [existing] = await db
     .select({ currentValueCents: savingsGoals.currentValueCents })
@@ -294,7 +338,7 @@ export async function updateGoal(
     const updated = await db
       .update(savingsGoals)
       .set({
-        ...goalValues(input, target.cents),
+        ...goalValues(input, target.cents, rate.bp),
         currentValueCents,
         ...(valueUpdatedAt === undefined ? {} : { valueUpdatedAt }),
       })
@@ -356,6 +400,7 @@ export type ContributionResult =
         | "goal_not_found"
         | "goal_inactive"
         | "member_not_found"
+        | "system_category_missing"
         | "forbidden";
     };
 
@@ -369,6 +414,15 @@ function resolveMemberId(
   return { ok: true, memberId: resolved };
 }
 
+/**
+ * Mirror categories (system-seeded): a savings DEPOSIT is money that LEFT
+ * the household's income/expense flow — an expense; a WITHDRAWAL returns it
+ * — income. Same member, date, scope and amount as the contribution, linked
+ * via transactions.savings_contribution_id (CASCADE delete).
+ */
+const MIRROR_DEPOSIT_CATEGORY = "Ahorro e inversión";
+const MIRROR_WITHDRAWAL_CATEGORY = "Recupero de ahorro";
+
 export async function addContribution(
   db: Database,
   user: SessionUser,
@@ -378,40 +432,73 @@ export async function addContribution(
   const cents = parseAmountCents(input.amount);
   if (cents === null || cents <= 0) return { ok: false, error: "invalid_amount" };
 
-  const [goal] = await db
-    .select({ isActive: savingsGoals.isActive })
-    .from(savingsGoals)
-    .where(eq(savingsGoals.id, goalId))
-    .limit(1);
-  if (!goal) return { ok: false, error: "goal_not_found" };
-  if (!goal.isActive) return { ok: false, error: "goal_inactive" };
+  // Contribution + mirror commit together (R1): stats never diverge from
+  // the savings ledger. Interest rows never pass through here.
+  return db.transaction(async (tx) => {
+    const [goal] = await tx
+      .select({ name: savingsGoals.name, scope: savingsGoals.scope, isActive: savingsGoals.isActive })
+      .from(savingsGoals)
+      .where(eq(savingsGoals.id, goalId))
+      .limit(1);
+    if (!goal) return { ok: false, error: "goal_not_found" };
+    if (!goal.isActive) return { ok: false, error: "goal_inactive" };
 
-  const member = resolveMemberId(user, input.memberId);
-  if (!member.ok) return member;
+    const member = resolveMemberId(user, input.memberId);
+    if (!member.ok) return member;
 
-  try {
-    await db.insert(savingsContributions).values({
-      goalId,
-      memberId: member.memberId,
-      kind: input.kind,
-      amountCents: cents,
-      date: input.date,
-      note: input.note ? input.note : null,
-    });
-    return { ok: true };
-  } catch (error) {
-    if (hasPgError(error, "23503")) return { ok: false, error: "member_not_found" };
-    throw error;
-  }
+    const mirror =
+      input.kind === "deposit"
+        ? { type: "expense" as const, categoryName: MIRROR_DEPOSIT_CATEGORY, note: `Aporte a ${goal.name}` }
+        : { type: "income" as const, categoryName: MIRROR_WITHDRAWAL_CATEGORY, note: `Retiro de ${goal.name}` };
+
+    const [category] = await tx
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.name, mirror.categoryName))
+      .limit(1);
+    // Run `npm run db:seed` after deploying: both modes create these.
+    if (!category) return { ok: false, error: "system_category_missing" };
+
+    try {
+      const [contribution] = await tx
+        .insert(savingsContributions)
+        .values({
+          goalId,
+          memberId: member.memberId,
+          kind: input.kind,
+          amountCents: cents,
+          date: input.date,
+          note: input.note ? input.note : null,
+        })
+        .returning({ id: savingsContributions.id });
+
+      await tx.insert(transactions).values({
+        date: input.date,
+        amountCents: cents,
+        type: mirror.type,
+        categoryId: category.id,
+        memberId: member.memberId,
+        scope: goal.scope,
+        note: mirror.note,
+        savingsContributionId: contribution.id,
+      });
+      return { ok: true };
+    } catch (error) {
+      if (hasPgError(error, "23503")) return { ok: false, error: "member_not_found" };
+      throw error;
+    }
+  });
 }
 
-export async function listContributionsByGoal(
+/** Full history (optionally one goal's), newest first. Feeds the /ahorro cards. */
+export async function listContributions(
   db: Database,
-  goalId: string,
+  goalId?: string,
 ): Promise<ContributionView[]> {
   return db
     .select({
       id: savingsContributions.id,
+      goalId: savingsContributions.goalId,
       kind: savingsContributions.kind,
       amountCents: savingsContributions.amountCents,
       date: savingsContributions.date,
@@ -420,8 +507,8 @@ export async function listContributionsByGoal(
       memberName: users.name,
     })
     .from(savingsContributions)
-    .innerJoin(users, eq(savingsContributions.memberId, users.id))
-    .where(eq(savingsContributions.goalId, goalId))
+    .leftJoin(users, eq(savingsContributions.memberId, users.id))
+    .where(goalId ? eq(savingsContributions.goalId, goalId) : undefined)
     .orderBy(desc(savingsContributions.date), desc(savingsContributions.createdAt));
 }
 
@@ -436,7 +523,12 @@ export type ValueResult =
       error: "invalid_current_value" | "goal_not_found" | "not_investment" | "forbidden";
     };
 
-/** Admin-only manual valuation of an investment. */
+/** Admin-only manual valuation. Rate-bearing goals get a true-up: the delta
+ * against the real balance materializes as ONE visible 'interest' row
+ * ("Ajuste de valoración") and value_updated_at becomes the new accrual
+ * base. Re-valuating the same day replaces that day's adjustment (the
+ * ledger keeps ONE net adjustment converging to the latest stated value).
+ * Non-rate investments keep the plain valuation behavior. */
 export async function updateGoalValue(
   db: Database,
   user: SessionUser,
@@ -444,23 +536,84 @@ export async function updateGoalValue(
   currentValue: string,
 ): Promise<ValueResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
-  const [goal] = await db
-    .select({ kind: savingsGoals.kind })
+
+  // Pre-check for typed errors; the mutations below re-check via the tx
+  // (a goal deleted mid-flight simply updates zero rows).
+  const [existing] = await db
+    .select({ kind: savingsGoals.kind, annualRateBp: savingsGoals.annualRateBp })
     .from(savingsGoals)
     .where(eq(savingsGoals.id, goalId))
     .limit(1);
-  if (!goal) return { ok: false, error: "goal_not_found" };
-  if (goal.kind !== "investment") return { ok: false, error: "not_investment" };
+  if (!existing) return { ok: false, error: "goal_not_found" };
+  if (existing.kind !== "investment" && existing.annualRateBp === null) {
+    return { ok: false, error: "not_investment" };
+  }
 
   const cents = parseAmountCents(currentValue);
   if (cents === null || cents < 0) return { ok: false, error: "invalid_current_value" };
 
-  const updated = await db
-    .update(savingsGoals)
-    .set({ currentValueCents: cents, valueUpdatedAt: new Date() })
-    .where(eq(savingsGoals.id, goalId))
-    .returning({ id: savingsGoals.id });
-  if (updated.length === 0) return { ok: false, error: "goal_not_found" };
+  await db.transaction(async (tx) => {
+    const [goal] = await tx
+      .select({
+        kind: savingsGoals.kind,
+        annualRateBp: savingsGoals.annualRateBp,
+        currentValueCents: savingsGoals.currentValueCents,
+      })
+      .from(savingsGoals)
+      .where(eq(savingsGoals.id, goalId))
+      .limit(1)
+      .for("update");
+    if (!goal) return;
+    if (goal.kind !== "investment" && goal.annualRateBp === null) return;
+
+    if (goal.annualRateBp === null) {
+      await tx
+        .update(savingsGoals)
+        .set({ currentValueCents: cents, valueUpdatedAt: new Date() })
+        .where(eq(savingsGoals.id, goalId));
+      return;
+    }
+
+    // True-up: absorb (stated value − current balance) into the ledger so
+    // the visible net matches what the goal is really worth, then rebase.
+    // A same-day adjustment is replaced so repeated valuations converge.
+    const today = todayIso();
+    await tx
+      .delete(savingsContributions)
+      .where(
+        and(
+          eq(savingsContributions.goalId, goalId),
+          eq(savingsContributions.kind, "interest"),
+          eq(savingsContributions.date, today),
+          eq(savingsContributions.note, "Ajuste de valoración"),
+        ),
+      );
+    const [balance] = await tx
+      .select({
+        balance: sql<number>`coalesce(sum(case ${savingsContributions.kind} when 'deposit' then ${savingsContributions.amountCents} when 'withdrawal' then -${savingsContributions.amountCents} else ${savingsContributions.amountCents} end), 0)`,
+      })
+      .from(savingsContributions)
+      .where(eq(savingsContributions.goalId, goalId));
+    const delta = cents - Number(balance?.balance ?? 0);
+
+    if (delta !== 0) {
+      await tx.insert(savingsContributions).values({
+        goalId,
+        memberId: null,
+        kind: "interest",
+        amountCents: delta,
+        date: today,
+        note: "Ajuste de valoración",
+      });
+    }
+    await tx
+      .update(savingsGoals)
+      .set({
+        currentValueCents: goal.kind === "investment" ? cents : null,
+        valueUpdatedAt: new Date(),
+      })
+      .where(eq(savingsGoals.id, goalId));
+  });
   return { ok: true };
 }
 

@@ -35,6 +35,9 @@ function mapGoalError(error: string): FormState {
   if (error === "invalid_current_value") {
     return { fieldErrors: { currentValue: "El valor actual no es válido." } };
   }
+  if (error === "invalid_rate") {
+    return { fieldErrors: { annualRate: "La TNA no es válida (máximo 1000%)." } };
+  }
   if (error === "member_not_found") {
     return { fieldErrors: { memberId: "El integrante seleccionado no existe." } };
   }
@@ -60,6 +63,8 @@ function readGoalForm(formData: FormData) {
     target: formData.get("target") ?? "",
     deadline: formData.get("deadline") ?? "",
     currentValue: formData.get("currentValue") ?? "",
+    institution: formData.get("institution") ?? "",
+    annualRate: formData.get("annualRate") ?? "",
   };
 }
 
@@ -195,6 +200,12 @@ export async function addContributionAction(
     }
     if (result.error === "member_not_found") {
       return { fieldErrors: { memberId: "El integrante seleccionado no existe." } };
+    }
+    if (result.error === "system_category_missing") {
+      return {
+        error:
+          "Faltan las categorías de ahorro del sistema: ejecutá la carga inicial (db:seed) para crearlas.",
+      };
     }
     return { error: "No tenés permiso para registrar ese aporte." };
   }

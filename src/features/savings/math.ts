@@ -48,6 +48,14 @@ export function investmentValueCents(
 }
 
 /**
+ * Basis points → es-AR percent copy ("3550 → 35,5", "7000 → 70"). Shared by
+ * the TNA chip in the UI and the accrual engine's interest note.
+ */
+export function formatRatePercent(rateBp: number): string {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(rateBp / 100);
+}
+
+/**
  * Whole months from today until the deadline month; negative when overdue,
  * null when there is no deadline. Month granularity on purpose ("vence en
  * N meses" — day precision would make the copy jitter daily).
