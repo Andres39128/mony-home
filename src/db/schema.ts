@@ -127,6 +127,25 @@ export const transactions = pgTable(
   ],
 );
 
+export const assistantUsage = pgTable(
+  "assistant_usage",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Calendar day ('YYYY-MM-DD'); the daily quota resets by this key. */
+    day: date("day", { mode: "string" }).notNull(),
+    /** Requests served that day; incremented atomically on success. */
+    count: integer("count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("assistant_usage_user_id_day_unique").on(table.userId, table.day),
+    check("assistant_usage_count_non_negative", sql`${table.count} >= 0`),
+  ],
+);
+
 export const budgets = pgTable(
   "budgets",
   {

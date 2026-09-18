@@ -37,7 +37,15 @@ export type EnvSource = Record<string, string | undefined>;
  * Throws an Error listing every missing/invalid variable when parsing fails.
  */
 export function loadConfig(source: EnvSource = process.env): AppConfig {
-  const result = envSchema.safeParse(source);
+  // Blank placeholders ('' / whitespace) in .env templates count as unset,
+  // so optional variables don't fail validation when left empty.
+  const cleaned = Object.fromEntries(
+    Object.entries(source).map(([key, value]) => [
+      key,
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    ]),
+  );
+  const result = envSchema.safeParse(cleaned);
   if (!result.success) {
     const details = result.error.issues
       .map((issue) => `  - ${issue.path.join(".") || "(root)"}: ${issue.message}`)

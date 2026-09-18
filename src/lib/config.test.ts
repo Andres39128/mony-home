@@ -12,6 +12,14 @@ describe("loadConfig", () => {
     expect(config.LLM_API_KEY).toBeUndefined();
   });
 
+  it("treats blank .env placeholders as unset (optional vars, defaults apply)", () => {
+    const config = loadConfig({ DATABASE_URL: "", LLM_MODEL: "   ", APP_NAME: "" });
+
+    expect(config.DATABASE_URL).toBeUndefined();
+    expect(config.LLM_MODEL).toBeUndefined();
+    expect(config.APP_NAME).toBe("mony-home");
+  });
+
   it("round-trips a valid override, coercing ASSISTANT_DAILY_LIMIT to a number", () => {
     const config = loadConfig({
       DATABASE_URL: "postgresql://user:pass@localhost:5432/mony",

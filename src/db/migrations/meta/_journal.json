@@ -15,6 +15,13 @@
       "when": 1789671229315,
       "tag": "0001_misty_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789735810788,
+      "tag": "0002_military_wolf_cub",
+      "breakpoints": true
     }
   ]
 }
