@@ -16,7 +16,7 @@ function AppMark() {
     <Link href="/" className="flex items-center gap-2" aria-label="mony-home — Ir al inicio">
       <span
         aria-hidden
-        className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-honey text-lg font-bold text-ink"
+        className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-honey text-lg font-bold text-on-accent"
       >
         M
       </span>

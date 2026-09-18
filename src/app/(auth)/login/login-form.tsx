@@ -53,7 +53,7 @@ export default function LoginForm({
         />
       </div>
       {errorMessage && (
-        <p role="alert" className="rounded-lg bg-danger-fill px-3 py-2 text-sm text-danger-text">
+        <p role="alert" className="rounded-lg bg-danger-fill px-3 py-2 text-sm text-on-accent">
           {errorMessage}
         </p>
       )}

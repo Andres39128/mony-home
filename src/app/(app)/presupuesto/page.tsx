@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import { todayIso } from "@/features/transactions/service";
+import { monthLabel, shiftMonth } from "@/features/transactions/month-nav";
 import { getMonth } from "@/features/budgets/service";
 import { computeProgress, monthBounds } from "@/features/budgets/progress";
 import {
@@ -9,7 +11,8 @@ import {
 } from "@/features/budgets/actions";
 import { formatCents } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
-import { inputClass } from "@/components/forms";
+import { Card } from "@/components/card";
+import { ChevronLeftIcon, ChevronRightIcon, TagIcon } from "@/components/icons";
 import BudgetEditor from "./budget-editor";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -20,11 +23,16 @@ function singleParam(params: Record<string, string | string[] | undefined>, key:
 }
 
 /** "2026-09" → "septiembre de 2026" for the heading (display only). */
-function monthLabel(month: string): string {
+function longMonthLabel(month: string): string {
   const [year, monthNumber] = month.split("-").map(Number);
   return new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" }).format(
     new Date(Date.UTC(year, monthNumber - 1, 1)),
   );
+}
+
+/** Remaining chip: honey pastel when on/under budget, danger when overspent. */
+function remainingChipClass(remainingCents: number): string {
+  return remainingCents < 0 ? "bg-danger-fill text-on-accent" : "bg-honey text-on-accent";
 }
 
 export default async function PresupuestoPage({ searchParams }: { searchParams: SearchParams }) {
@@ -44,124 +52,183 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
 
   return (
     <section className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold capitalize tracking-tight text-ink">
-        Presupuesto de {monthLabel(month)}
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold capitalize tracking-tight text-ink">
+          Presupuesto de {longMonthLabel(month)}
+        </h1>
 
-      {/* Shareable, no-JS month picker: a plain GET form over the search params. */}
-      <form
-        method="get"
-        action="/presupuesto"
-        className="flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-surface p-4 shadow-sm"
-      >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-muted">Mes</span>
-          <input type="month" name="month" defaultValue={month} className={inputClass} />
-        </label>
-        <button
-          type="submit"
-          className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
+        {/* Shareable month stepper: plain links over the ?month param, no JS. */}
+        <nav
+          aria-label="Cambiar mes"
+          className="flex items-center rounded-2xl border border-line bg-surface p-2 shadow-sm"
         >
-          Filtrar
-        </button>
-      </form>
+          <Link
+            href={`/presupuesto?month=${shiftMonth(month, -1)}`}
+            aria-label="Mes anterior"
+            className="inline-flex size-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-base"
+          >
+            <ChevronLeftIcon className="size-5" />
+          </Link>
+          <span className="min-w-20 text-center text-sm font-medium text-ink">
+            {monthLabel(month)}
+          </span>
+          <Link
+            href={`/presupuesto?month=${shiftMonth(month, 1)}`}
+            aria-label="Mes siguiente"
+            className="inline-flex size-11 items-center justify-center rounded-lg text-muted transition-colors hover:bg-base"
+          >
+            <ChevronRightIcon className="size-5" />
+          </Link>
+        </nav>
+      </div>
 
-      <div data-tour="presupuesto-resumen" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <article className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
-          <h2 className="text-sm font-medium text-muted">Presupuestado</h2>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
-            {formatCents(view.totals.plannedCents)}
-          </p>
-        </article>
-        <article className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
-          <h2 className="text-sm font-medium text-muted">Gastado</h2>
-          <p className="mt-1 w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-2xl font-semibold tabular-nums text-danger-text">
-            {formatCents(view.totals.spentCents)}
-          </p>
-        </article>
-        <article className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-5 shadow-sm">
-          <h2 className="text-sm font-medium text-muted">% del presupuesto</h2>
-          <p className="text-2xl font-semibold tabular-nums text-ink">
-            {totals.pct}%
-          </p>
-          <ProgressBar pct={totals.pct} status={totals.status} />
-        </article>
-        <article className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
-          <h2 className="text-sm font-medium text-muted">Ingresos del mes</h2>
-          <p className="mt-1 w-fit rounded-lg bg-sage px-2 py-0.5 text-2xl font-semibold tabular-nums text-ink">
-            {formatCents(view.context.incomeCents)}
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            Saldo:{" "}
-            <span
-              className={`font-semibold tabular-nums ${
-                balanceCents < 0
-                  ? "rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text"
-                  : "text-ink"
-              }`}
+      <div data-tour="presupuesto-resumen" className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Card className="flex flex-col gap-1 p-4">
+            <h2 className="text-xs font-medium text-muted">Presupuestado</h2>
+            <p className="text-xl font-semibold tabular-nums text-ink">
+              {formatCents(view.totals.plannedCents)}
+            </p>
+          </Card>
+          <Card className="flex flex-col gap-1 p-4">
+            <h2 className="text-xs font-medium text-muted">Gastado</h2>
+            <p className="w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-xl font-semibold tabular-nums text-on-accent">
+              {formatCents(view.totals.spentCents)}
+            </p>
+          </Card>
+          <Card className="flex flex-col gap-1 p-4">
+            <h2 className="text-xs font-medium text-muted">Restante</h2>
+            <p
+              className={`w-fit rounded-lg px-2 py-0.5 text-xl font-semibold tabular-nums ${remainingChipClass(totals.remainingCents)}`}
             >
-              {formatCents(balanceCents)}
-            </span>
-          </p>
-        </article>
+              {formatCents(totals.remainingCents)}
+            </p>
+          </Card>
+          <Card className="flex flex-col gap-1 p-4">
+            <h2 className="text-xs font-medium text-muted">% ejecutado</h2>
+            <p className="text-xl font-semibold tabular-nums text-ink">{totals.pct}%</p>
+            <ProgressBar pct={totals.pct} status={totals.status} />
+          </Card>
+        </div>
+        {/* Month income context, kept out of the KPI cards to stay compact. */}
+        <p className="text-sm text-muted">
+          Ingresos del mes:{" "}
+          <span className="font-medium tabular-nums text-ink">
+            {formatCents(view.context.incomeCents)}
+          </span>
+          {" · "}Saldo:{" "}
+          <span
+            className={`font-semibold tabular-nums ${
+              balanceCents < 0
+                ? "rounded-lg bg-danger-fill px-2 py-0.5 text-on-accent"
+                : "text-ink"
+            }`}
+          >
+            {formatCents(balanceCents)}
+          </span>
+        </p>
       </div>
 
-      <div data-tour="presupuesto-tabla" className="overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-line text-left text-muted">
-            <tr>
-              <th className="px-6 py-3 font-medium">Categoría</th>
-              <th className="px-4 py-3 text-right font-medium">Presupuestado</th>
-              <th className="px-4 py-3 text-right font-medium">Gastado</th>
-              <th className="px-4 py-3 font-medium">Avance</th>
-              <th className="px-6 py-3 text-right font-medium">Restante</th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.rows.map((row) => (
-              <tr
-                key={row.categoryId}
-                className="border-b border-line last:border-0"
-              >
-                <td className="px-6 py-3">
-                  <span className="flex items-center gap-2 font-medium text-ink">
-                    <span
-                      className="inline-block h-3 w-3 rounded-full"
-                      style={{ backgroundColor: row.color }}
-                    />
-                    {row.categoryName}
-                    {row.plannedCents === 0 && (
-                      <span className="rounded bg-honey px-1 text-xs font-normal text-ink">
-                        Sin presupuestar
+      <div data-tour="presupuesto-tabla">
+        {view.rows.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line px-6 py-12 text-center">
+            <TagIcon className="size-8 text-muted" />
+            <p className="text-sm font-medium text-ink">
+              Todavía no hay categorías para presupuestar
+            </p>
+            <p className="max-w-xs text-sm text-muted">
+              Creá categorías de gasto activas en Categorías y volvé acá para definir los montos
+              del mes.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {/* Mobile: card rows inside one card surface, no horizontal scroll. */}
+            <Card className="md:hidden">
+              <ul className="divide-y divide-line">
+                {view.rows.map((row) => (
+                  <li key={row.categoryId} className="flex flex-col gap-2 px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-ink">
+                        <span
+                          aria-hidden
+                          className="inline-block size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: row.color }}
+                        />
+                        <span className="truncate">{row.categoryName}</span>
+                      </p>
+                      <span
+                        className={`shrink-0 rounded-lg px-2 py-0.5 text-sm font-medium tabular-nums ${remainingChipClass(row.remainingCents)}`}
+                      >
+                        {formatCents(row.remainingCents)}
                       </span>
-                    )}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted">
-                  {formatCents(row.plannedCents)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted">
-                  {formatCents(row.spentCents)}
-                </td>
-                <td className="w-48 px-4 py-3">
-                  <ProgressBar pct={row.pct} status={row.status} />
-                </td>
-                <td
-                  className={`px-6 py-3 text-right tabular-nums ${
-                    row.remainingCents < 0
-                      ? "font-medium text-danger-text"
-                      : "text-muted"
-                  }`}
-                >
-                  {formatCents(row.remainingCents)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    </div>
+                    <p className="text-xs tabular-nums text-muted">
+                      {formatCents(row.spentCents)} de {formatCents(row.plannedCents)}
+                    </p>
+                    <ProgressBar pct={row.pct} status={row.status} />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+
+            {/* md+: the full table stays, with comfortable padding. */}
+            <div className="hidden overflow-x-auto rounded-2xl border border-line bg-surface shadow-sm md:block">
+              <table className="w-full text-sm">
+                <thead className="border-b border-line text-left text-muted">
+                  <tr>
+                    <th className="px-6 py-3 font-medium">Categoría</th>
+                    <th className="px-4 py-3 text-right font-medium">Presupuestado</th>
+                    <th className="px-4 py-3 text-right font-medium">Gastado</th>
+                    <th className="px-4 py-3 font-medium">Avance</th>
+                    <th className="px-6 py-3 text-right font-medium">Restante</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.rows.map((row) => (
+                    <tr key={row.categoryId} className="border-b border-line last:border-0">
+                      <td className="px-6 py-3">
+                        <span className="flex items-center gap-2 font-medium text-ink">
+                          <span
+                            className="inline-block h-3 w-3 rounded-full"
+                            style={{ backgroundColor: row.color }}
+                          />
+                          {row.categoryName}
+                          {row.plannedCents === 0 && (
+                            <span className="rounded bg-honey px-1 text-xs font-normal text-on-accent">
+                              Sin presupuestar
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted">
+                        {formatCents(row.plannedCents)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted">
+                        {formatCents(row.spentCents)}
+                      </td>
+                      <td className="w-48 px-4 py-3">
+                        <ProgressBar pct={row.pct} status={row.status} />
+                      </td>
+                      <td
+                        className={`px-6 py-3 text-right tabular-nums ${
+                          row.remainingCents < 0
+                            ? "font-medium text-danger-text"
+                            : "text-muted"
+                        }`}
+                      >
+                        {formatCents(row.remainingCents)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
-      {isAdmin && (
+      {isAdmin && view.rows.length > 0 && (
         <div data-tour="presupuesto-editor">
           <BudgetEditor
             month={month}

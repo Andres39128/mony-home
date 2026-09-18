@@ -19,7 +19,8 @@ export function ProgressBar({ pct, status }: { pct: number; status: ProgressStat
       aria-valuenow={width}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="h-2 w-full overflow-hidden rounded-full bg-line"
+      /* Track: muted (light) / line (dark) so constant pastel fills keep >=3:1. */
+      className="h-2 w-full overflow-hidden rounded-full bg-muted dark:bg-line"
     >
       <div
         className={`h-full rounded-full transition-[width] ${STATUS_CLASS[status]}`}

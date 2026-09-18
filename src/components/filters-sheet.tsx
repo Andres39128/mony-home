@@ -79,7 +79,7 @@ export default function FiltersSheet({
           <FunnelIcon className="size-5 text-muted" />
           Filtros
           {activeFilters.length > 0 && (
-            <span className="inline-flex size-5 items-center justify-center rounded-full bg-honey text-[11px] font-semibold text-ink">
+            <span className="inline-flex size-5 items-center justify-center rounded-full bg-honey text-[11px] font-semibold text-on-accent">
               {activeFilters.length}
             </span>
           )}

@@ -92,8 +92,8 @@ export default function NewMovementFab({
         aria-label="Nuevo movimiento"
         className={
           desktopButton
-            ? "fixed right-4 bottom-[calc(5.5rem_+_env(safe-area-inset-bottom))] z-40 inline-flex size-14 items-center justify-center rounded-full bg-honey text-ink shadow-lg transition-colors hover:bg-honey/80 md:static md:size-auto md:gap-2 md:rounded-lg md:bg-ink md:px-4 md:py-2 md:text-sm md:font-medium md:shadow-none md:hover:bg-ink/90"
-            : "fixed right-4 bottom-[calc(5.5rem_+_env(safe-area-inset-bottom))] z-40 inline-flex size-14 items-center justify-center rounded-full bg-honey text-ink shadow-lg transition-colors hover:bg-honey/80 md:hidden"
+            ? "fixed right-4 bottom-[calc(5.5rem_+_env(safe-area-inset-bottom))] z-40 inline-flex size-14 items-center justify-center rounded-full bg-honey text-on-accent shadow-lg transition-colors hover:brightness-95 md:static md:size-auto md:gap-2 md:rounded-lg md:bg-ink md:text-base md:px-4 md:py-2 md:text-sm md:font-medium md:shadow-none md:hover:bg-ink/90"
+            : "fixed right-4 bottom-[calc(5.5rem_+_env(safe-area-inset-bottom))] z-40 inline-flex size-14 items-center justify-center rounded-full bg-honey text-on-accent shadow-lg transition-colors hover:brightness-95 md:hidden"
         }
       >
         <PlusIcon className="size-6 shrink-0" />

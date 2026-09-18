@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { askAssistantAction } from "@/features/assistant/actions";
 import { inputClass } from "@/components/forms";
+import { SparklesIcon } from "@/components/icons";
 import {
   HISTORY_TURNS_SENT,
   QUESTION_MAX_LENGTH,
@@ -45,6 +46,19 @@ const ERROR_COPY: Record<string, string> = {
 /** Wraps amount-like tokens ($ 1.234,56) in monospace so figures stand out. */
 const AMOUNT_SPLIT_RE = /(\$[\d.,]*[\d]|\b\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?%?)/g;
 
+/**
+ * Empty-state suggestion chips. Every prompt is answerable from the
+ * pre-computed finance context the assistant actually sees (month totals,
+ * budget, top categories, envelopes, trend vs. previous months).
+ */
+const SUGGESTIONS = [
+  "¿Cuánto gastamos este mes?",
+  "¿Cómo van las bolsas?",
+  "¿En qué categorías gastamos más?",
+  "¿Cómo vamos con el presupuesto?",
+  "¿Gastamos más que el mes pasado?",
+];
+
 function MessageText({ content }: { content: string }) {
   const parts = content.split(AMOUNT_SPLIT_RE);
   return (
@@ -77,8 +91,9 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
   const [remaining, setRemaining] = useState(initialRemaining);
   const listRef = useRef<HTMLDivElement>(null);
 
-  function send() {
-    const question = input.trim();
+  /** Sends the typed question, or the given suggestion chip text verbatim. */
+  function send(questionOverride?: string) {
+    const question = (questionOverride ?? input).trim();
     if (question.length === 0 || pending) return;
     if (question.length > QUESTION_MAX_LENGTH) {
       setError(`La pregunta es demasiado larga (máximo ${QUESTION_MAX_LENGTH} caracteres).`);
@@ -130,9 +145,36 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
         className="flex max-h-[28rem] min-h-48 flex-col gap-3 overflow-y-auto rounded-2xl border border-line bg-surface p-4"
       >
         {messages.length === 0 && !pending && (
-          <p className="mx-auto my-auto text-center text-sm text-muted">
-            Preguntá por tus gastos, presupuestos o bolsas de este mes.
-          </p>
+          <div className="mx-auto my-auto flex w-full max-w-xs flex-col items-center gap-3 py-6 text-center">
+            <SparklesIcon className="size-8 text-muted" />
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-medium text-ink">
+                ¡Hola! Soy el asistente del hogar
+              </p>
+              <p className="text-sm text-muted">
+                Preguntame por los gastos, ingresos, presupuesto y bolsas del
+                mes.
+              </p>
+            </div>
+            <ul aria-label="Preguntas sugeridas" className="flex flex-wrap justify-center gap-2">
+              {SUGGESTIONS.map((suggestion, index) => (
+                <li key={suggestion}>
+                  <button
+                    type="button"
+                    onClick={() => send(suggestion)}
+                    disabled={exhausted}
+                    className={`inline-flex min-h-11 items-center rounded-full px-3 py-2 text-xs font-medium text-on-accent transition-colors disabled:opacity-50 ${
+                      index % 2 === 0
+                        ? "bg-mint hover:brightness-95"
+                        : "bg-honey hover:brightness-95"
+                    }`}
+                  >
+                    {suggestion}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {messages.map((message) => (
           <div
@@ -152,7 +194,7 @@ export default function AssistantChat({ initialRemaining, limit }: AssistantChat
           </p>
         )}
         {error && (
-          <p role="alert" className="self-start rounded-lg bg-danger-fill px-3 py-2 text-sm text-danger-text">
+          <p role="alert" className="self-start rounded-lg bg-danger-fill px-3 py-2 text-sm text-on-accent">
             {error}
           </p>
         )}

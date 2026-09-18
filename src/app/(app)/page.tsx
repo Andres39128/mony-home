@@ -83,16 +83,16 @@ function drillQuery(
   return next.toString();
 }
 
-/** Colored money chip: pastel fill + ink/danger text, legible on both themes. */
-const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-ink";
-const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text";
+/** Colored money chip: pastel fill + constant on-accent text, legible on both themes. */
+const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-on-accent";
+const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-on-accent";
 
 /** Hero emphasis shares the chip language at display size (no size classes here). */
 function balanceHeroClass(balanceCents: number): string {
   return balanceCents > 0
-    ? "bg-honey text-ink"
+    ? "bg-honey text-on-accent"
     : balanceCents < 0
-      ? "bg-danger-fill text-danger-text"
+      ? "bg-danger-fill text-on-accent"
       : "text-ink";
 }
 
@@ -367,7 +367,7 @@ export default async function DashboardPage({
         <Link
           href="/ahorro"
           data-tour="dashboard-patrimonio"
-          className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey/40 p-5 shadow-sm transition-colors hover:bg-honey/60"
+          className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey-soft p-5 shadow-sm transition-colors hover:brightness-95"
         >
           <h2 className="text-sm font-medium text-ink">
             Patrimonio

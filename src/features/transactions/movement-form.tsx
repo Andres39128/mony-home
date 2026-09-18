@@ -445,7 +445,7 @@ export default function MovementForm({
       {mode === "create" && state.ok && (
         <p
           role="status"
-          className="rounded-lg bg-sage px-3 py-2 text-sm text-ink"
+          className="rounded-lg bg-sage px-3 py-2 text-sm text-on-accent"
         >
           Movimiento guardado.
         </p>

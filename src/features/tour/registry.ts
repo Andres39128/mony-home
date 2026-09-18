@@ -190,7 +190,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "bolsas-editar",
       title: "Editar una bolsa (admin)",
       description:
-        "Clic en \"Editar\" para desplegar el formulario de edición: nombre, monto mensual, tipo e integrante.",
+        "Tocá el lápiz en una bolsa para abrir el formulario de edición: nombre, monto mensual, tipo e integrante.",
     },
     {
       id: "bolsas-crear",
@@ -235,7 +235,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "integrantes-editar",
       title: "Editar o desactivar (admin)",
       description:
-        "Clic en \"Editar\" para desplegar el formulario. Si el integrante tiene movimientos no se puede borrar: desactivarlo para que deje de usar el sistema.",
+        "Tocá el lápiz para editar nombre, rol o contraseña. Si el integrante tiene movimientos no se puede borrar: desactivarlo para que deje de usar el sistema.",
     },
   ],
   "/categorias": [
@@ -251,7 +251,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "categorias-editar",
       title: "Editar una categoría (admin)",
       description:
-        "Clic en \"Editar\" para desplegar el formulario. Si la categoría ya tiene movimientos no se puede borrar: desactivarla para ocultarla de los formularios.",
+        "Tocá el lápiz para editar nombre, color o ícono. Si la categoría ya tiene movimientos no se puede borrar: desactivarla para ocultarla de los formularios.",
     },
   ],
   "/grupos": [
@@ -267,7 +267,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "grupos-lista",
       title: "Grupos del hogar",
       description:
-        "Cada grupo suma sus movimientos. Clic en \"Editar\" para cambiar nombre, estado o cerrarlo; el borrado está protegido si ya tiene movimientos.",
+        "Cada grupo suma sus movimientos. Tocá el lápiz para cambiar nombre o cerrarlo; el borrado está protegido si ya tiene movimientos.",
     },
   ],
 };

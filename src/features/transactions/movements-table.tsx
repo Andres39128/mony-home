@@ -29,14 +29,14 @@ function shortDate(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 }
 
-/** Colored amount chip classes: pastel fill, legible ink/danger text. */
+/** Colored amount chip classes: per-theme soft tint, legible ink/danger text. */
 function amountChipClass(type: TransactionView["type"]): string {
-  return type === "income" ? "bg-sage/40 text-ink" : "bg-danger-fill/50 text-danger-text";
+  return type === "income" ? "bg-sage-soft text-ink" : "bg-danger-soft text-danger-text";
 }
 
 /** Scope chip: Común → mint, Individual → honey (constant across themes). */
 function scopeChipClass(scope: TransactionView["scope"]): string {
-  return scope === "individual" ? "bg-honey text-ink" : "bg-mint text-ink";
+  return scope === "individual" ? "bg-honey text-on-accent" : "bg-mint text-on-accent";
 }
 
 /**
@@ -82,7 +82,7 @@ function RowActions({
           disabled={deletePending}
           aria-label="Borrar movimiento"
           title="Borrar"
-          className="inline-flex size-11 items-center justify-center rounded-lg text-danger-text transition-colors hover:bg-danger-fill/50 disabled:opacity-50"
+          className="inline-flex size-11 items-center justify-center rounded-lg text-danger-text transition-colors hover:bg-danger-soft disabled:opacity-50"
         >
           <TrashIcon className="size-5" />
         </button>

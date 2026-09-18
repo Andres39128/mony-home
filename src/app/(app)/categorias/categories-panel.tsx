@@ -1,18 +1,21 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { CategoryView } from "@/features/categories/service";
 import type { FormState } from "@/lib/form-state";
 import { FALLBACK_COLOR } from "@/features/analytics/transform";
 import {
   ActiveBadge,
-  EditDetails,
+  CreateTrigger,
   FieldError,
   FormError,
+  IconDeleteButton,
+  IconEditButton,
   OkMessage,
   SubmitButton,
   inputClass,
 } from "@/components/forms";
+import { Sheet } from "@/components/sheet";
 
 type CategoryAction = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -97,48 +100,37 @@ function CategoryFields({ state, category }: { state: FormState; category?: Cate
   );
 }
 
+/** Rendered inside the create Sheet: field names and action are unchanged. */
 function CreateCategoryForm({ action }: { action: CategoryAction }) {
   const [state, formAction, pending] = useActionState(action, {});
   return (
-    <form
-      action={formAction}
-      data-tour="categorias-crear"
-      className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
-    >
-      <h2 className="font-semibold text-ink">Nueva categoría</h2>
+    <form action={formAction} className="flex flex-col gap-4">
       <CategoryFields state={state} />
       <FormError state={state} />
+      <OkMessage state={state} text="Categoría creada." />
       <SubmitButton pending={pending}>Crear categoría</SubmitButton>
     </form>
   );
 }
 
+/**
+ * Rendered inside the single edit Sheet: update + activate/deactivate forms
+ * keep their exact field names and server actions. Delete lives on the row.
+ */
 function EditCategoryForm({
   category,
   updateAction,
   toggleAction,
-  deleteAction,
 }: {
   category: CategoryView;
   updateAction: CategoryAction;
   toggleAction: CategoryAction;
-  deleteAction: CategoryAction;
 }) {
   const [state, formAction, pending] = useActionState(updateAction, {});
   const [toggleState, toggleFormAction, togglePending] = useActionState(toggleAction, {});
-  const [deleteState, deleteFormAction, deletePending] = useActionState(deleteAction, {});
 
   return (
-    <EditDetails
-      summary={
-        <>
-          <NameIcon category={category} />
-          <span className="ml-auto">
-            <ActiveBadge active={category.isActive} />
-          </span>
-        </>
-      }
-    >
+    <div className="flex flex-col gap-4">
       <form action={formAction} className="flex flex-col gap-4">
         <input type="hidden" name="id" value={category.id} />
         <CategoryFields state={state} category={category} />
@@ -146,24 +138,14 @@ function EditCategoryForm({
         <OkMessage state={state} />
         <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
       </form>
-      <div className="flex flex-wrap items-start gap-3 border-t border-line pt-4">
-        <form action={toggleFormAction} className="flex flex-col gap-2">
-          <input type="hidden" name="id" value={category.id} />
-          <FormError state={toggleState} />
-          <SubmitButton pending={togglePending} variant="secondary">
-            {category.isActive ? "Desactivar" : "Activar"}
-          </SubmitButton>
-        </form>
-        <form action={deleteFormAction} className="flex flex-col gap-2">
-          <input type="hidden" name="id" value={category.id} />
-          <FormError state={deleteState} />
-          <OkMessage state={deleteState} text="Categoría eliminada." />
-          <SubmitButton pending={deletePending} variant="danger">
-            Eliminar
-          </SubmitButton>
-        </form>
-      </div>
-    </EditDetails>
+      <form action={toggleFormAction} className="flex flex-col gap-2 border-t border-line pt-4">
+        <input type="hidden" name="id" value={category.id} />
+        <FormError state={toggleState} />
+        <SubmitButton pending={togglePending} variant="secondary">
+          {category.isActive ? "Desactivar" : "Activar"}
+        </SubmitButton>
+      </form>
+    </div>
   );
 }
 
@@ -175,8 +157,24 @@ export default function CategoriesPanel({
   toggleAction,
   deleteAction,
 }: Props) {
+  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteState, deleteFormAction, deletePending] = useActionState(deleteAction, {});
+  const editing = categories.find((category) => category.id === editingId) ?? null;
+
   return (
     <div className="flex flex-col gap-8">
+      {isAdmin && (
+        <CreateTrigger
+          label="Nueva categoría"
+          tourId="categorias-crear"
+          onClick={() => setCreating(true)}
+        />
+      )}
+
+      <FormError state={deleteState} />
+      <OkMessage state={deleteState} text="Categoría eliminada." />
+
       {SECTIONS.map((section, sectionIndex) => {
         const items = categories.filter((c) => c.kind === section.kind);
         return (
@@ -193,35 +191,60 @@ export default function CategoriesPanel({
                 data-tour={sectionIndex === 0 ? "categorias-editar" : undefined}
                 className="flex flex-col gap-2"
               >
-                {items.map((category) =>
-                  isAdmin ? (
-                    <li key={category.id}>
-                      <EditCategoryForm
-                        category={category}
-                        updateAction={updateAction}
-                        toggleAction={toggleAction}
-                        deleteAction={deleteAction}
-                      />
-                    </li>
-                  ) : (
-                    <li
-                      key={category.id}
-                      className={`flex items-center justify-between gap-2 rounded-2xl border border-line bg-surface px-6 py-4 text-sm shadow-sm ${
-                        category.isActive ? "" : "opacity-60"
-                      }`}
-                    >
+                {items.map((category) => (
+                  <li
+                    key={category.id}
+                    className={`flex flex-col gap-1 rounded-2xl border border-line bg-surface px-6 py-4 text-sm shadow-sm ${
+                      category.isActive ? "" : "opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
                       <NameIcon category={category} />
                       <ActiveBadge active={category.isActive} />
-                    </li>
-                  ),
-                )}
+                    </div>
+                    {isAdmin && (
+                      <div className="flex justify-end gap-1 border-t border-line pt-1">
+                        <IconEditButton
+                          label={`Editar ${category.name}`}
+                          onClick={() => setEditingId(category.id)}
+                        />
+                        <IconDeleteButton
+                          label={`Eliminar ${category.name}`}
+                          confirm={`¿Eliminar la categoría "${category.name}"?`}
+                          id={category.id}
+                          formAction={deleteFormAction}
+                          pending={deletePending}
+                        />
+                      </div>
+                    )}
+                  </li>
+                ))}
               </ul>
             )}
           </div>
         );
       })}
 
-      {isAdmin && <CreateCategoryForm action={createAction} />}
+      {isAdmin && (
+        <>
+          <Sheet open={creating} onClose={() => setCreating(false)} title="Nueva categoría">
+            <CreateCategoryForm action={createAction} />
+          </Sheet>
+          <Sheet
+            open={editing !== null}
+            onClose={() => setEditingId(null)}
+            title="Editar categoría"
+          >
+            {editing && (
+              <EditCategoryForm
+                category={editing}
+                updateAction={updateAction}
+                toggleAction={toggleAction}
+              />
+            )}
+          </Sheet>
+        </>
+      )}
     </div>
   );
 }

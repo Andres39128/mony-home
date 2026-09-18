@@ -47,9 +47,9 @@ function hrefWith(params: Params, overrides: Record<string, string | null>): str
 }
 
 /** Colored money chips: pastel fill + ink/danger text, legible on both themes. */
-const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-ink";
-const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text";
-const CHIP_WEALTH = "w-fit rounded-lg bg-honey px-2 py-0.5 text-ink";
+const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-on-accent";
+const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-on-accent";
+const CHIP_WEALTH = "w-fit rounded-lg bg-honey px-2 py-0.5 text-on-accent";
 
 export default async function MovimientosPage({
   searchParams,

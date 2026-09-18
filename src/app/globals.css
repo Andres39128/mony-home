@@ -10,12 +10,20 @@
   --ink: #1a2530;
   --muted: #4a5a68;
   --line: #e5dfd2;
-  /* Accent pastels are constant in both themes; ink text sits on top. */
+  /* Accent pastels are constant in both themes. Text on SOLID pastels always
+     uses --on-accent (constant dark navy): pastel + inverted ink text was
+     unreadable in dark mode. --{accent}-soft are per-theme tints for places
+     that used translucent pastels, so normal ink text keeps passing. */
   --mint: #a8dadc;
   --honey: #ffe5a3;
   --sage: #c7e9c0;
   --danger-fill: #f6cfc9;
   --danger-text: #8c3b34;
+  --on-accent: #1a2530;
+  --mint-soft: #e3f1f2;
+  --honey-soft: #fbf0d4;
+  --sage-soft: #e8f4e7;
+  --danger-soft: #f9e6e2;
 }
 
 .dark {
@@ -24,6 +32,12 @@
   --ink: #edeae0;
   --muted: #9aa8b5;
   --line: #2a3a48;
+  /* Constant dark red #8c3b34 fails on dark backgrounds: invert it. */
+  --danger-text: #e8b4ac;
+  --mint-soft: #24444a;
+  --honey-soft: #4a4028;
+  --sage-soft: #2a4234;
+  --danger-soft: #4a2e2b;
 }
 
 @theme inline {
@@ -37,6 +51,11 @@
   --color-sage: var(--sage);
   --color-danger-fill: var(--danger-fill);
   --color-danger-text: var(--danger-text);
+  --color-on-accent: var(--on-accent);
+  --color-mint-soft: var(--mint-soft);
+  --color-honey-soft: var(--honey-soft);
+  --color-sage-soft: var(--sage-soft);
+  --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

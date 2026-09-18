@@ -76,7 +76,7 @@ export function BottomNav() {
                 >
                   <span
                     className={`flex size-8 items-center justify-center rounded-full ${
-                      active ? "bg-mint/50 text-ink" : "text-muted"
+                      active ? "bg-mint-soft text-ink" : "text-muted"
                     }`}
                   >
                     <Icon className="size-6" />
