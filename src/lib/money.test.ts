@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsToNumber, formatCents, MoneyParseError, parseAmountToCents, percentage } from "@/lib/money";
+import { centsToNumber, formatCents, formatCentsCompact, MoneyParseError, parseAmountToCents, percentage } from "@/lib/money";
 
 describe("parseAmountToCents", () => {
   it("parses plain integers", () => {
@@ -103,6 +103,15 @@ describe("formatCents", () => {
       10,
     );
     expect(formatCents(1000, "USD")).toBe(expected);
+  });
+});
+
+describe("formatCentsCompact", () => {
+  it("abbreviates for chart axes without losing zero", () => {
+    expect(formatCentsCompact(0)).toBe("0");
+    // ICU may render the number/suffix gap as a NBSP; tolerate any whitespace.
+    expect(formatCentsCompact(1_540_000)).toMatch(/^15,4\s?k$/u);
+    expect(formatCentsCompact(250_000_000)).toMatch(/^2,5\s?M$/u);
   });
 });
 

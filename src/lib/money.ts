@@ -123,6 +123,17 @@ export function formatCents(cents: number, currency = "ARS"): string {
   );
 }
 
+/**
+ * Compact abbreviation for chart axes only (never for real amounts):
+ * 1_540_000 cents → '15,4 k'. Exact values always go through formatCents.
+ */
+export function formatCentsCompact(cents: number): string {
+  return new Intl.NumberFormat("es-AR", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(centsToNumber(cents));
+}
+
 /** Percentage of `part` over `total`, rounded to 2 decimals; 0 when total <= 0. */
 export function percentage(part: number, total: number): number {
   if (total <= 0) return 0;
