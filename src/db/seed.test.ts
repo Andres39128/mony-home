@@ -53,7 +53,7 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users.map((u) => u.username).sort()).toEqual(["admin", "andres", "maria"]);
-    expect(counts.categories).toHaveLength(13);
+    expect(counts.categories).toHaveLength(15);
     expect(counts.envelopes).toHaveLength(2);
     expect(counts.groups).toHaveLength(1);
     expect(counts.transactions).toHaveLength(8);
@@ -68,7 +68,7 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(3);
-    expect(counts.categories).toHaveLength(13);
+    expect(counts.categories).toHaveLength(15);
     expect(counts.envelopes).toHaveLength(2);
     expect(counts.groups).toHaveLength(1);
     expect(counts.transactions).toHaveLength(8);
@@ -84,7 +84,7 @@ describe("seedDatabase", () => {
     expect(counts.users).toHaveLength(1);
     expect(counts.users[0]?.username).toBe("admin");
     expect(counts.users[0]?.role).toBe("admin");
-    expect(counts.categories).toHaveLength(13);
+    expect(counts.categories).toHaveLength(15);
     expect(counts.envelopes).toHaveLength(0);
     expect(counts.groups).toHaveLength(0);
     expect(counts.transactions).toHaveLength(0);
@@ -99,6 +99,6 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(1);
-    expect(counts.categories).toHaveLength(13);
+    expect(counts.categories).toHaveLength(15);
   });
 });

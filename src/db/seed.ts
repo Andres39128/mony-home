@@ -38,6 +38,9 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     .onConflictDoNothing();
 
   // --- Categories (always; name is unique; conflicts skipped) ---
+  // The last two are SYSTEM categories: the savings mirror writes them from
+  // contribute() — deposits charge "Ahorro e inversión" (expense), withdrawals
+  // credit "Recupero de ahorro" (income). Production mode needs them too.
   const expenseCategories = [
     ["Luz", "#f59e0b"],
     ["Agua", "#38bdf8"],
@@ -50,10 +53,12 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     ["Educación", "#60a5fa"],
     ["Alquiler", "#94a3b8"],
     ["Otros gastos", "#64748b"],
+    ["Ahorro e inversión", "#0ea5e9"],
   ] as const;
   const incomeCategories = [
     ["Sueldo", "#22c55e"],
     ["Otros ingresos", "#4ade80"],
+    ["Recupero de ahorro", "#14b8a6"],
   ] as const;
 
   await db
@@ -260,6 +265,9 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
         scope: "common",
         currentValueCents: 165000,
         valueUpdatedAt: now,
+        institution: "Banco Nación",
+        // 70% TNA: the demo shows the yield feature from day one.
+        annualRateBp: 7000,
       })
       .returning();
     await db.insert(savingsContributions).values([

@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -33,7 +34,7 @@ export const transactionTypeEnum = pgEnum("transaction_type", ["income", "expens
 export const scopeKindEnum = pgEnum("scope_kind", ["individual", "common"]);
 export const groupStatusEnum = pgEnum("group_status", ["active", "closed"]);
 export const savingsKindEnum = pgEnum("savings_kind", ["savings", "investment"]);
-export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "withdrawal"]);
+export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "withdrawal", "interest"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -117,6 +118,10 @@ export const transactions = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     envelopeId: uuid("envelope_id").references(() => envelopes.id, { onDelete: "restrict" }),
     groupId: uuid("group_id").references(() => expenseGroups.id, { onDelete: "set null" }),
+    /** Set on mirror rows: the savings contribution that generated this movement. */
+    savingsContributionId: uuid("savings_contribution_id").references(() => savingsContributions.id, {
+      onDelete: "cascade",
+    }),
     scope: scopeKindEnum("scope").notNull().default("common"),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -129,6 +134,7 @@ export const transactions = pgTable(
     index("transactions_member_id_idx").on(table.memberId),
     index("transactions_envelope_id_idx").on(table.envelopeId),
     index("transactions_group_id_idx").on(table.groupId),
+    index("transactions_savings_contribution_id_idx").on(table.savingsContributionId),
   ],
 );
 
@@ -174,8 +180,8 @@ export const budgets = pgTable(
  * Savings goals and investments. A savings goal ('savings') is a cumulative
  * pool with optional target/deadline; an investment ('investment') tracks a
  * manually updated current value. Contributions live in the SEPARATE
- * savings_contributions ledger — saving is neither income nor expense and
- * must never pollute those stats.
+ * savings_contributions ledger; deposit/withdrawal mirror into `transactions`
+ * (income/expense) so household stats reflect the real money flow.
  */
 export const savingsGoals = pgTable(
   "savings_goals",
@@ -192,6 +198,10 @@ export const savingsGoals = pgTable(
     /** Investments only: last manually-set valuation; null = never updated. */
     currentValueCents: bigint("current_value_cents", { mode: "number" }),
     valueUpdatedAt: timestamp("value_updated_at", { withTimezone: true }),
+    /** Where the money is held (banco, billetera, fondo…); free text, optional. */
+    institution: text("institution"),
+    /** Annual nominal rate (TNA) in basis points; null = no yield. 0..100000 = 0..1000%. */
+    annualRateBp: integer("annual_rate_bp"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -208,12 +218,19 @@ export const savingsGoals = pgTable(
       "savings_goals_current_value_non_negative",
       sql`${table.currentValueCents} IS NULL OR ${table.currentValueCents} >= 0`,
     ),
+    check(
+      "savings_goals_annual_rate_bp_bounds",
+      sql`${table.annualRateBp} IS NULL OR (${table.annualRateBp} >= 0 AND ${table.annualRateBp} <= 100000)`,
+    ),
   ],
 );
 
 /**
  * Contributions ledger: deposits add to a goal's net accumulation,
- * withdrawals subtract (emergency funds get used). Not a `transactions` row.
+ * withdrawals subtract (emergency funds get used), 'interest' rows are the
+ * visible monthly yield entries written by the accrual engine (member-less).
+ * Not a `transactions` row by itself — deposit/withdrawal get a MIRROR row
+ * in `transactions` so income/expense stats reflect real money flow.
  */
 export const savingsContributions = pgTable(
   "savings_contributions",
@@ -222,9 +239,8 @@ export const savingsContributions = pgTable(
     goalId: uuid("goal_id")
       .notNull()
       .references(() => savingsGoals.id, { onDelete: "restrict" }),
-    memberId: uuid("member_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    /** null exactly for 'interest' rows — yield belongs to the pool, not a member. */
+    memberId: uuid("member_id").references(() => users.id, { onDelete: "restrict" }),
     kind: contributionKindEnum("kind").notNull(),
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     date: date("date", { mode: "string" }).notNull().default(sql`CURRENT_DATE`),
@@ -232,7 +248,22 @@ export const savingsContributions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check("savings_contributions_amount_positive", sql`${table.amountCents} > 0`),
+    // Deposits/withdrawals are positive; interest is signed (a valuation
+    // true-up that LOSES value records a negative interest entry).
+    check(
+      "savings_contributions_amount_positive",
+      sql`(${table.kind} = 'interest' AND ${table.amountCents} <> 0) OR ${table.amountCents} > 0`,
+    ),
+    // 'interest' ⇔ member IS NULL: deposits/withdrawals always name a member.
+    check(
+      "savings_contributions_interest_member_exclusive",
+      sql`(${table.kind} = 'interest') = (${table.memberId} IS NULL)`,
+    ),
+    // One interest entry per goal/month/cause — makes lazy concurrent
+    // catch-ups idempotent even when two requests race on the same view.
+    uniqueIndex("savings_contributions_interest_unique")
+      .on(table.goalId, table.date, table.note)
+      .where(sql`${table.kind} = 'interest'`),
     index("savings_contributions_goal_date_idx").on(table.goalId, table.date),
   ],
 );
