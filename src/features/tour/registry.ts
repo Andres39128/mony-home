@@ -38,6 +38,13 @@ export const TOUR_LABELS = {
 export const TOURS: Record<string, readonly TourStep[]> = {
   "/": [
     {
+      id: "dashboard-filtros",
+      element: "dashboard-filtros",
+      title: "Filtros",
+      description:
+        "Elegí mes, ámbito, integrante, categoría, bolsa o grupo. Todo lo que ves abajo se recalcula con estos filtros.",
+    },
+    {
       id: "dashboard-kpis",
       element: "dashboard-kpis",
       title: "Resumen del mes",
@@ -45,11 +52,18 @@ export const TOURS: Record<string, readonly TourStep[]> = {
         "Ingresos, gastos, saldo y porcentaje del presupuesto ejecutado. La barra del presupuesto muestra cuánto llevás gastado del total planificado.",
     },
     {
-      id: "dashboard-filtros",
-      element: "dashboard-filtros",
-      title: "Filtros",
+      id: "dashboard-patrimonio",
+      element: "dashboard-patrimonio",
+      title: "Patrimonio",
       description:
-        "Elegí mes, ámbito, integrante, categoría, bolsa o grupo. Todo lo que ves abajo se recalcula con estos filtros.",
+        "Lo que tenés ahorrado e invertido en total. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Ahorro.",
+    },
+    {
+      id: "dashboard-bolsas",
+      element: "dashboard-bolsas",
+      title: "Bolsas del mes",
+      description:
+        "Avance de cada bolsa del hogar. Hacé clic en una bolsa para ver sus movimientos de este mes.",
     },
     {
       id: "dashboard-donut",
@@ -72,20 +86,6 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       description:
         "Líneas del año: cuánto estaba presupuestado acumulado vs cuánto se gastó realmente, mes a mes.",
     },
-    {
-      id: "dashboard-bolsas",
-      element: "dashboard-bolsas",
-      title: "Bolsas del mes",
-      description:
-        "Avance de cada bolsa del hogar. Hacé clic en una bolsa para ver sus movimientos de este mes.",
-    },
-    {
-      id: "dashboard-patrimonio",
-      element: "dashboard-patrimonio",
-      title: "Patrimonio",
-      description:
-        "Lo que tenés ahorrado e invertido en total. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Ahorro.",
-    },
   ],
   "/ahorro": [
     {
@@ -93,14 +93,14 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "ahorro-patrimonio",
       title: "Patrimonio",
       description:
-        "Total ahorrado del hogar, dividido en metas de ahorro e inversiones. Los aportes no son gastos ni ingresos: viven aparte de los movimientos.",
+        "Total ahorrado del hogar, dividido en metas de ahorro e inversiones. Cada aporte o retiro también genera un movimiento: los depósitos salen de tu saldo y los retiros lo reintegran.",
     },
     {
       id: "ahorro-metas",
       element: "ahorro-metas",
       title: "Metas e inversiones",
       description:
-        "Una meta acumula plata (con objetivo y plazo opcionales); una inversión guarda además su valor actual y el retorno respecto de lo invertido.",
+        "Una meta acumula plata (con objetivo y plazo opcionales); una inversión guarda además su valor actual y el retorno respecto de lo invertido. Las metas con TNA generan intereses automáticamente cada mes, visibles en el historial.",
     },
     {
       id: "ahorro-aporte",

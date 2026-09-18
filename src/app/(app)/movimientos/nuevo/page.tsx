@@ -2,13 +2,17 @@ import Link from "next/link";
 import { requireUser } from "@/features/auth/session";
 import { todayIso } from "@/features/transactions/service";
 import { movementFormOptions } from "@/features/transactions/form-options";
-import { createCategoryInlineAction, createMovementAction } from "@/features/transactions/actions";
+import {
+  createCategoryInlineAction,
+  createMovementAndRedirectAction,
+} from "@/features/transactions/actions";
 import MovementForm from "@/features/transactions/movement-form";
 
 /**
  * No-JS fallback for quick entry: the same MovementForm, rendered full-page.
- * The dialog on /movimientos is the primary path; this route keeps entry
- * working (progressive enhancement) without client JavaScript.
+ * The sheet on /movimientos is the primary path; this route keeps entry
+ * working (progressive enhancement) without client JavaScript, redirecting
+ * back to the list after a successful save.
  */
 export default async function NuevoMovimientoPage() {
   const user = await requireUser();
@@ -28,8 +32,8 @@ export default async function NuevoMovimientoPage() {
           groups={options.groups}
           currentUser={user}
           serverToday={todayIso()}
-          createAction={createMovementAction}
-          updateAction={createMovementAction}
+          createAction={createMovementAndRedirectAction}
+          updateAction={createMovementAndRedirectAction}
           createCategoryAction={createCategoryInlineAction}
         />
       </div>

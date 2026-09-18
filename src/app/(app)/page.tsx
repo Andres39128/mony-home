@@ -7,6 +7,7 @@ import {
   type TransactionFilters,
 } from "@/features/transactions/service";
 import { movementFormOptions } from "@/features/transactions/form-options";
+import { monthLabel, shiftMonth } from "@/features/transactions/month-nav";
 import {
   DEFAULT_MONTHS_BACK,
   cumulativeBudgetVsActual,
@@ -27,16 +28,47 @@ import { monthBounds, computeProgress } from "@/features/budgets/progress";
 import { getMonth } from "@/features/budgets/service";
 import { monthlyProgress } from "@/features/envelopes/service";
 import { getPatrimony } from "@/features/savings/service";
+import NewMovementFab, {
+  QUICK_TILE_CLASS,
+} from "@/features/transactions/new-movement-fab";
+import {
+  createCategoryInlineAction,
+  createMovementAction,
+} from "@/features/transactions/actions";
 import { formatCents } from "@/lib/money";
+import FiltersSheet, { type ActiveFilter } from "@/components/filters-sheet";
 import { Card } from "@/components/card";
 import { ProgressBar } from "@/components/progress";
 import { inputClass } from "@/components/forms";
+import {
+  ChartIcon,
+  ChevronDownIcon,
+  PouchIcon,
+  SparklesIcon,
+} from "@/components/icons";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
-function singleParam(params: Record<string, string | string[] | undefined>, key: string) {
+type Params = Awaited<SearchParams>;
+
+function singleParam(params: Params, key: string) {
   const value = params[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** URL of "/" with the same params, overriding/dropping some. */
+function hrefWith(params: Params, overrides: Record<string, string | null>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key in overrides) continue;
+    if (typeof value === "string" && value) query.set(key, value);
+    else if (Array.isArray(value)) for (const item of value) if (item) query.append(key, item);
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value) query.set(key, value);
+  }
+  const qs = query.toString();
+  return qs ? `/?${qs}` : "/";
 }
 
 /** Active filters as a query string, dropping/overriding keys per chart. */
@@ -54,21 +86,31 @@ function drillQuery(
 /** Colored money chip: pastel fill + ink/danger text, legible on both themes. */
 const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-ink";
 const CHIP_EXPENSE = "w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-danger-text";
-const CHIP_WEALTH = "w-fit rounded-lg bg-honey px-2 py-0.5 text-ink";
+
+/** Hero emphasis shares the chip language at display size (no size classes here). */
+function balanceHeroClass(balanceCents: number): string {
+  return balanceCents > 0
+    ? "bg-honey text-ink"
+    : balanceCents < 0
+      ? "bg-danger-fill text-danger-text"
+      : "text-ink";
+}
 
 function KpiCard({
   title,
   value,
   valueClass = "text-ink",
+  className,
   children,
 }: {
   title: string;
   value: string;
   valueClass?: string;
+  className?: string;
   children?: React.ReactNode;
 }) {
   return (
-    <Card className="p-5">
+    <Card className={`p-5 ${className ?? ""}`}>
       <h2 className="text-sm font-medium text-muted">{title}</h2>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
       {children}
@@ -111,7 +153,7 @@ export default async function DashboardPage({
   searchParams: SearchParams;
 }) {
   // Route guard: /login without a valid session.
-  await requireUser();
+  const user = await requireUser();
   const params = await searchParams;
   const today = todayIso();
 
@@ -155,6 +197,48 @@ export default async function DashboardPage({
   const budgetTotals = budgetMonth?.totals ?? { plannedCents: 0, spentCents: 0, pct: 0 };
   const budgetProgress = computeProgress(budgetTotals.plannedCents, budgetTotals.spentCents);
 
+  // Removable chips: one per set filter, each linking to the URL minus it.
+  const activeFilters: ActiveFilter[] = [];
+  if (filters.scope) {
+    activeFilters.push({
+      param: "scope",
+      label: `Ámbito: ${filters.scope === "individual" ? "Individual" : "Común"}`,
+      href: hrefWith(params, { scope: null }),
+    });
+  }
+  const member = options.members.find((item) => item.id === filters.memberId);
+  if (member) {
+    activeFilters.push({
+      param: "memberId",
+      label: `Integrante: ${member.name}`,
+      href: hrefWith(params, { memberId: null }),
+    });
+  }
+  const category = options.categories.find((item) => item.id === filters.categoryId);
+  if (category) {
+    activeFilters.push({
+      param: "categoryId",
+      label: `Categoría: ${category.name}`,
+      href: hrefWith(params, { categoryId: null }),
+    });
+  }
+  const envelope = options.envelopes.find((item) => item.id === filters.envelopeId);
+  if (envelope) {
+    activeFilters.push({
+      param: "envelopeId",
+      label: `Bolsa: ${envelope.name}`,
+      href: hrefWith(params, { envelopeId: null }),
+    });
+  }
+  const group = options.groups.find((item) => item.id === filters.groupId);
+  if (group) {
+    activeFilters.push({
+      param: "groupId",
+      label: `Grupo: ${group.name}`,
+      href: hrefWith(params, { groupId: null }),
+    });
+  }
+
   // Donut drill: the slice's category replaces any current one; all other
   // active filters ride along (the slice was computed under them).
   const donutQuery = drillQuery(baseParams, ["categoryId"], { month });
@@ -164,25 +248,21 @@ export default async function DashboardPage({
   const envelopeHref = (envelopeId: string) =>
     `/movimientos?${drillQuery(baseParams, ["envelopeId"], { month, envelopeId })}`;
 
-  const balanceClass =
-    totals.balanceCents > 0
-      ? CHIP_WEALTH
-      : totals.balanceCents < 0
-        ? CHIP_EXPENSE
-        : "text-ink";
-
   return (
     <section className="flex flex-col gap-6">
       <h1 className="text-2xl font-semibold tracking-tight text-ink">
         Dashboard
       </h1>
 
-      {/* Shareable, no-JS filters: a plain GET form over the search params. */}
-      <form
-        method="get"
+      {/* Shareable, no-JS filters: compact bar (month stepper + sheet) over the
+          same GET params the old filter wall used. */}
+      <FiltersSheet
         action="/"
-        data-tour="dashboard-filtros"
-        className="grid items-end gap-3 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7"
+        tourId="dashboard-filtros"
+        monthLabel={monthLabel(month)}
+        prevMonthHref={hrefWith(params, { month: shiftMonth(month, -1) })}
+        nextMonthHref={hrefWith(params, { month: shiftMonth(month, 1) })}
+        activeFilters={activeFilters}
       >
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-muted">Mes</span>
@@ -242,128 +322,166 @@ export default async function DashboardPage({
             ))}
           </select>
         </label>
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
-          >
-            Filtrar
-          </button>
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center text-sm text-muted underline-offset-2 hover:underline"
-          >
-            Limpiar
-          </Link>
-        </div>
-      </form>
+      </FiltersSheet>
 
-      <div data-tour="dashboard-kpis" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          title="Ingresos"
-          value={formatCents(totals.incomeCents)}
-          valueClass={CHIP_INCOME}
-        />
-        <KpiCard
-          title="Gastos"
-          value={formatCents(totals.expenseCents)}
-          valueClass={CHIP_EXPENSE}
-        />
-        <KpiCard title="Saldo" value={formatCents(totals.balanceCents)} valueClass={balanceClass} />
-        <KpiCard
-          title="Presupuesto ejecutado"
-          value={`${budgetTotals.pct}%`}
-          valueClass={budgetProgress.status === "over" ? CHIP_EXPENSE : "text-ink"}
-        >
-          <div className="mt-2">
-            <ProgressBar pct={budgetProgress.pct} status={budgetProgress.status} />
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            de {formatCents(budgetTotals.plannedCents)} planificados
+      {/* KPI strip: the period's net balance leads as the hero figure; below
+          it the income/expense/budget row and the patrimony link. */}
+      <div data-tour="dashboard-kpis" className="flex flex-col gap-4">
+        <Card className="p-5">
+          <h2 className="text-sm font-medium text-muted">Saldo del período</h2>
+          <p
+            className={`mt-2 inline-block rounded-xl px-3 py-1 text-3xl font-semibold tabular-nums sm:text-4xl ${balanceHeroClass(totals.balanceCents)}`}
+          >
+            {formatCents(totals.balanceCents)}
           </p>
-        </KpiCard>
-      </div>
+        </Card>
 
-      {/* Visually distinct strip (outside the KPI grid): money that is saved,
-          not spent — fed by the savings ledger, never the movements stats. */}
-      <Link
-        href="/ahorro"
-        data-tour="dashboard-patrimonio"
-        className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey/40 p-5 shadow-sm transition-colors hover:bg-honey/60"
-      >
-        <h2 className="text-sm font-medium text-ink">
-          Patrimonio
-        </h2>
-        <p className="text-2xl font-semibold tabular-nums text-ink">
-          {formatCents(patrimony.totalCents)}
-        </p>
-        <p className="text-sm text-ink">
-          Ahorro {formatCents(patrimony.savingsCents)} · Inversión{" "}
-          {formatCents(patrimony.investmentsCents)}
-        </p>
-      </Link>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard
-          title="Gastos por categoría"
-          tourId="dashboard-donut"
-          emptyMessage={donutData.length === 0 ? "Sin gastos en el período" : null}
-        >
-          <CategoryDonut
-            slices={donutData}
-            totalCents={donutData.reduce((total, slice) => total + slice.cents, 0)}
-            drillQuery={donutQuery}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+          <KpiCard
+            title="Ingresos"
+            value={formatCents(totals.incomeCents)}
+            valueClass={CHIP_INCOME}
           />
-        </ChartCard>
+          <KpiCard
+            title="Gastos"
+            value={formatCents(totals.expenseCents)}
+            valueClass={CHIP_EXPENSE}
+          />
+          <KpiCard
+            className="col-span-2 lg:col-span-1"
+            title="Presupuesto ejecutado"
+            value={`${budgetTotals.pct}%`}
+            valueClass={budgetProgress.status === "over" ? CHIP_EXPENSE : "text-ink"}
+          >
+            <div className="mt-2">
+              <ProgressBar pct={budgetProgress.pct} status={budgetProgress.status} />
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              de {formatCents(budgetTotals.plannedCents)} planificados
+            </p>
+          </KpiCard>
+        </div>
 
-        <ChartCard
-          title="Ingresos vs Gastos · últimos 12 meses"
-          tourId="dashboard-barras"
-          emptyMessage={hasFlowData(barsData) ? null : "Sin datos en el período"}
+        {/* Visually distinct strip: money that is saved, not spent — fed by
+            the savings ledger, never the movements stats. */}
+        <Link
+          href="/ahorro"
+          data-tour="dashboard-patrimonio"
+          className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey/40 p-5 shadow-sm transition-colors hover:bg-honey/60"
         >
-          <MonthlyBars data={barsData} drillQuery={barsQuery} />
-        </ChartCard>
-
-        <ChartCard
-          wide
-          title={`Presupuesto acumulado vs gasto acumulado · ${month.slice(0, 4)}`}
-          tourId="dashboard-acumulado"
-          emptyMessage={hasCumulativeData(linesData) ? null : "Sin datos en el período"}
-        >
-          <BudgetLines data={linesData} />
-        </ChartCard>
-
-        <ChartCard
-          wide
-          title={`Bolsas de ${month}`}
-          tourId="dashboard-bolsas"
-          emptyMessage={envelopeRows.length === 0 ? "Sin bolsas activas" : null}
-        >
-          <ul className="flex flex-col gap-4">
-            {envelopeRows.map((row) => (
-              <li key={row.id}>
-                <Link
-                  href={envelopeHref(row.id)}
-                  className="group block rounded-lg transition-colors hover:bg-base"
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                    <span className="font-medium text-muted group-hover:underline">
-                      {row.name}
-                      {row.scope === "individual" && row.memberName ? ` · ${row.memberName}` : ""}
-                    </span>
-                    <span className="tabular-nums text-muted">
-                      {formatCents(row.spentCents)} / {formatCents(row.plannedCents)}
-                    </span>
-                  </div>
-                  <div className="mt-1.5">
-                    <ProgressBar pct={row.pct} status={row.status} />
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </ChartCard>
+          <h2 className="text-sm font-medium text-ink">
+            Patrimonio
+          </h2>
+          <p className="text-2xl font-semibold tabular-nums text-ink">
+            {formatCents(patrimony.totalCents)}
+          </p>
+          <p className="text-sm text-ink">
+            Ahorro {formatCents(patrimony.savingsCents)} · Inversión{" "}
+            {formatCents(patrimony.investmentsCents)}
+          </p>
+        </Link>
       </div>
+
+      {/* Quick access: capture first, then the three related screens. The
+          tile reuses the new-movement sheet (one instance, one form). */}
+      <nav aria-label="Accesos rápidos" className="grid grid-cols-4 gap-2 sm:max-w-md">
+        <NewMovementFab
+          variant="tile"
+          currentUser={user}
+          categories={options.categories}
+          envelopes={options.envelopes}
+          members={options.members}
+          groups={options.groups}
+          serverToday={today}
+          createAction={createMovementAction}
+          createCategoryAction={createCategoryInlineAction}
+        />
+        <Link href="/bolsas" className={QUICK_TILE_CLASS}>
+          <PouchIcon className="size-5" />
+          Bolsas
+        </Link>
+        <Link href="/presupuesto" className={QUICK_TILE_CLASS}>
+          <ChartIcon className="size-5" />
+          Presupuesto
+        </Link>
+        <Link href="/asistente" className={QUICK_TILE_CLASS}>
+          <SparklesIcon className="size-5" />
+          Asistente
+        </Link>
+      </nav>
+
+      {/* Envelope progress for the period, one row per bolsa. */}
+      <ChartCard
+        title={`Bolsas de ${month}`}
+        tourId="dashboard-bolsas"
+        emptyMessage={envelopeRows.length === 0 ? "Sin bolsas activas" : null}
+      >
+        <ul className="flex flex-col gap-4">
+          {envelopeRows.map((row) => (
+            <li key={row.id}>
+              <Link
+                href={envelopeHref(row.id)}
+                className="group block rounded-lg transition-colors hover:bg-base"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+                  <span className="font-medium text-muted group-hover:underline">
+                    {row.name}
+                    {row.scope === "individual" && row.memberName ? ` · ${row.memberName}` : ""}
+                  </span>
+                  <span className="tabular-nums text-muted">
+                    {formatCents(row.spentCents)} / {formatCents(row.plannedCents)}
+                  </span>
+                </div>
+                <div className="mt-1.5">
+                  <ProgressBar pct={row.pct} status={row.status} />
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </ChartCard>
+
+      {/* Charts collapsed by default (mobile-first): a native <details>
+          keeps it no-JS; the tour opens ancestors before highlighting. */}
+      <details className="group">
+        <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line pb-3 [&::-webkit-details-marker]:hidden">
+          <h2 className="text-sm font-medium text-muted">Ver gráficos del período</h2>
+          <span className="flex items-center gap-2 text-xs text-muted">
+            3 gráficos · evolución, presupuesto y categorías
+            <ChevronDownIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <ChartCard
+            title="Gastos por categoría"
+            tourId="dashboard-donut"
+            emptyMessage={donutData.length === 0 ? "Sin gastos en el período" : null}
+          >
+            <CategoryDonut
+              slices={donutData}
+              totalCents={donutData.reduce((total, slice) => total + slice.cents, 0)}
+              drillQuery={donutQuery}
+            />
+          </ChartCard>
+
+          <ChartCard
+            title="Ingresos vs Gastos · últimos 12 meses"
+            tourId="dashboard-barras"
+            emptyMessage={hasFlowData(barsData) ? null : "Sin datos en el período"}
+          >
+            <MonthlyBars data={barsData} drillQuery={barsQuery} />
+          </ChartCard>
+
+          <ChartCard
+            wide
+            title={`Presupuesto acumulado vs gasto acumulado · ${month.slice(0, 4)}`}
+            tourId="dashboard-acumulado"
+            emptyMessage={hasCumulativeData(linesData) ? null : "Sin datos en el período"}
+          >
+            <BudgetLines data={linesData} />
+          </ChartCard>
+        </div>
+      </details>
     </section>
   );
 }

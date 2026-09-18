@@ -8,6 +8,7 @@ import "driver.js/dist/driver.css";
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import type { Driver } from "driver.js";
+import { HelpIcon } from "@/components/icons";
 import {
   TOUR_AUTO_LAUNCH_ROUTE,
   TOUR_LABELS,
@@ -51,6 +52,17 @@ async function startTour(steps: readonly TourStep[]): Promise<void> {
       skipMissingElement: true,
       showProgress: true,
       ...TOUR_LABELS,
+      // Steps anchored inside a collapsed <details> (dashboard charts):
+      // open ancestor disclosures so the highlight lands on visible UI.
+      onHighlightStarted: (element) => {
+        for (
+          let node = element?.parentElement;
+          node;
+          node = node.parentElement
+        ) {
+          if (node instanceof HTMLDetailsElement && !node.open) node.open = true;
+        }
+      },
       onDestroyed: () => {
         try {
           localStorage.setItem(TOUR_STORAGE_KEY, "1");
@@ -102,6 +114,32 @@ export default function TourLauncher() {
       className="flex size-11 items-center justify-center rounded-full border border-line font-semibold text-muted transition-colors hover:bg-base disabled:cursor-not-allowed disabled:opacity-40"
     >
       ?
+    </button>
+  );
+}
+
+/**
+ * Row-style entry point for the mobile "Más" sheet: same module-level
+ * startTour and per-page registry as the "?" button, just full-width.
+ */
+export function TourSheetRow() {
+  const pathname = usePathname();
+  const steps = TOURS[pathname];
+
+  return (
+    <button
+      type="button"
+      onClick={() => void startTour(steps ?? [])}
+      disabled={!steps}
+      title={
+        steps
+          ? "Recorrido guiado por esta página"
+          : "Esta página no tiene recorrido guiado"
+      }
+      className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-ink transition-colors hover:bg-base disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <HelpIcon className="size-5 text-muted" />
+      Recorrido guiado
     </button>
   );
 }

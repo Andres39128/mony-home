@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { categories } from "@/db/schema";
@@ -108,6 +109,19 @@ export async function updateMovementAction(
 
   revalidateMovements();
   return { ok: true };
+}
+
+/**
+ * /movimientos/nuevo page variant: same create rules, but bounces back to the
+ * list after a successful save (works with and without client JS).
+ */
+export async function createMovementAndRedirectAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const result = await createMovementAction(_prev, formData);
+  if (result.ok) redirect("/movimientos");
+  return result;
 }
 
 export async function deleteMovementAction(

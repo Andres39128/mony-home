@@ -31,8 +31,10 @@ interface MovementFormProps {
   createAction: MovementAction;
   updateAction: MovementAction;
   createCategoryAction: InlineCategoryAction;
-  /** Called after a successful save (edit dialogs close on it). */
+  /** Called after a successful save (sheets close on it). */
   onSuccess?: () => void;
+  /** Pin the submit to the bottom edge of a scrolling sheet. */
+  submitSticky?: boolean;
 }
 
 const INLINE_CATEGORY = "__new__";
@@ -90,9 +92,10 @@ function Toggle({
 }
 
 /**
- * Quick movement entry, shared by the /movimientos dialog, the /movimientos/nuevo
- * fallback page and the per-row edit dialog. Field order per the approved UX
- * spec; Enter submits natively; validation errors come from the server actions.
+ * Quick movement entry, shared by the /movimientos sheet, the
+ * /movimientos/nuevo fallback page and the per-row edit sheet. Field order
+ * per the approved UX spec; Enter submits natively; validation errors come
+ * from the server actions.
  */
 export default function MovementForm({
   mode,
@@ -107,6 +110,7 @@ export default function MovementForm({
   updateAction,
   createCategoryAction,
   onSuccess,
+  submitSticky = false,
 }: MovementFormProps) {
   const isAdmin = currentUser.role === "admin";
   const baseAction = mode === "edit" ? updateAction : createAction;
@@ -141,27 +145,12 @@ export default function MovementForm({
     if (!transaction && dateRef.current) dateRef.current.value = localToday();
   }, [transaction]);
 
-  function resetForm() {
-    setType("expense");
-    setScope("common");
-    setCategoryId("");
-    setEnvelopeId("");
-    setGroupId("");
-    setMemberId(currentUser.id);
-    setInlineOpen(false);
-    if (amountRef.current) amountRef.current.value = "";
-    if (noteRef.current) noteRef.current.value = "";
-    if (dateRef.current) dateRef.current.value = localToday();
-  }
-
   // Post-success behavior lives in the action wrapper (async callback, not an
-  // effect): quick entry resets to defaults and confirms; edit dialogs close.
+  // effect): the caller closes its sheet (or the /nuevo page's server action
+  // redirects), so the form never lingers open after a save.
   async function handleMovementAction(prev: FormState, formData: FormData): Promise<FormState> {
     const result = await baseAction(prev, formData);
-    if (result.ok) {
-      if (mode === "create") resetForm();
-      onSuccess?.();
-    }
+    if (result.ok) onSuccess?.();
     return result;
   }
 
@@ -237,20 +226,6 @@ export default function MovementForm({
     <form action={formAction} className="flex flex-col gap-4">
       {mode === "edit" && transaction && <input type="hidden" name="id" value={transaction.id} />}
 
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-muted">Tipo</span>
-        <Toggle
-          name="type"
-          value={type}
-          onChange={(value) => changeType(value as "income" | "expense")}
-          options={[
-            { value: "expense", label: "Gasto" },
-            { value: "income", label: "Ingreso" },
-          ]}
-        />
-        <FieldError message={state.fieldErrors?.type} />
-      </div>
-
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-muted">Monto</span>
@@ -277,6 +252,23 @@ export default function MovementForm({
           <FieldError message={state.fieldErrors?.date} />
         </label>
       </div>
+
+      <section className="flex flex-col gap-4 border-t border-line pt-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Detalles</h3>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-muted">Tipo</span>
+          <Toggle
+            name="type"
+            value={type}
+            onChange={(value) => changeType(value as "income" | "expense")}
+            options={[
+              { value: "expense", label: "Gasto" },
+              { value: "income", label: "Ingreso" },
+            ]}
+          />
+          <FieldError message={state.fieldErrors?.type} />
+        </div>
 
       <div className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-muted">Categoría</span>
@@ -445,8 +437,11 @@ export default function MovementForm({
         />
         <FieldError message={state.fieldErrors?.note} />
       </label>
+      </section>
 
       <FormError state={state} />
+      {/* Success status: only meaningful on the no-JS /movimientos/nuevo page
+          (with JS the caller closes the sheet on success). */}
       {mode === "create" && state.ok && (
         <p
           role="status"
@@ -456,13 +451,21 @@ export default function MovementForm({
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="inline-flex min-h-11 items-center self-start rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
+      <div
+        className={
+          submitSticky
+            ? "sticky bottom-0 -mx-5 border-t border-line bg-surface px-5 pb-[calc(1.25rem_+_env(safe-area-inset-bottom))] pt-3"
+            : undefined
+        }
       >
-        {mode === "edit" ? "Guardar cambios" : "Guardar movimiento"}
-      </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
+        >
+          {mode === "edit" ? "Guardar cambios" : "Guardar movimiento"}
+        </button>
+      </div>
     </form>
   );
 }

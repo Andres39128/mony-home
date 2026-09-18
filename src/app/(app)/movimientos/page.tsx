@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import { todayIso, listTransactions, transactionTotals, type TransactionFilters } from "@/features/transactions/service";
 import { movementFormOptions } from "@/features/transactions/form-options";
+import { monthLabel, shiftMonth } from "@/features/transactions/month-nav";
 import {
   createCategoryInlineAction,
   createMovementAction,
@@ -10,14 +10,17 @@ import {
   updateMovementAction,
 } from "@/features/transactions/actions";
 import MovementsTable from "@/features/transactions/movements-table";
-import NewMovementDialog from "@/features/transactions/new-movement-dialog";
+import NewMovementFab from "@/features/transactions/new-movement-fab";
+import FiltersSheet, { type ActiveFilter } from "@/components/filters-sheet";
 import { formatCents } from "@/lib/money";
 import { Card } from "@/components/card";
 import { inputClass } from "@/components/forms";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
-function singleParam(params: Record<string, string | string[] | undefined>, key: string) {
+type Params = Awaited<SearchParams>;
+
+function singleParam(params: Params, key: string) {
   const value = params[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -26,6 +29,21 @@ function envelopeFilterLabel(envelope: { name: string; scope: string; memberName
   return envelope.scope === "common"
     ? `Común · ${envelope.name}`
     : `Individual · ${envelope.name} (${envelope.memberName ?? "?"})`;
+}
+
+/** URL of /movimientos with the same params, overriding/dropping some. */
+function hrefWith(params: Params, overrides: Record<string, string | null>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key in overrides) continue;
+    if (typeof value === "string" && value) query.set(key, value);
+    else if (Array.isArray(value)) for (const item of value) if (item) query.append(key, item);
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value) query.set(key, value);
+  }
+  const qs = query.toString();
+  return qs ? `/movimientos?${qs}` : "/movimientos";
 }
 
 /** Colored money chips: pastel fill + ink/danger text, legible on both themes. */
@@ -43,8 +61,9 @@ export default async function MovimientosPage({
   const today = todayIso();
 
   const typeParam = singleParam(params, "type");
+  const month = singleParam(params, "month") ?? today.slice(0, 7);
   const filters: TransactionFilters = {
-    month: singleParam(params, "month") ?? today.slice(0, 7),
+    month,
     categoryId: singleParam(params, "categoryId"),
     memberId: singleParam(params, "memberId"),
     envelopeId: singleParam(params, "envelopeId"),
@@ -57,6 +76,48 @@ export default async function MovimientosPage({
     transactionTotals(getDb(), filters),
     movementFormOptions(),
   ]);
+
+  // Removable chips: one per set filter, each linking to the URL minus it.
+  const activeFilters: ActiveFilter[] = [];
+  const category = options.categories.find((item) => item.id === filters.categoryId);
+  if (category) {
+    activeFilters.push({
+      param: "categoryId",
+      label: `Categoría: ${category.name}`,
+      href: hrefWith(params, { categoryId: null }),
+    });
+  }
+  const member = options.members.find((item) => item.id === filters.memberId);
+  if (member) {
+    activeFilters.push({
+      param: "memberId",
+      label: `Integrante: ${member.name}`,
+      href: hrefWith(params, { memberId: null }),
+    });
+  }
+  const envelope = options.envelopes.find((item) => item.id === filters.envelopeId);
+  if (envelope) {
+    activeFilters.push({
+      param: "envelopeId",
+      label: `Bolsa: ${envelopeFilterLabel(envelope)}`,
+      href: hrefWith(params, { envelopeId: null }),
+    });
+  }
+  const group = options.groups.find((item) => item.id === filters.groupId);
+  if (group) {
+    activeFilters.push({
+      param: "groupId",
+      label: `Grupo: ${group.name}`,
+      href: hrefWith(params, { groupId: null }),
+    });
+  }
+  if (filters.type) {
+    activeFilters.push({
+      param: "type",
+      label: `Tipo: ${filters.type === "income" ? "Ingreso" : "Gasto"}`,
+      href: hrefWith(params, { type: null }),
+    });
+  }
 
   const balanceClass =
     totals.balanceCents > 0
@@ -71,8 +132,9 @@ export default async function MovimientosPage({
         <h1 className="text-2xl font-semibold tracking-tight text-ink">
           Movimientos
         </h1>
-        <NewMovementDialog
+        <NewMovementFab
           tourId="movimientos-nuevo"
+          desktopButton
           currentUser={user}
           categories={options.categories}
           envelopes={options.envelopes}
@@ -84,12 +146,14 @@ export default async function MovimientosPage({
         />
       </div>
 
-      {/* Shareable, no-JS filters: a plain GET form over the search params. */}
-      <form
-        method="get"
+      {/* Shareable, no-JS filters: compact bar + sheet with the GET form. */}
+      <FiltersSheet
         action="/movimientos"
-        data-tour="movimientos-filtros"
-        className="grid items-end gap-3 rounded-2xl border border-line bg-surface p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-7"
+        tourId="movimientos-filtros"
+        monthLabel={monthLabel(month)}
+        prevMonthHref={hrefWith(params, { month: shiftMonth(month, -1) })}
+        nextMonthHref={hrefWith(params, { month: shiftMonth(month, 1) })}
+        activeFilters={activeFilters}
       >
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-muted">Mes</span>
@@ -149,21 +213,7 @@ export default async function MovimientosPage({
             <option value="expense">Gasto</option>
           </select>
         </label>
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            className="inline-flex min-h-11 items-center rounded-lg bg-ink px-4 py-2 text-sm font-medium text-base transition-colors hover:bg-ink/90"
-          >
-            Filtrar
-          </button>
-          <Link
-            href="/movimientos"
-            className="inline-flex min-h-11 items-center text-sm text-muted underline-offset-2 hover:underline"
-          >
-            Limpiar filtros
-          </Link>
-        </div>
-      </form>
+      </FiltersSheet>
 
       <div data-tour="movimientos-totales" className="grid gap-4 sm:grid-cols-3">
         <Card className="p-5">

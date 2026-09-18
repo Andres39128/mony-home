@@ -3,40 +3,57 @@ import type { ReactNode } from "react";
 import { requireUser } from "@/features/auth/session";
 import { logoutAction } from "@/features/auth/actions";
 import TourLauncher from "@/features/tour/tour-launcher";
+import { SparklesIcon } from "@/components/icons";
+import { BottomNav } from "@/components/bottom-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { TopNavLinks } from "@/components/top-nav";
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
-const NAV_LINKS = [
-  { href: "/", label: "Dashboard" },
-  { href: "/movimientos", label: "Movimientos" },
-  { href: "/presupuesto", label: "Presupuesto" },
-  { href: "/asistente", label: "Asistente" },
-  { href: "/integrantes", label: "Integrantes" },
-  { href: "/categorias", label: "Categorías" },
-  { href: "/bolsas", label: "Bolsas" },
-  { href: "/ahorro", label: "Ahorro" },
-  { href: "/grupos", label: "Grupos" },
-] as const;
+/** Honey coin mark + wordmark. Mobile header and desktop bar share it. */
+function AppMark() {
+  return (
+    <Link href="/" className="flex items-center gap-2" aria-label="mony-home — Ir al inicio">
+      <span
+        aria-hidden
+        className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-honey text-lg font-bold text-ink"
+      >
+        M
+      </span>
+      <span className="font-semibold text-ink">mony-home</span>
+    </Link>
+  );
+}
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
 
   return (
     <div className="flex min-h-full flex-col bg-base font-sans">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <nav className="flex flex-wrap items-center gap-2 text-sm">
-            {NAV_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="inline-flex min-h-11 items-center px-1 font-medium text-ink hover:underline"
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+      {/* Mobile header: brand + assistant shortcut + theme. Navigation lives
+          in the bottom tab bar; desktop never sees this bar. */}
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-line bg-surface/95 px-4 py-2 backdrop-blur md:hidden">
+        <AppMark />
+        <div className="flex items-center">
+          <Link
+            href="/asistente"
+            aria-label="Ir al Asistente"
+            title="Asistente"
+            className="inline-flex size-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-base"
+          >
+            <SparklesIcon className="size-5" />
+          </Link>
+          <ThemeToggle />
+        </div>
+      </header>
+
+      {/* Desktop top bar (md+): brand, primary nav, admin dropdown, actions. */}
+      <header className="hidden border-b border-line bg-surface md:block">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-6">
+            <AppMark />
+            <TopNavLinks />
+          </div>
           <div className="flex items-center gap-3 text-sm">
             <TourLauncher />
             <span className="text-muted">
@@ -54,7 +71,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+
+      {/* pb-28 clears the fixed bottom tab bar (56px + safe area) on mobile. */}
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 pb-28 md:pb-8">
+        {children}
+      </main>
+
+      <BottomNav />
     </div>
   );
 }
