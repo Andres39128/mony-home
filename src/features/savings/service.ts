@@ -19,6 +19,7 @@ import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/features/transactions/service";
+import { getDebtCents } from "@/features/loans/service";
 import { catchUpAllInterest } from "./accrual";
 // Pure math lives in a client-safe module; re-exported here so the service
 // stays the single import surface for server-side callers and tests.
@@ -140,6 +141,8 @@ export interface PatrimonyBreakdown {
 export interface Patrimony {
   savingsCents: number;
   investmentsCents: number;
+  /** Total outstanding debt across all loans (assets − debts = NET). */
+  debtCents: number;
   totalCents: number;
   goals: PatrimonyBreakdown[];
 }
@@ -622,12 +625,14 @@ export async function updateGoalValue(
 // ---------------------------------------------------------------------------
 
 /**
- * Household net worth: net accumulated of savings goals plus the current
- * value of investments (net invested when never valued). Includes inactive
- * goals — deactivating a tracker does not withdraw the money.
+ * Household NET worth: net accumulated of savings goals plus the current
+ * value of investments, MINUS outstanding loan balances. Includes inactive
+ * goals — deactivating a tracker does not withdraw the money — and inactive
+ * loans — deactivating a debt does not forgive it.
  */
 export async function getPatrimony(db: Database): Promise<Patrimony> {
   const goals = await listGoals(db);
+  const debtCents = await getDebtCents(db);
   const breakdown: PatrimonyBreakdown[] = goals.map((goal) => ({
     id: goal.id,
     name: goal.name,
@@ -643,5 +648,11 @@ export async function getPatrimony(db: Database): Promise<Patrimony> {
   const investmentsCents = breakdown
     .filter((goal) => goal.kind === "investment")
     .reduce((total, goal) => total + goal.valueCents, 0);
-  return { savingsCents, investmentsCents, totalCents: savingsCents + investmentsCents, goals: breakdown };
+  return {
+    savingsCents,
+    investmentsCents,
+    debtCents,
+    totalCents: savingsCents + investmentsCents - debtCents,
+    goals: breakdown,
+  };
 }
