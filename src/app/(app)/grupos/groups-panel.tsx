@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import type { ExpenseGroupView } from "@/features/expense-groups/service";
 import type { FormState } from "@/lib/form-state";
 import {
+  EditDetails,
   FieldError,
   FormError,
   OkMessage,
@@ -122,39 +123,40 @@ function GroupRow({
   const [statusState, statusFormAction, statusPending] = useActionState(statusAction, {});
 
   return (
-    <li className="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <details>
-        <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-6 py-4 font-medium text-zinc-900 hover:bg-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-800/50">
-          <span>{group.name}</span>
-          <StatusBadge status={group.status} />
-          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
-            {group.transactionCount} {group.transactionCount === 1 ? "movimiento" : "movimientos"}
-          </span>
-        </summary>
-        <div className="flex flex-col gap-4 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
-          {group.description && (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{group.description}</p>
-          )}
-          <form action={formAction} className="flex flex-col gap-4">
+    <li>
+      <EditDetails
+        summary={
+          <>
+            <span>{group.name}</span>
+            <StatusBadge status={group.status} />
+            <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+              {group.transactionCount} {group.transactionCount === 1 ? "movimiento" : "movimientos"}
+            </span>
+          </>
+        }
+      >
+        {group.description && (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">{group.description}</p>
+        )}
+        <form action={formAction} className="flex flex-col gap-4">
+          <input type="hidden" name="id" value={group.id} />
+          <GroupFields state={state} group={group} />
+          <FormError state={state} />
+          <OkMessage state={state} />
+          <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+        </form>
+        <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+          <form action={statusFormAction} className="flex flex-col gap-2">
             <input type="hidden" name="id" value={group.id} />
-            <GroupFields state={state} group={group} />
-            <FormError state={state} />
-            <OkMessage state={state} />
-            <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+            <input type="hidden" name="status" value={group.status === "active" ? "closed" : "active"} />
+            <FormError state={statusState} />
+            <SubmitButton pending={statusPending} variant="secondary">
+              {group.status === "active" ? "Cerrar grupo" : "Reabrir grupo"}
+            </SubmitButton>
           </form>
-          <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-            <form action={statusFormAction} className="flex flex-col gap-2">
-              <input type="hidden" name="id" value={group.id} />
-              <input type="hidden" name="status" value={group.status === "active" ? "closed" : "active"} />
-              <FormError state={statusState} />
-              <SubmitButton pending={statusPending} variant="secondary">
-                {group.status === "active" ? "Cerrar grupo" : "Reabrir grupo"}
-              </SubmitButton>
-            </form>
-            <DeleteGroupForm group={group} deleteAction={deleteAction} />
-          </div>
+          <DeleteGroupForm group={group} deleteAction={deleteAction} />
         </div>
-      </details>
+      </EditDetails>
     </li>
   );
 }

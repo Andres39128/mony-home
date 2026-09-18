@@ -5,6 +5,7 @@ import type { CategoryView } from "@/features/categories/service";
 import type { FormState } from "@/lib/form-state";
 import {
   ActiveBadge,
+  EditDetails,
   FieldError,
   FormError,
   OkMessage,
@@ -126,38 +127,41 @@ function EditCategoryForm({
   const [deleteState, deleteFormAction, deletePending] = useActionState(deleteAction, {});
 
   return (
-    <details className="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <summary className="flex cursor-pointer items-center justify-between gap-2 px-6 py-4 font-medium text-zinc-900 hover:bg-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-800/50">
-        <NameIcon category={category} />
-        <ActiveBadge active={category.isActive} />
-      </summary>
-      <div className="flex flex-col gap-4 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <form action={formAction} className="flex flex-col gap-4">
+    <EditDetails
+      summary={
+        <>
+          <NameIcon category={category} />
+          <span className="ml-auto">
+            <ActiveBadge active={category.isActive} />
+          </span>
+        </>
+      }
+    >
+      <form action={formAction} className="flex flex-col gap-4">
+        <input type="hidden" name="id" value={category.id} />
+        <CategoryFields state={state} category={category} />
+        <FormError state={state} />
+        <OkMessage state={state} />
+        <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+      </form>
+      <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        <form action={toggleFormAction} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={category.id} />
-          <CategoryFields state={state} category={category} />
-          <FormError state={state} />
-          <OkMessage state={state} />
-          <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+          <FormError state={toggleState} />
+          <SubmitButton pending={togglePending} variant="secondary">
+            {category.isActive ? "Desactivar" : "Activar"}
+          </SubmitButton>
         </form>
-        <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-          <form action={toggleFormAction} className="flex flex-col gap-2">
-            <input type="hidden" name="id" value={category.id} />
-            <FormError state={toggleState} />
-            <SubmitButton pending={togglePending} variant="secondary">
-              {category.isActive ? "Desactivar" : "Activar"}
-            </SubmitButton>
-          </form>
-          <form action={deleteFormAction} className="flex flex-col gap-2">
-            <input type="hidden" name="id" value={category.id} />
-            <FormError state={deleteState} />
-            <OkMessage state={deleteState} text="Categoría eliminada." />
-            <SubmitButton pending={deletePending} variant="danger">
-              Eliminar
-            </SubmitButton>
-          </form>
-        </div>
+        <form action={deleteFormAction} className="flex flex-col gap-2">
+          <input type="hidden" name="id" value={category.id} />
+          <FormError state={deleteState} />
+          <OkMessage state={deleteState} text="Categoría eliminada." />
+          <SubmitButton pending={deletePending} variant="danger">
+            Eliminar
+          </SubmitButton>
+        </form>
       </div>
-    </details>
+    </EditDetails>
   );
 }
 

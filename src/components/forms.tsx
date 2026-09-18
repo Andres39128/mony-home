@@ -74,3 +74,30 @@ export function ActiveBadge({ active }: { active: boolean }) {
     </span>
   );
 }
+
+/**
+ * Collapsible card for admin edit forms: native <details>/<summary> (works
+ * without JS) with an explicit "Editar" affordance and a chevron that rotates
+ * while open, so the edit controls are discoverable.
+ */
+export function EditDetails({ summary, children }: { summary: ReactNode; children: ReactNode }) {
+  return (
+    <details className="group rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-6 py-4 font-medium text-zinc-900 hover:bg-zinc-50 [&::-webkit-details-marker]:hidden dark:text-zinc-50 dark:hover:bg-zinc-800/50">
+        <span
+          aria-hidden
+          className="inline-block shrink-0 text-xs text-zinc-500 transition-transform group-open:rotate-90 dark:text-zinc-400"
+        >
+          ▸
+        </span>
+        <span className="rounded-md border border-zinc-200 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+          Editar
+        </span>
+        {summary}
+      </summary>
+      <div className="flex flex-col gap-4 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
+        {children}
+      </div>
+    </details>
+  );
+}

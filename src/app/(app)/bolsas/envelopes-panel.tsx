@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
 import {
   ActiveBadge,
+  EditDetails,
   FieldError,
   FormError,
   OkMessage,
@@ -139,46 +140,47 @@ function EditEnvelopeForm({
   const [deleteState, deleteFormAction, deletePending] = useActionState(deleteAction, {});
 
   return (
-    <details className="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-6 py-4 font-medium text-zinc-900 hover:bg-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-800/50">
-        <span className={envelope.isActive ? "" : "text-zinc-400 dark:text-zinc-500"}>
-          {envelope.name}
-        </span>
-        <ScopeBadge envelope={envelope} />
-        <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
-          {formatCents(envelope.monthlyAmountCents)}/mes
-        </span>
-        <span className="ml-auto">
-          <ActiveBadge active={envelope.isActive} />
-        </span>
-      </summary>
-      <div className="flex flex-col gap-4 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <form action={formAction} className="flex flex-col gap-4">
+    <EditDetails
+      summary={
+        <>
+          <span className={envelope.isActive ? "" : "text-zinc-400 dark:text-zinc-500"}>
+            {envelope.name}
+          </span>
+          <ScopeBadge envelope={envelope} />
+          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+            {formatCents(envelope.monthlyAmountCents)}/mes
+          </span>
+          <span className="ml-auto">
+            <ActiveBadge active={envelope.isActive} />
+          </span>
+        </>
+      }
+    >
+      <form action={formAction} className="flex flex-col gap-4">
+        <input type="hidden" name="id" value={envelope.id} />
+        <EnvelopeFields state={state} members={members} envelope={envelope} />
+        <FormError state={state} />
+        <OkMessage state={state} />
+        <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+      </form>
+      <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        <form action={toggleFormAction} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={envelope.id} />
-          <EnvelopeFields state={state} members={members} envelope={envelope} />
-          <FormError state={state} />
-          <OkMessage state={state} />
-          <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+          <FormError state={toggleState} />
+          <SubmitButton pending={togglePending} variant="secondary">
+            {envelope.isActive ? "Desactivar" : "Activar"}
+          </SubmitButton>
         </form>
-        <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-          <form action={toggleFormAction} className="flex flex-col gap-2">
-            <input type="hidden" name="id" value={envelope.id} />
-            <FormError state={toggleState} />
-            <SubmitButton pending={togglePending} variant="secondary">
-              {envelope.isActive ? "Desactivar" : "Activar"}
-            </SubmitButton>
-          </form>
-          <form action={deleteFormAction} className="flex flex-col gap-2">
-            <input type="hidden" name="id" value={envelope.id} />
-            <FormError state={deleteState} />
-            <OkMessage state={deleteState} text="Bolsa eliminada." />
-            <SubmitButton pending={deletePending} variant="danger">
-              Eliminar
-            </SubmitButton>
-          </form>
-        </div>
+        <form action={deleteFormAction} className="flex flex-col gap-2">
+          <input type="hidden" name="id" value={envelope.id} />
+          <FormError state={deleteState} />
+          <OkMessage state={deleteState} text="Bolsa eliminada." />
+          <SubmitButton pending={deletePending} variant="danger">
+            Eliminar
+          </SubmitButton>
+        </form>
       </div>
-    </details>
+    </EditDetails>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import type { MemberView, MemberFormState } from "@/features/members/service";
+import { EditDetails } from "@/components/forms";
 
 type MemberAction = (state: MemberFormState, formData: FormData) => Promise<MemberFormState>;
 
@@ -96,71 +97,72 @@ function EditMemberForm({
   const [deleteState, deleteFormAction, deletePending] = useActionState(deleteAction, {});
 
   return (
-    <details className="rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <summary className="cursor-pointer px-6 py-4 font-medium text-zinc-900 hover:bg-zinc-50 dark:text-zinc-50 dark:hover:bg-zinc-800/50">
-        {member.name}{" "}
-        <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
-          ({member.username})
-        </span>
-      </summary>
-      <div className="flex flex-col gap-4 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <form action={formAction} className="flex flex-col gap-4">
-          <input type="hidden" name="id" value={member.id} />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
-              <input name="name" defaultValue={member.name} required maxLength={80} className={inputClass} />
-              <FieldError message={state.fieldErrors?.name} />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-zinc-700 dark:text-zinc-300">Rol</span>
-              <select name="role" defaultValue={member.role} className={inputClass}>
-                <option value="member">Miembro</option>
-                <option value="admin">Administrador</option>
-              </select>
-              <FieldError message={state.fieldErrors?.role} />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                Nueva contraseña (opcional)
-              </span>
-              <input name="newPassword" type="password" minLength={8} maxLength={128} className={inputClass} />
-              <FieldError message={state.fieldErrors?.newPassword} />
-            </label>
-            <label className="flex items-center gap-2 self-end pb-2 text-sm">
-              <input
-                name="isActive"
-                type="checkbox"
-                defaultChecked={member.isActive}
-                className="size-4 rounded border-zinc-300"
-              />
-              <span className="font-medium text-zinc-700 dark:text-zinc-300">Activo</span>
-            </label>
-          </div>
-          <FormError state={state} />
-          <OkMessage state={state} />
-          <button
-            type="submit"
-            disabled={pending}
-            className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-          >
-            Guardar cambios
-          </button>
-        </form>
-        <form action={deleteFormAction} className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
-          <input type="hidden" name="id" value={member.id} />
-          <FormError state={deleteState} />
-          <OkMessage state={deleteState} text="Integrante eliminado." />
-          <button
-            type="submit"
-            disabled={deletePending}
-            className="self-start rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-          >
-            Eliminar
-          </button>
-        </form>
-      </div>
-    </details>
+    <EditDetails
+      summary={
+        <>
+          {member.name}{" "}
+          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+            ({member.username})
+          </span>
+        </>
+      }
+    >
+      <form action={formAction} className="flex flex-col gap-4">
+        <input type="hidden" name="id" value={member.id} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+            <input name="name" defaultValue={member.name} required maxLength={80} className={inputClass} />
+            <FieldError message={state.fieldErrors?.name} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">Rol</span>
+            <select name="role" defaultValue={member.role} className={inputClass}>
+              <option value="member">Miembro</option>
+              <option value="admin">Administrador</option>
+            </select>
+            <FieldError message={state.fieldErrors?.role} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              Nueva contraseña (opcional)
+            </span>
+            <input name="newPassword" type="password" minLength={8} maxLength={128} className={inputClass} />
+            <FieldError message={state.fieldErrors?.newPassword} />
+          </label>
+          <label className="flex items-center gap-2 self-end pb-2 text-sm">
+            <input
+              name="isActive"
+              type="checkbox"
+              defaultChecked={member.isActive}
+              className="size-4 rounded border-zinc-300"
+            />
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">Activo</span>
+          </label>
+        </div>
+        <FormError state={state} />
+        <OkMessage state={state} />
+        <button
+          type="submit"
+          disabled={pending}
+          className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        >
+          Guardar cambios
+        </button>
+      </form>
+      <form action={deleteFormAction} className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        <input type="hidden" name="id" value={member.id} />
+        <FormError state={deleteState} />
+        <OkMessage state={deleteState} text="Integrante eliminado." />
+        <button
+          type="submit"
+          disabled={deletePending}
+          className="self-start rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+        >
+          Eliminar
+        </button>
+      </form>
+    </EditDetails>
   );
 }
 
