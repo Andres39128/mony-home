@@ -1,0 +1,616 @@
+"use client";
+
+import { useActionState, useEffect, useRef, useState } from "react";
+import type { GoalView } from "@/features/savings/service";
+import {
+  computeGoalProgress,
+  computeInvestmentReturn,
+  investmentValueCents,
+  monthsUntilDeadline,
+} from "@/features/savings/math";
+import type { FormState } from "@/lib/form-state";
+import { formatCents } from "@/lib/money";
+import { ProgressBar } from "@/components/progress";
+import {
+  ActiveBadge,
+  EditDetails,
+  FieldError,
+  FormError,
+  OkMessage,
+  SubmitButton,
+  inputClass,
+} from "@/components/forms";
+
+type SavingsAction = (state: FormState, formData: FormData) => Promise<FormState>;
+
+interface Props {
+  goals: GoalView[];
+  members: { id: string; name: string }[];
+  isAdmin: boolean;
+  patrimony: { savingsCents: number; investmentsCents: number; totalCents: number };
+  createAction: SavingsAction;
+  updateAction: SavingsAction;
+  toggleAction: SavingsAction;
+  deleteAction: SavingsAction;
+  valueAction: SavingsAction;
+  contributionAction: SavingsAction;
+}
+
+/** "Común" / "Individual · {member}" badge, same pattern as the bolsas panel. */
+function ScopeBadge({ goal }: { goal: GoalView }) {
+  return goal.scope === "common" ? (
+    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+      Común
+    </span>
+  ) : (
+    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+      Individual · {goal.memberName ?? "?"}
+    </span>
+  );
+}
+
+/** Month-granularity deadline copy; helper returns null (no deadline). */
+function DeadlineLabel({ deadline }: { deadline: string | null }) {
+  const months = monthsUntilDeadline(deadline);
+  if (months === null) return null;
+  const copy =
+    months < 0 ? "plazo vencido" : months === 0 ? "vence este mes" : `vence en ${months} ${months === 1 ? "mes" : "meses"}`;
+  return (
+    <span
+      className={`text-xs ${
+        months < 0
+          ? "font-medium text-red-600 dark:text-red-400"
+          : "text-zinc-500 dark:text-zinc-400"
+      }`}
+    >
+      {copy}
+    </span>
+  );
+}
+
+/** Segmented depósito/retiro toggle (radio group styled as a two-option pill). */
+function KindToggle({
+  value,
+  onChange,
+}: {
+  value: "deposit" | "withdrawal";
+  onChange: (value: "deposit" | "withdrawal") => void;
+}) {
+  const options = [
+    { value: "deposit" as const, label: "Depósito" },
+    { value: "withdrawal" as const, label: "Retiro" },
+  ];
+  return (
+    <div className="inline-flex overflow-hidden rounded-lg border border-zinc-300 dark:border-zinc-700">
+      {options.map((option) => (
+        <label
+          key={option.value}
+          className={`cursor-pointer px-3 py-1.5 text-sm font-medium transition-colors ${
+            value === option.value
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "bg-white text-zinc-600 hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+          }`}
+        >
+          <input
+            type="radio"
+            name="kind"
+            value={option.value}
+            checked={value === option.value}
+            onChange={() => onChange(option.value)}
+            className="sr-only"
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Quick contribution: monto first (autoFocused on the first card), Enter
+ * saves natively, form resets after success — same philosophy as the
+ * movement quick-entry form.
+ */
+function QuickContributionForm({
+  goal,
+  action,
+  autoFocus,
+  tourId,
+}: {
+  goal: GoalView;
+  action: SavingsAction;
+  autoFocus: boolean;
+  tourId?: string;
+}) {
+  const amountRef = useRef<HTMLInputElement>(null);
+
+  // Mount: focus the monto (explicit ref focus — the autoFocus attribute is
+  // an a11y lint violation and fights the page on multi-card grids).
+  useEffect(() => {
+    if (autoFocus) amountRef.current?.focus();
+  }, [autoFocus]);
+
+  async function handleAction(prev: FormState, formData: FormData): Promise<FormState> {
+    const result = await action(prev, formData);
+    if (result.ok && amountRef.current) amountRef.current.value = "";
+    return result;
+  }
+
+  const [state, formAction, pending] = useActionState(handleAction, {});
+  const [kind, setKind] = useState<"deposit" | "withdrawal">("deposit");
+
+  return (
+    <form action={formAction} data-tour={tourId} className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+      <input type="hidden" name="id" value={goal.id} />
+      <div className="flex flex-wrap items-center gap-2">
+        <KindToggle value={kind} onChange={setKind} />
+        <input
+          ref={amountRef}
+          name="amount"
+          inputMode="decimal"
+          placeholder="1.234,56"
+          required
+          aria-label={`Monto del aporte a ${goal.name}`}
+          className={`${inputClass} w-32 flex-1`}
+        />
+        <SubmitButton pending={pending}>
+          {kind === "deposit" ? "Depositar" : "Retirar"}
+        </SubmitButton>
+      </div>
+      <FormError state={state} />
+      <OkMessage state={state} text="Aporte registrado." />
+    </form>
+  );
+}
+
+function GoalCard({
+  goal,
+  contributionAction,
+  autoFocusContribution,
+  tourId,
+}: {
+  goal: GoalView;
+  contributionAction: SavingsAction;
+  autoFocusContribution: boolean;
+  tourId?: string;
+}) {
+  const progress = computeGoalProgress(goal.netCents, goal.targetCents);
+  return (
+    <li
+      className={`flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+        goal.isActive ? "" : "opacity-60"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-zinc-900 dark:text-zinc-50">{goal.name}</span>
+        <ScopeBadge goal={goal} />
+      </div>
+      {progress ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <span>
+              {formatCents(goal.netCents)} de {formatCents(goal.targetCents!)}
+            </span>
+            <span className="tabular-nums">{progress.pct}%</span>
+          </div>
+          <ProgressBar pct={progress.pct} status={progress.status} />
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            Faltan {formatCents(progress.remainingCents)}
+          </span>
+        </div>
+      ) : (
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Acumulado: {formatCents(goal.netCents)}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <DeadlineLabel deadline={goal.deadline} />
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          {goal.contributionCount} {goal.contributionCount === 1 ? "aporte" : "aportes"}
+        </span>
+      </div>
+      {goal.isActive && (
+        <QuickContributionForm
+          goal={goal}
+          action={contributionAction}
+          autoFocus={autoFocusContribution}
+          tourId={tourId}
+        />
+      )}
+    </li>
+  );
+}
+
+function InvestmentCard({
+  goal,
+  isAdmin,
+  contributionAction,
+  valueAction,
+  autoFocusContribution,
+  valueTourId,
+}: {
+  goal: GoalView;
+  isAdmin: boolean;
+  contributionAction: SavingsAction;
+  valueAction: SavingsAction;
+  autoFocusContribution: boolean;
+  valueTourId?: string;
+}) {
+  const returnValue = computeInvestmentReturn(goal.netCents, goal.currentValueCents);
+  const valueCents = investmentValueCents(goal.netCents, goal.currentValueCents);
+  const returnClass =
+    returnValue > 0
+      ? "text-emerald-600 dark:text-emerald-400"
+      : returnValue < 0
+        ? "text-red-600 dark:text-red-400"
+        : "text-zinc-500 dark:text-zinc-400";
+
+  const [valueState, valueFormAction, valuePending] = useActionState(valueAction, {});
+
+  return (
+    <li
+      className={`flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white px-6 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${
+        goal.isActive ? "" : "opacity-60"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-zinc-900 dark:text-zinc-50">{goal.name}</span>
+        <ScopeBadge goal={goal} />
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Invertido neto</p>
+          <p className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+            {formatCents(goal.netCents)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Valor actual</p>
+          <p className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+            {formatCents(valueCents)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Retorno</p>
+          <p className={`font-medium tabular-nums ${returnClass}`}>
+            {returnValue > 0 ? "+" : ""}
+            {returnValue}%
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Aportes</p>
+          <p className="font-medium tabular-nums text-zinc-900 dark:text-zinc-50">
+            {goal.contributionCount}
+          </p>
+        </div>
+      </div>
+      {goal.valueUpdatedAt && (
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          actualizado{" "}
+          {new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short", year: "numeric" }).format(
+            goal.valueUpdatedAt,
+          )}
+        </p>
+      )}
+      {isAdmin && goal.isActive && (
+        <form
+          action={valueFormAction}
+          data-tour={valueTourId}
+          className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800"
+        >
+          <input type="hidden" name="id" value={goal.id} />
+          <input
+            name="currentValue"
+            inputMode="decimal"
+            placeholder="Valor actual"
+            aria-label={`Valor actual de ${goal.name}`}
+            defaultValue={goal.currentValueCents === null ? undefined : formatCents(goal.currentValueCents)}
+            className={`${inputClass} w-40 flex-1`}
+          />
+          <SubmitButton pending={valuePending} variant="secondary">
+            Actualizar valor
+          </SubmitButton>
+          <FieldError message={valueState.fieldErrors?.currentValue} />
+          <FormError state={valueState} />
+          <OkMessage state={valueState} text="Valor actualizado." />
+        </form>
+      )}
+      {goal.isActive && (
+        <QuickContributionForm
+          goal={goal}
+          action={contributionAction}
+          autoFocus={autoFocusContribution}
+        />
+      )}
+    </li>
+  );
+}
+
+function GoalFields({
+  state,
+  members,
+  goal,
+}: {
+  state: FormState;
+  members: { id: string; name: string }[];
+  goal?: GoalView;
+}) {
+  const [kind, setKind] = useState<"savings" | "investment">(goal?.kind ?? "savings");
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">Nombre</span>
+          <input name="name" defaultValue={goal?.name} required maxLength={64} className={inputClass} />
+          <FieldError message={state.fieldErrors?.name} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">Tipo</span>
+          <select
+            name="kind"
+            value={kind}
+            onChange={(event) => setKind(event.target.value as "savings" | "investment")}
+            className={inputClass}
+          >
+            <option value="savings">Meta de ahorro</option>
+            <option value="investment">Inversión</option>
+          </select>
+          <FieldError message={state.fieldErrors?.kind} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">Ámbito</span>
+          <select name="scope" defaultValue={goal?.scope ?? "common"} className={inputClass}>
+            <option value="common">Común</option>
+            <option value="individual">Individual</option>
+          </select>
+          <FieldError message={state.fieldErrors?.scope} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            Integrante (solo individuales)
+          </span>
+          <select name="memberId" defaultValue={goal?.memberId ?? ""} className={inputClass}>
+            <option value="">—</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+          <FieldError message={state.fieldErrors?.memberId} />
+        </label>
+      </div>
+      {kind === "savings" ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              Objetivo (opcional)
+            </span>
+            <input
+              name="target"
+              inputMode="decimal"
+              placeholder="1.234,56"
+              defaultValue={goal?.targetCents != null ? formatCents(goal.targetCents) : undefined}
+              className={inputClass}
+            />
+            <FieldError message={state.fieldErrors?.target} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              Fecha límite (opcional)
+            </span>
+            <input type="date" name="deadline" defaultValue={goal?.deadline ?? undefined} className={inputClass} />
+            <FieldError message={state.fieldErrors?.deadline} />
+          </label>
+        </div>
+      ) : (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            Valor actual (opcional)
+          </span>
+          <input
+            name="currentValue"
+            inputMode="decimal"
+            placeholder="1.234,56"
+            defaultValue={goal?.currentValueCents != null ? formatCents(goal.currentValueCents) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.currentValue} />
+        </label>
+      )}
+    </div>
+  );
+}
+
+function CreateGoalForm({
+  action,
+  members,
+}: {
+  action: SavingsAction;
+  members: { id: string; name: string }[];
+}) {
+  const [state, formAction, pending] = useActionState(action, {});
+  return (
+    <form
+      action={formAction}
+      data-tour="ahorro-crear"
+      className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+    >
+      <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Nueva meta</h2>
+      <GoalFields state={state} members={members} />
+      <FormError state={state} />
+      <SubmitButton pending={pending}>Crear meta</SubmitButton>
+    </form>
+  );
+}
+
+function EditGoalForm({
+  goal,
+  members,
+  updateAction,
+  toggleAction,
+  deleteAction,
+}: {
+  goal: GoalView;
+  members: { id: string; name: string }[];
+  updateAction: SavingsAction;
+  toggleAction: SavingsAction;
+  deleteAction: SavingsAction;
+}) {
+  const [state, formAction, pending] = useActionState(updateAction, {});
+  const [toggleState, toggleFormAction, togglePending] = useActionState(toggleAction, {});
+  const [deleteState, deleteFormAction, deletePending] = useActionState(deleteAction, {});
+
+  return (
+    <EditDetails
+      summary={
+        <>
+          <span className={goal.isActive ? "" : "text-zinc-400 dark:text-zinc-500"}>
+            {goal.name}
+          </span>
+          <ScopeBadge goal={goal} />
+          <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+            {formatCents(goal.netCents)}
+          </span>
+          <span className="ml-auto">
+            <ActiveBadge active={goal.isActive} />
+          </span>
+        </>
+      }
+    >
+      <form action={formAction} className="flex flex-col gap-4">
+        <input type="hidden" name="id" value={goal.id} />
+        <GoalFields state={state} members={members} goal={goal} />
+        <FormError state={state} />
+        <OkMessage state={state} />
+        <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
+      </form>
+      <div className="flex flex-wrap items-start gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+        <form action={toggleFormAction} className="flex flex-col gap-2">
+          <input type="hidden" name="id" value={goal.id} />
+          <FormError state={toggleState} />
+          <SubmitButton pending={togglePending} variant="secondary">
+            {goal.isActive ? "Desactivar" : "Activar"}
+          </SubmitButton>
+        </form>
+        <form action={deleteFormAction} className="flex flex-col gap-2">
+          <input type="hidden" name="id" value={goal.id} />
+          <FormError state={deleteState} />
+          <OkMessage state={deleteState} text="Meta eliminada." />
+          <SubmitButton pending={deletePending} variant="danger">
+            Eliminar
+          </SubmitButton>
+        </form>
+      </div>
+    </EditDetails>
+  );
+}
+
+export default function SavingsPanel({
+  goals,
+  members,
+  isAdmin,
+  patrimony,
+  createAction,
+  updateAction,
+  toggleAction,
+  deleteAction,
+  valueAction,
+  contributionAction,
+}: Props) {
+  const savings = goals.filter((goal) => goal.kind === "savings");
+  const investments = goals.filter((goal) => goal.kind === "investment");
+
+  // One autoFocus + tour anchor across all cards: the first active goal wins.
+  const firstActiveId = goals.find((goal) => goal.isActive)?.id;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div
+        data-tour="ahorro-patrimonio"
+        className="grid gap-4 sm:grid-cols-3"
+      >
+        {[
+          { label: "Patrimonio total", cents: patrimony.totalCents, accent: true },
+          { label: "Ahorro", cents: patrimony.savingsCents, accent: false },
+          { label: "Inversión", cents: patrimony.investmentsCents, accent: false },
+        ].map((item) => (
+          <article
+            key={item.label}
+            className={`rounded-2xl border p-5 shadow-sm ${
+              item.accent
+                ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30"
+                : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+            }`}
+          >
+            <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{item.label}</h2>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+              {formatCents(item.cents)}
+            </p>
+          </article>
+        ))}
+      </div>
+
+      <div data-tour="ahorro-metas" className="flex flex-col gap-3">
+        {savings.length > 0 && (
+          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Metas de ahorro
+          </h2>
+        )}
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {savings.map((goal) => (
+            <GoalCard
+              key={goal.id}
+              goal={goal}
+              contributionAction={contributionAction}
+              autoFocusContribution={goal.id === firstActiveId}
+              tourId={goal.id === firstActiveId ? "ahorro-aporte" : undefined}
+            />
+          ))}
+        </ul>
+
+        {investments.length > 0 && (
+          <h2 className="mt-2 text-sm font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Inversiones
+          </h2>
+        )}
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {investments.map((goal, index) => (
+            <InvestmentCard
+              key={goal.id}
+              goal={goal}
+              isAdmin={isAdmin}
+              contributionAction={contributionAction}
+              valueAction={valueAction}
+              autoFocusContribution={false}
+              valueTourId={isAdmin && index === 0 && goal.isActive ? "ahorro-valor" : undefined}
+            />
+          ))}
+        </ul>
+        {goals.length === 0 && (
+          <p className="rounded-2xl border border-dashed border-zinc-300 px-6 py-10 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+            Todavía no hay metas ni inversiones.
+          </p>
+        )}
+      </div>
+
+      {isAdmin && (
+        <>
+          <CreateGoalForm action={createAction} members={members} />
+          <div className="flex flex-col gap-3">
+            {goals.map((goal) => (
+              <EditGoalForm
+                key={goal.id}
+                goal={goal}
+                members={members}
+                updateAction={updateAction}
+                toggleAction={toggleAction}
+                deleteAction={deleteAction}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

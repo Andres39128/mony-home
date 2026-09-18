@@ -26,6 +26,7 @@ import BudgetLines from "@/features/analytics/charts/budget-lines";
 import { monthBounds, computeProgress } from "@/features/budgets/progress";
 import { getMonth } from "@/features/budgets/service";
 import { monthlyProgress } from "@/features/envelopes/service";
+import { getPatrimony } from "@/features/savings/service";
 import { formatCents } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
 import { inputClass } from "@/components/forms";
@@ -143,7 +144,7 @@ export default async function DashboardPage({
   if (filters.envelopeId) baseParams.set("envelopeId", filters.envelopeId);
   if (filters.groupId) baseParams.set("groupId", filters.groupId);
 
-  const [options, totals, slices, monthlyRows, budgetMonth, envelopeRows, cumulativeRows] =
+  const [options, totals, slices, monthlyRows, budgetMonth, envelopeRows, cumulativeRows, patrimony] =
     await Promise.all([
       movementFormOptions(),
       transactionTotals(getDb(), filters),
@@ -152,6 +153,7 @@ export default async function DashboardPage({
       getMonth(getDb(), month),
       monthlyProgress(getDb(), month),
       cumulativeBudgetVsActual(getDb(), Number(month.slice(0, 4)), filters),
+      getPatrimony(getDb()),
     ]);
 
   const donutData = buildDonutData(slices);
@@ -288,6 +290,25 @@ export default async function DashboardPage({
           </p>
         </KpiCard>
       </div>
+
+      {/* Visually distinct strip (outside the KPI grid): money that is saved,
+          not spent — fed by the savings ledger, never the movements stats. */}
+      <Link
+        href="/ahorro"
+        data-tour="dashboard-patrimonio"
+        className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm transition-colors hover:bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50"
+      >
+        <h2 className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+          Patrimonio
+        </h2>
+        <p className="text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+          {formatCents(patrimony.totalCents)}
+        </p>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Ahorro {formatCents(patrimony.savingsCents)} · Inversión{" "}
+          {formatCents(patrimony.investmentsCents)}
+        </p>
+      </Link>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard

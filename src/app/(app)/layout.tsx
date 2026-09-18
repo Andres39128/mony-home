@@ -14,6 +14,7 @@ const NAV_LINKS = [
   { href: "/integrantes", label: "Integrantes" },
   { href: "/categorias", label: "Categorías" },
   { href: "/bolsas", label: "Bolsas" },
+  { href: "/ahorro", label: "Ahorro" },
   { href: "/grupos", label: "Grupos" },
 ] as const;
 

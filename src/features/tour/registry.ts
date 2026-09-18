@@ -79,6 +79,50 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       description:
         "Avance de cada bolsa del hogar. Hacé clic en una bolsa para ver sus movimientos de este mes.",
     },
+    {
+      id: "dashboard-patrimonio",
+      element: "dashboard-patrimonio",
+      title: "Patrimonio",
+      description:
+        "Lo que tenés ahorrado e invertido en total. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Ahorro.",
+    },
+  ],
+  "/ahorro": [
+    {
+      id: "ahorro-patrimonio",
+      element: "ahorro-patrimonio",
+      title: "Patrimonio",
+      description:
+        "Total ahorrado del hogar, dividido en metas de ahorro e inversiones. Los aportes no son gastos ni ingresos: viven aparte de los movimientos.",
+    },
+    {
+      id: "ahorro-metas",
+      element: "ahorro-metas",
+      title: "Metas e inversiones",
+      description:
+        "Una meta acumula plata (con objetivo y plazo opcionales); una inversión guarda además su valor actual y el retorno respecto de lo invertido.",
+    },
+    {
+      id: "ahorro-aporte",
+      element: "ahorro-aporte",
+      title: "Aporte rápido",
+      description:
+        "Escribí el monto, elegí depósito o retiro y presioná Enter: se guarda al instante. El monto queda listo para el próximo aporte.",
+    },
+    {
+      id: "ahorro-valor",
+      element: "ahorro-valor",
+      title: "Actualizar valor (admin)",
+      description:
+        "El valor de una inversión no se calcula solo: actualizalo a mano cuando cambie y el retorno se recalcula.",
+    },
+    {
+      id: "ahorro-crear",
+      element: "ahorro-crear",
+      title: "Nueva meta (admin)",
+      description:
+        "Formulario para crear una meta de ahorro o una inversión del hogar, común o individual.",
+    },
   ],
   "/movimientos": [
     {

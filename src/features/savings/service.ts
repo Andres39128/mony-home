@@ -16,72 +16,23 @@ import { z } from "zod";
 import { savingsContributions, savingsGoals, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
-import { parseAmountToCents, percentage } from "@/lib/money";
+import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/features/transactions/service";
-import { computeProgress, type Progress } from "@/features/budgets/progress";
+// Pure math lives in a client-safe module; re-exported here so the service
+// stays the single import surface for server-side callers and tests.
+// Pure math lives in a client-safe module; re-exported here so the service
+// stays the single import surface for server-side callers and tests.
+export {
+  computeNetCents,
+  computeGoalProgress,
+  computeInvestmentReturn,
+  investmentValueCents,
+  monthsUntilDeadline,
+} from "./math";
+import { investmentValueCents } from "./math";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * Net accumulation of a goal: deposits minus withdrawals, across ALL months
- * (unlike bolsas monthly progress — a savings pool accumulates over time).
- */
-export function computeNetCents(
-  depositsCents: number,
-  withdrawalsCents: number,
-): number {
-  return depositsCents - withdrawalsCents;
-}
-
-/**
- * Progress toward the target using the SHARED budgets math (one source of
- * truth for thresholds and divide-by-zero). No target → no bar (null).
- */
-export function computeGoalProgress(
-  netCents: number,
-  targetCents: number | null,
-): Progress | null {
-  if (targetCents === null) return null;
-  return computeProgress(targetCents, netCents);
-}
-
-/**
- * Investment return: (current − net invested) / net invested, as a
- * 2-decimal percentage. Never-updated value falls back to net invested
- * (→ 0%) and a zero net invested avoids division by zero (→ 0%).
- */
-export function computeInvestmentReturn(
-  netInvestedCents: number,
-  currentValueCents: number | null,
-): number {
-  if (netInvestedCents <= 0) return 0;
-  const value = currentValueCents ?? netInvestedCents;
-  return percentage(value - netInvestedCents, netInvestedCents);
-}
-
-/**
- * Whole months from today until the deadline month; negative when overdue,
- * null when there is no deadline. Month granularity on purpose ("vence en
- * N meses" — day precision would make the copy jitter daily).
- */
-export function monthsUntilDeadline(
-  deadline: string | null,
-  today: string = todayIso(),
-): number | null {
-  if (!deadline) return null;
-  const [todayYear, todayMonth] = today.split("-").map(Number);
-  const [goalYear, goalMonth] = deadline.split("-").map(Number);
-  return (goalYear - todayYear) * 12 + (goalMonth - todayMonth);
-}
-
-/** Effective patrimony value: the current valuation, else net invested. */
-export function investmentValueCents(
-  netCents: number,
-  currentValueCents: number | null,
-): number {
-  return currentValueCents ?? netCents;
-}
 
 // ---------------------------------------------------------------------------
 // Validation (trust boundary)
