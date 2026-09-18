@@ -7,6 +7,8 @@ import {
   categories,
   envelopes,
   expenseGroups,
+  loanPayments,
+  loans,
   savingsContributions,
   savingsGoals,
   transactions,
@@ -302,6 +304,161 @@ describe("migration 0005 (savings realism invariants)", () => {
       .returning();
 
     await db.delete(savingsContributions).where(eq(savingsContributions.id, contribution.id));
+
+    const remaining = await db.select().from(transactions).where(eq(transactions.id, mirror.id));
+    expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("migration 0006 (loans invariants)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+  let memberId: string;
+  let loanId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u10", passwordHash: "h", name: "U10" })
+      .returning();
+    memberId = user.id;
+    const [loan] = await db
+      .insert(loans)
+      .values({
+        name: "Visa",
+        kind: "credit_card",
+        entity: "Banco Nación",
+        scope: "common",
+        principalCents: 85_000_000,
+        annualRateBp: 4500,
+      })
+      .returning();
+    loanId = loan.id;
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("rejects an individual loan without a member via CHECK", async () => {
+    await expectPgError(
+      db
+        .insert(loans)
+        .values({ name: "Huerfana", kind: "other", entity: "X", scope: "individual", principalCents: 100 }),
+      "23514",
+    );
+    const [ok] = await db
+      .insert(loans)
+      .values({ name: "Con dueño", kind: "other", entity: "X", scope: "individual", memberId, principalCents: 100 })
+      .returning();
+    expect(ok.memberId).toBe(memberId);
+  });
+
+  it("rejects non-positive principals and out-of-bounds rates via CHECK", async () => {
+    for (const bad of [0, -100]) {
+      await expectPgError(
+        db.insert(loans).values({ name: "X", kind: "other", entity: "X", scope: "common", principalCents: bad }),
+        "23514",
+      );
+    }
+    await expectPgError(
+      db.insert(loans).values({ name: "X", kind: "other", entity: "X", scope: "common", principalCents: 1, annualRateBp: 100001 }),
+      "23514",
+    );
+    const [zeroRate] = await db
+      .insert(loans)
+      .values({ name: "Sin tasa", kind: "mortgage", entity: "Banco", scope: "common", principalCents: 1, annualRateBp: null })
+      .returning();
+    expect(zeroRate.annualRateBp).toBeNull();
+  });
+
+  it("accepts interest rows only without a member (CHECK both directions)", async () => {
+    await expectPgError(
+      db.insert(loanPayments).values({ loanId, memberId, kind: "interest", amountCents: 100, date: "2026-09-01" }),
+      "23514",
+    );
+    const [row] = await db
+      .insert(loanPayments)
+      .values({ loanId, memberId: null, kind: "interest", amountCents: 100, date: "2026-09-01" })
+      .returning();
+    expect(row.memberId).toBeNull();
+  });
+
+  it("requires a member on payments; payments are strictly positive (CHECK)", async () => {
+    await expectPgError(
+      db.insert(loanPayments).values({ loanId, memberId: null, kind: "payment", amountCents: 100, date: "2026-09-01" }),
+      "23514",
+    );
+    for (const bad of [0, -50]) {
+      await expectPgError(
+        db.insert(loanPayments).values({ loanId, memberId, kind: "payment", amountCents: bad, date: "2026-09-01" }),
+        "23514",
+      );
+    }
+    // Interest is signed: a negative balance true-up is legal.
+    const [adjust] = await db
+      .insert(loanPayments)
+      .values({ loanId, memberId: null, kind: "interest", amountCents: -50, date: "2026-09-02" })
+      .returning();
+    expect(adjust.amountCents).toBe(-50);
+  });
+
+  it("allows one interest entry per loan/month/cause; payments repeat freely (unique index)", async () => {
+    const [first] = await db
+      .insert(loanPayments)
+      .values({
+        loanId, memberId: null, kind: "interest", amountCents: 555, date: "2026-09-01", note: "Interés 45% TNA",
+      })
+      .returning();
+    expect(first.note).toBe("Interés 45% TNA");
+    await expectPgError(
+      db.insert(loanPayments).values({
+        loanId, memberId: null, kind: "interest", amountCents: 999, date: "2026-09-01", note: "Interés 45% TNA",
+      }),
+      "23505",
+    );
+    // Same month, different cause (true-up) → allowed.
+    const [adjust] = await db
+      .insert(loanPayments)
+      .values({ loanId, memberId: null, kind: "interest", amountCents: 100, date: "2026-09-01", note: "Ajuste de saldo" })
+      .returning();
+    expect(adjust.note).toBe("Ajuste de saldo");
+    // Two payments on the same day are normal.
+    for (const amountCents of [100, 200]) {
+      const [row] = await db
+        .insert(loanPayments)
+        .values({ loanId, memberId, kind: "payment", amountCents, date: "2026-09-03" })
+        .returning();
+      expect(row.kind).toBe("payment");
+    }
+  });
+
+  it("RESTRICTs loan deletion while payments exist", async () => {
+    await expectPgError(db.delete(loans).where(eq(loans.id, loanId)), "23001");
+  });
+
+  it("cascades mirror deletion from the payment (FK ON DELETE CASCADE)", async () => {
+    const [category] = await db
+      .insert(categories)
+      .values({ name: "Pago de préstamos (cascade)", kind: "expense" })
+      .returning();
+    const [payment] = await db
+      .insert(loanPayments)
+      .values({ loanId, memberId, kind: "payment", amountCents: 500, date: "2026-09-04" })
+      .returning();
+    const [mirror] = await db
+      .insert(transactions)
+      .values({
+        amountCents: 500,
+        type: "expense",
+        categoryId: category.id,
+        memberId,
+        loanPaymentId: payment.id,
+      })
+      .returning();
+
+    await db.delete(loanPayments).where(eq(loanPayments.id, payment.id));
 
     const remaining = await db.select().from(transactions).where(eq(transactions.id, mirror.id));
     expect(remaining).toHaveLength(0);

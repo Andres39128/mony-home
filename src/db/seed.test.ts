@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { loadConfig } from "@/lib/config";
 import { seedDatabase } from "@/db/seed";
-import { budgets, categories, envelopes, expenseGroups, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
+import { budgets, categories, envelopes, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import { createTestDb } from "@/db/test-utils";
 
 /**
@@ -25,7 +25,7 @@ describe("seedDatabase", () => {
   });
 
   const tableCounts = async () => {
-    const [userRows, categoryRows, envelopeRows, groupRows, transactionRows, budgetRows, goalRows, contributionRows] =
+    const [userRows, categoryRows, envelopeRows, groupRows, transactionRows, budgetRows, goalRows, contributionRows, loanRows, loanPaymentRows] =
       await Promise.all([
         db.select().from(users),
         db.select().from(categories),
@@ -35,6 +35,8 @@ describe("seedDatabase", () => {
         db.select().from(budgets),
         db.select().from(savingsGoals),
         db.select().from(savingsContributions),
+        db.select().from(loans),
+        db.select().from(loanPayments),
       ]);
     return {
       users: userRows,
@@ -45,6 +47,8 @@ describe("seedDatabase", () => {
       budgets: budgetRows,
       goals: goalRows,
       contributions: contributionRows,
+      loans: loanRows,
+      loanPayments: loanPaymentRows,
     };
   };
 
@@ -53,13 +57,15 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users.map((u) => u.username).sort()).toEqual(["admin", "andres", "maria"]);
-    expect(counts.categories).toHaveLength(15);
+    expect(counts.categories).toHaveLength(16);
     expect(counts.envelopes).toHaveLength(2);
     expect(counts.groups).toHaveLength(1);
-    expect(counts.transactions).toHaveLength(8);
+    expect(counts.transactions).toHaveLength(10);
     expect(counts.budgets).toHaveLength(2);
     expect(counts.goals).toHaveLength(2);
     expect(counts.contributions).toHaveLength(4);
+    expect(counts.loans).toHaveLength(2);
+    expect(counts.loanPayments).toHaveLength(2);
   });
 
   it("is idempotent in demo mode (re-run does not duplicate rows)", async () => {
@@ -68,13 +74,15 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(3);
-    expect(counts.categories).toHaveLength(15);
+    expect(counts.categories).toHaveLength(16);
     expect(counts.envelopes).toHaveLength(2);
     expect(counts.groups).toHaveLength(1);
-    expect(counts.transactions).toHaveLength(8);
+    expect(counts.transactions).toHaveLength(10);
     expect(counts.budgets).toHaveLength(2);
     expect(counts.goals).toHaveLength(2);
     expect(counts.contributions).toHaveLength(4);
+    expect(counts.loans).toHaveLength(2);
+    expect(counts.loanPayments).toHaveLength(2);
   });
 
   it("seeds only categories + admin in production mode (SEED_DEMO_DATA=false)", async () => {
@@ -84,13 +92,15 @@ describe("seedDatabase", () => {
     expect(counts.users).toHaveLength(1);
     expect(counts.users[0]?.username).toBe("admin");
     expect(counts.users[0]?.role).toBe("admin");
-    expect(counts.categories).toHaveLength(15);
+    expect(counts.categories).toHaveLength(16);
     expect(counts.envelopes).toHaveLength(0);
     expect(counts.groups).toHaveLength(0);
     expect(counts.transactions).toHaveLength(0);
     expect(counts.budgets).toHaveLength(0);
     expect(counts.goals).toHaveLength(0);
     expect(counts.contributions).toHaveLength(0);
+    expect(counts.loans).toHaveLength(0);
+    expect(counts.loanPayments).toHaveLength(0);
   });
 
   it("is idempotent in production mode (re-run does not duplicate rows)", async () => {
@@ -99,6 +109,7 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(1);
-    expect(counts.categories).toHaveLength(15);
+    expect(counts.categories).toHaveLength(16);
+    expect(counts.loans).toHaveLength(0);
   });
 });

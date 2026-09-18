@@ -35,6 +35,8 @@ export const scopeKindEnum = pgEnum("scope_kind", ["individual", "common"]);
 export const groupStatusEnum = pgEnum("group_status", ["active", "closed"]);
 export const savingsKindEnum = pgEnum("savings_kind", ["savings", "investment"]);
 export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "withdrawal", "interest"]);
+export const loanKindEnum = pgEnum("loan_kind", ["credit_card", "investment_line", "mortgage", "other"]);
+export const loanPaymentKindEnum = pgEnum("loan_payment_kind", ["payment", "interest"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -122,6 +124,10 @@ export const transactions = pgTable(
     savingsContributionId: uuid("savings_contribution_id").references(() => savingsContributions.id, {
       onDelete: "cascade",
     }),
+    /** Set on mirror rows: the loan payment that generated this movement. */
+    loanPaymentId: uuid("loan_payment_id").references(() => loanPayments.id, {
+      onDelete: "cascade",
+    }),
     scope: scopeKindEnum("scope").notNull().default("common"),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -135,6 +141,7 @@ export const transactions = pgTable(
     index("transactions_envelope_id_idx").on(table.envelopeId),
     index("transactions_group_id_idx").on(table.groupId),
     index("transactions_savings_contribution_id_idx").on(table.savingsContributionId),
+    index("transactions_loan_payment_id_idx").on(table.loanPaymentId),
   ],
 );
 
@@ -265,5 +272,84 @@ export const savingsContributions = pgTable(
       .on(table.goalId, table.date, table.note)
       .where(sql`${table.kind} = 'interest'`),
     index("savings_contributions_goal_date_idx").on(table.goalId, table.date),
+  ],
+);
+
+/**
+ * Household debts (credit cards, investment lines, mortgages). The
+ * OUTSTANDING balance is never stored: outstanding = principal + interest −
+ * payments, computed from the loan_payments ledger. Loan proceeds create NO
+ * transaction — borrowed money is not income; payments mirror an expense.
+ */
+export const loans = pgTable(
+  "loans",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    kind: loanKindEnum("kind").notNull(),
+    /** Lending entity ("Visa Banco Nación", "Banco Hipotecario"…); required. */
+    entity: text("entity").notNull(),
+    scope: scopeKindEnum("scope").notNull().default("common"),
+    /** null = common loan; required when scope is 'individual'. */
+    memberId: uuid("member_id").references(() => users.id),
+    /** Original borrowed amount; always positive. */
+    principalCents: bigint("principal_cents", { mode: "number" }).notNull(),
+    /** Annual nominal rate (TNA) in basis points; null = no interest. 0..100000 = 0..1000%. */
+    annualRateBp: integer("annual_rate_bp"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "loans_individual_requires_member",
+      sql`${table.scope} <> 'individual' OR ${table.memberId} IS NOT NULL`,
+    ),
+    check("loans_principal_positive", sql`${table.principalCents} > 0`),
+    check(
+      "loans_annual_rate_bp_bounds",
+      sql`${table.annualRateBp} IS NULL OR (${table.annualRateBp} >= 0 AND ${table.annualRateBp} <= 100000)`,
+    ),
+  ],
+);
+
+/**
+ * Loan payments ledger: 'payment' rows reduce the debt and MIRROR an expense
+ * in `transactions` (paying a loan is real money leaving the household);
+ * 'interest' rows are written by the lazy monthly accrual (or by admin
+ * balance true-ups) and never mirror. Member-less exactly for 'interest'.
+ */
+export const loanPayments = pgTable(
+  "loan_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    loanId: uuid("loan_id")
+      .notNull()
+      .references(() => loans.id, { onDelete: "restrict" }),
+    /** null exactly for 'interest' rows — a charge belongs to the loan, not a member. */
+    memberId: uuid("member_id").references(() => users.id, { onDelete: "restrict" }),
+    kind: loanPaymentKindEnum("kind").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    date: date("date", { mode: "string" }).notNull().default(sql`CURRENT_DATE`),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Payments are positive; interest is signed (a balance true-up that
+    // REDUCES the debt records a negative interest entry).
+    check(
+      "loan_payments_amount_positive",
+      sql`(${table.kind} = 'interest' AND ${table.amountCents} <> 0) OR ${table.amountCents} > 0`,
+    ),
+    // 'interest' ⇔ member IS NULL: payments always name a member.
+    check(
+      "loan_payments_interest_member_exclusive",
+      sql`(${table.kind} = 'interest') = (${table.memberId} IS NULL)`,
+    ),
+    // One interest entry per loan/month/cause — makes lazy concurrent
+    // catch-ups idempotent even when two requests race on the same view.
+    uniqueIndex("loan_payments_interest_unique")
+      .on(table.loanId, table.date, table.note)
+      .where(sql`${table.kind} = 'interest'`),
+    index("loan_payments_loan_date_idx").on(table.loanId, table.date),
   ],
 );

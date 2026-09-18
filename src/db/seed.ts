@@ -18,7 +18,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type AppConfig } from "../lib/config.ts";
-import { budgets, categories, envelopes, expenseGroups, savingsContributions, savingsGoals, transactions, users } from "./schema.ts";
+import { budgets, categories, envelopes, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "./schema.ts";
 
 /** Any Postgres drizzle database — postgres-js in the CLI, PGlite in tests. */
 type SeedDb = PgDatabase<PgQueryResultHKT>;
@@ -54,6 +54,9 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     ["Alquiler", "#94a3b8"],
     ["Otros gastos", "#64748b"],
     ["Ahorro e inversión", "#0ea5e9"],
+    // SYSTEM category: the loans mirror writes it from pay() — a loan payment
+    // is an expense. Production mode needs it too.
+    ["Pago de préstamos", "#fb7185"],
   ] as const;
   const incomeCategories = [
     ["Sueldo", "#22c55e"],
@@ -274,6 +277,53 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
       { goalId: goal.id, memberId: userId("andres"), kind: "deposit", amountCents: 200000, date: day(3) },
       { goalId: goal.id, memberId: userId("maria"), kind: "withdrawal", amountCents: 50000, date: day(12) },
     ]);
+  }
+
+  // --- Demo loans + payments (demo only; no unique key → check by name) ---
+  // Payments reduce the debt and MIRROR an expense (category "Pago de
+  // préstamos"); the mirrors ride along in the same guard block.
+  const loanRows = await db.select().from(loans);
+  if (!loanRows.some((l) => l.name === "Visa Banco Nación")) {
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa Banco Nación",
+        kind: "credit_card",
+        entity: "Visa Banco Nación",
+        scope: "common",
+        principalCents: 85_000_000, // $850.000
+        annualRateBp: 4500, // 45% TNA
+      })
+      .returning();
+    for (const payment of [
+      { memberId: userId("andres"), amountCents: 5_000_000, date: day(5) }, // $50.000
+      { memberId: userId("maria"), amountCents: 3_000_000, date: day(12) }, // $30.000
+    ]) {
+      const [row] = await db
+        .insert(loanPayments)
+        .values({ loanId: card.id, ...payment, kind: "payment" })
+        .returning();
+      await db.insert(transactions).values({
+        date: payment.date,
+        amountCents: payment.amountCents,
+        type: "expense",
+        categoryId: categoryId("Pago de préstamos"),
+        memberId: payment.memberId,
+        scope: card.scope,
+        note: "Pago Visa Banco Nación",
+        loanPaymentId: row.id,
+      });
+    }
+  }
+  if (!loanRows.some((l) => l.name === "Hipoteca casa")) {
+    await db.insert(loans).values({
+      name: "Hipoteca casa",
+      kind: "mortgage",
+      entity: "Banco Hipotecario",
+      scope: "common",
+      principalCents: 1_200_000_000, // $12.000.000
+      // No rate: the demo also covers the rateless path (no accrual).
+    });
   }
 }
 
