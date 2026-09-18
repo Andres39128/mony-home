@@ -142,6 +142,9 @@ function QuickContributionForm({
   return (
     <form action={formAction} data-tour={tourId} className="flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
       <input type="hidden" name="id" value={goal.id} />
+      <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        Aportar a esta meta — monto y Enter; el toggle cambia a retiro
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <KindToggle value={kind} onChange={setKind} />
         <input

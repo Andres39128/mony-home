@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   date,
@@ -20,7 +21,9 @@ import {
  * - All primary keys are `uuid().defaultRandom()`.
  * - All tables carry `created_at timestamptz default now()`.
  * - Column names are explicit snake_case; TS keys stay camelCase.
- * - Money is ALWAYS integer cents (never floats, never numeric columns).
+ * - Money is ALWAYS integer cents (never floats, never numeric columns),
+ *   stored as bigint: int4 caps at ~$21M ARS in cents, which real
+ *   household savings targets already exceed.
  * - "común" scope is stored as 'common'.
  */
 
@@ -79,7 +82,7 @@ export const envelopes = pgTable(
     scope: scopeKindEnum("scope").notNull(),
     /** null = common/shared envelope; required when scope is 'individual'. */
     memberId: uuid("member_id").references(() => users.id),
-    monthlyAmountCents: integer("monthly_amount_cents").notNull().default(0),
+    monthlyAmountCents: bigint("monthly_amount_cents", { mode: "number" }).notNull().default(0),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -104,7 +107,7 @@ export const transactions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     date: date("date", { mode: "string" }).notNull().default(sql`CURRENT_DATE`),
-    amountCents: integer("amount_cents").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     type: transactionTypeEnum("type").notNull(),
     categoryId: uuid("category_id")
       .notNull()
@@ -157,7 +160,7 @@ export const budgets = pgTable(
     categoryId: uuid("category_id")
       .notNull()
       .references(() => categories.id, { onDelete: "restrict" }),
-    amountCents: integer("amount_cents").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -184,10 +187,10 @@ export const savingsGoals = pgTable(
     /** null = common goal; required when scope is 'individual'. */
     memberId: uuid("member_id").references(() => users.id),
     /** Cumulative target; null = open pool (no progress bar). */
-    targetCents: integer("target_cents"),
+    targetCents: bigint("target_cents", { mode: "number" }),
     deadline: date("deadline", { mode: "string" }),
     /** Investments only: last manually-set valuation; null = never updated. */
-    currentValueCents: integer("current_value_cents"),
+    currentValueCents: bigint("current_value_cents", { mode: "number" }),
     valueUpdatedAt: timestamp("value_updated_at", { withTimezone: true }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -223,7 +226,7 @@ export const savingsContributions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     kind: contributionKindEnum("kind").notNull(),
-    amountCents: integer("amount_cents").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     date: date("date", { mode: "string" }).notNull().default(sql`CURRENT_DATE`),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

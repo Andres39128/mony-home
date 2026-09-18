@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
-import { budgets, categories, envelopes, expenseGroups, transactions, users } from "@/db/schema";
+import { budgets, categories, envelopes, expenseGroups, savingsGoals, transactions, users } from "@/db/schema";
 import { createTestDb, expectPgError } from "@/db/test-utils";
 
 /**
@@ -130,5 +130,13 @@ describe("schema (migrations applied to in-memory Postgres)", () => {
       db.insert(budgets).values({ month: "2026-09-01", categoryId: category.id, amountCents: -1 }),
       "23514",
     );
+  });
+
+  it("stores savings targets beyond int4 range (bigint money columns)", async () => {
+    const [goal] = await db
+      .insert(savingsGoals)
+      .values({ name: "Fondo de imprevistos", kind: "savings", scope: "common", targetCents: 3_600_000_000 })
+      .returning();
+    expect(goal.targetCents).toBe(3_600_000_000);
   });
 });

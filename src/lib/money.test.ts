@@ -131,3 +131,15 @@ describe("percentage", () => {
     expect(percentage(75, 50)).toBe(150);
   });
 });
+
+describe("parseAmountToCents range (bigint-backed money columns)", () => {
+  it("accepts real-world ARS magnitudes beyond int4 cents", () => {
+    // The exact production case: a $36M ARS emergency-fund target.
+    expect(parseAmountToCents("36000000")).toBe(3_600_000_000);
+    expect(parseAmountToCents("99.999.999.999,99")).toBe(9_999_999_999_999);
+  });
+
+  it("still rejects amounts beyond Number.MAX_SAFE_INTEGER cents", () => {
+    expect(() => parseAmountToCents("99999999999999999")).toThrow(MoneyParseError);
+  });
+});
