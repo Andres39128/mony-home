@@ -4,7 +4,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { categories, transactions, users } from "@/db/schema";
+import { budgets, categories, transactions, users } from "@/db/schema";
 import {
   categorySchema,
   createCategory,
@@ -144,6 +144,39 @@ describe("categories service (integration on PGlite)", () => {
     expect(result).toEqual({ ok: false, error: "has_movements" });
     const stillThere = await db.select().from(categories).where(eq(categories.id, row.id));
     expect(stillThere).toHaveLength(1);
+  });
+
+  it("deleting a category with only budget rows succeeds and removes its budgets", async () => {
+    // Production repro (Alquiler): budgets are plan config, not history —
+    // they cascade with the category instead of blocking the delete.
+    await createCategory(appDb, { ...validInput, name: "ConPresupuesto" });
+    const [row] = await db.select().from(categories).where(eq(categories.name, "ConPresupuesto"));
+    await db.insert(budgets).values({ month: "2026-09-01", categoryId: row.id, amountCents: 5000 });
+
+    const result = await removeCategory(appDb, admin, row.id);
+
+    expect(result).toEqual({ ok: true });
+    expect(await db.select().from(categories).where(eq(categories.id, row.id))).toHaveLength(0);
+    expect(await db.select().from(budgets).where(eq(budgets.categoryId, row.id))).toHaveLength(0);
+  });
+
+  it("rolls back the budget cascade when movements still block the delete", async () => {
+    await createCategory(appDb, { ...validInput, name: "Mixta" });
+    const [row] = await db.select().from(categories).where(eq(categories.name, "Mixta"));
+    await db.insert(budgets).values({ month: "2026-09-01", categoryId: row.id, amountCents: 7000 });
+    await db.insert(transactions).values({
+      amountCents: 200,
+      type: "expense",
+      categoryId: row.id,
+      memberId: member.id,
+    });
+
+    const result = await removeCategory(appDb, admin, row.id);
+
+    expect(result).toEqual({ ok: false, error: "has_movements" });
+    // Atomic: the cascade must NOT survive a blocked delete.
+    expect(await db.select().from(categories).where(eq(categories.id, row.id))).toHaveLength(1);
+    expect(await db.select().from(budgets).where(eq(budgets.categoryId, row.id))).toHaveLength(1);
   });
 
   it("deleting a category without movements succeeds", async () => {

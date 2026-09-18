@@ -35,7 +35,7 @@ function mapCategoryError(error: string): FormState {
   if (error === "has_movements") {
     return {
       error:
-        "No se puede eliminar: tiene movimientos o presupuestos asociados. Se puede desactivar como alternativa.",
+        "No se puede eliminar: tiene movimientos asociados. Se puede desactivar como alternativa.",
     };
   }
   if (error === "forbidden") return { error: ADMIN_REQUIRED_MESSAGE };

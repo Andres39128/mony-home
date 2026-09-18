@@ -11,7 +11,7 @@ import { and, asc, eq, gte, lte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { envelopes, transactions, users } from "@/db/schema";
 import type { Database } from "@/db";
-import { hasPgError } from "@/db/pg-errors";
+import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/features/transactions/service";
@@ -236,8 +236,8 @@ export async function removeEnvelope(
     if (deleted.length === 0) return { ok: false, error: "envelope_not_found" };
     return { ok: true };
   } catch (error) {
-    // RESTRICT FK: transactions.envelope_id.
-    if (hasPgError(error, "23001")) return { ok: false, error: "has_movements" };
+    // RESTRICT FK: transactions.envelope_id (23001 on PGlite, 23503 on PG 17).
+    if (hasPgFkError(error)) return { ok: false, error: "has_movements" };
     throw error;
   }
 }

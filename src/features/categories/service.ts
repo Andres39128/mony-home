@@ -11,9 +11,9 @@
  */
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { categories } from "@/db/schema";
+import { budgets, categories } from "@/db/schema";
 import type { Database } from "@/db";
-import { hasPgError } from "@/db/pg-errors";
+import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import type { SessionUser } from "@/lib/auth";
 
 export interface CategoryView {
@@ -132,15 +132,21 @@ export async function removeCategory(
 ): Promise<CategoryResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
   try {
-    const deleted = await db
-      .delete(categories)
-      .where(eq(categories.id, id))
-      .returning({ id: categories.id });
+    // Budgets are plan config, not accounting history: cascade-delete them in
+    // the same transaction. Transactions still RESTRICT the delete (R4) and
+    // surface as the typed 'has_movements' error.
+    const deleted = await db.transaction(async (tx) => {
+      await tx.delete(budgets).where(eq(budgets.categoryId, id));
+      return tx
+        .delete(categories)
+        .where(eq(categories.id, id))
+        .returning({ id: categories.id });
+    });
     if (deleted.length === 0) return { ok: false, error: "category_not_found" };
     return { ok: true };
   } catch (error) {
-    // RESTRICT FKs: transactions.category_id and budgets.category_id.
-    if (hasPgError(error, "23001")) return { ok: false, error: "has_movements" };
+    // RESTRICT FK: transactions.category_id (budgets rows are cascaded above).
+    if (hasPgFkError(error)) return { ok: false, error: "has_movements" };
     throw error;
   }
 }

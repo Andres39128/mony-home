@@ -10,6 +10,7 @@ import { z } from "zod";
 import { users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hashPassword } from "@/lib/auth";
+import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 
 export interface MemberView {
   id: string;
@@ -90,7 +91,7 @@ export async function createMember(
       });
     return { ok: true, member };
   } catch (error) {
-    if (hasPgCode(error, "23505")) return { ok: false, error: "username_taken" };
+    if (hasPgError(error, "23505")) return { ok: false, error: "username_taken" };
     throw error;
   }
 }
@@ -128,14 +129,8 @@ export async function deleteMember(
     if (deleted.length === 0) return { ok: false, error: "member_not_found" };
     return { ok: true };
   } catch (error) {
-    // RESTRICT FKs (movements, envelopes) → Postgres restrict_violation.
-    if (hasPgCode(error, "23001")) return { ok: false, error: "has_movements" };
+    // RESTRICT FKs (movements, envelopes) → 23001 on PGlite, 23503 on PG 17.
+    if (hasPgFkError(error)) return { ok: false, error: "has_movements" };
     throw error;
   }
-}
-
-/** Match a Postgres error code on the error or its cause (drizzle wraps). */
-function hasPgCode(error: unknown, code: string): boolean {
-  const err = error as { code?: string; cause?: { code?: string } };
-  return err.code === code || err.cause?.code === code;
 }
