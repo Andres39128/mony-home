@@ -26,7 +26,14 @@ function createDb(): { db: Database; client: postgres.Sql } {
     throw new Error("DATABASE_URL is required to run the app. See .env.example.");
   }
   // dep: postgres — already the project's wire driver (seed + migrations).
-  const client = postgres(config.DATABASE_URL);
+  // Pooled Supabase (Supavisor) caps clients hard (session pool_size: 15), and
+  // serverless lambdas freeze while holding sockets, so the pool must stay
+  // small and release idle connections instead of using the default max: 10.
+  const client = postgres(config.DATABASE_URL, {
+    max: 3,
+    idle_timeout: 20,
+    connect_timeout: 10,
+  });
   return { db: drizzle(client, { schema }), client };
 }
 
