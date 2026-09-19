@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "@/components/icons";
 
 const PRIMARY_LINKS = [
@@ -25,12 +26,44 @@ function isActive(pathname: string, href: string) {
 
 /**
  * Desktop (md+) top navigation: the 5 primary destinations with an ink pill
- * on the active one, plus the admin group under a native <details> dropdown
- * (no JS; known quirk: it stays open on outside clicks until a selection or
- * a toggle — acceptable for a desktop-only menu).
+ * on the active one, plus the admin group under a native <details> dropdown.
+ * JS enhancement (the details/summary toggle itself works without JS): the
+ * dropdown closes on outside clicks, Escape (focus returns to the trigger)
+ * and client-side route changes — navigation keeps the same <details> DOM
+ * node, whose open state would otherwise persist across routes.
  */
 export function TopNavLinks() {
   const pathname = usePathname();
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  // Synced from the native toggle event, so every open/close path (summary
+  // click, setting .open, Escape) updates the summary's aria-expanded.
+  const [open, setOpen] = useState(false);
+
+  function close() {
+    if (detailsRef.current) detailsRef.current.open = false;
+  }
+
+  // Close on route change: the details node survives client-side navigation.
+  useEffect(close, [pathname]);
+
+  // While open: outside pointerdown and Escape close the dropdown.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!detailsRef.current?.contains(event.target as Node)) close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      close();
+      detailsRef.current?.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   return (
     <nav
@@ -55,8 +88,15 @@ export function TopNavLinks() {
         );
       })}
 
-      <details className="relative">
-        <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-full px-3.5 font-medium text-muted transition-colors hover:bg-base hover:text-ink [&::-webkit-details-marker]:hidden">
+      <details
+        ref={detailsRef}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+        className="relative"
+      >
+        <summary
+          aria-expanded={open}
+          className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-full px-3.5 font-medium text-muted transition-colors hover:bg-base hover:text-ink [&::-webkit-details-marker]:hidden"
+        >
           Admin
           <ChevronDownIcon className="size-4" />
         </summary>
