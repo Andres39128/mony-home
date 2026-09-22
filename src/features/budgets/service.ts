@@ -80,6 +80,8 @@ export async function getMonth(
       .where(
         and(
           eq(transactions.type, "expense"),
+          // Pending quick-capture rows are placeholders, not spend.
+          eq(transactions.needsDetails, false),
           gte(transactions.date, bounds.start),
           lte(transactions.date, bounds.end),
         ),

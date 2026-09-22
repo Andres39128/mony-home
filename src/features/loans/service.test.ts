@@ -40,7 +40,7 @@ const cardInput: LoanInput = {
   entity: "Visa Banco Nación",
   scope: "common",
   memberId: "",
-  principal: "850.000",
+  principal: "850.000,00",
   annualRate: "",
 };
 
@@ -343,7 +343,7 @@ describe("payment mirrors and true-ups (integration on PGlite)", () => {
         ...cardInput,
         name: "Espejo",
         entity: "Banco Espejo",
-        principal: "1.000",
+        principal: "1.000,00",
         annualRate: "35,5",
       }),
     ).toEqual({ ok: true });
@@ -447,7 +447,7 @@ describe("payment mirrors and true-ups (integration on PGlite)", () => {
     expect(ajustes[0]).toMatchObject({ kind: "interest", memberId: null, amountCents: -20_999 });
 
     // Statement says $1.000 → delta +20000: positive entry, same day converges.
-    expect(await updateOutstanding(appDb, admin, loan.id, "1.000")).toEqual({ ok: true });
+    expect(await updateOutstanding(appDb, admin, loan.id, "1.000,00")).toEqual({ ok: true });
     loanRows = await listLoans(appDb);
     expect(loanRows.find((l) => l.id === loan.id)).toMatchObject({ outstandingCents: 100_000 });
     rows = await db.select().from(loanPayments).where(eq(loanPayments.loanId, loan.id));

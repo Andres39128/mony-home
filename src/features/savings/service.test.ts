@@ -136,7 +136,7 @@ describe("savings goals CRUD (integration on PGlite)", () => {
 
   it("creates goals with AR-formatted target and optional fields", async () => {
     expect(
-      await createGoal(appDb, admin, { ...savingsInput, target: "1.500", deadline: "2027-06-30" }),
+      await createGoal(appDb, admin, { ...savingsInput, target: "1.500,00", deadline: "2027-06-30" }),
     ).toEqual({ ok: true });
     expect(
       await createGoal(appDb, admin, { ...investmentInput, currentValue: "165.000,50" }),
@@ -202,7 +202,7 @@ describe("savings goals CRUD (integration on PGlite)", () => {
         name: "Emergencias",
         scope: "individual",
         memberId,
-        target: "2.000",
+        target: "2.000,00",
       }),
     ).toEqual({ ok: true });
     const [after] = await db.select().from(savingsGoals).where(eq(savingsGoals.id, row.id));

@@ -50,6 +50,13 @@
       "when": 1789757921489,
       "tag": "0006_loans",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790111518898,
+      "tag": "0007_worthless_talisman",
+      "breakpoints": true
     }
   ]
 }

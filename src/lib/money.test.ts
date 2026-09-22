@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centsToNumber, formatCents, formatCentsCompact, MoneyParseError, parseAmountToCents, percentage } from "@/lib/money";
+import { AmbiguousAmountError, centsToNumber, formatCents, formatCentsCompact, MoneyParseError, parseAmountToCents, percentage } from "@/lib/money";
 
 describe("parseAmountToCents", () => {
   it("parses plain integers", () => {
@@ -27,13 +27,35 @@ describe("parseAmountToCents", () => {
     expect(parseAmountToCents("$ 1.500,75")).toBe(150075);
     expect(parseAmountToCents("$1500")).toBe(150000);
     expect(parseAmountToCents(" 1 500 ")).toBe(150000);
-    expect(parseAmountToCents("$ -1.500")).toBe(-150000);
+    expect(parseAmountToCents("$ -1.500,00")).toBe(-150000);
   });
 
-  it("resolves the '1.234' ambiguity to thousands (es-AR convention)", () => {
-    expect(parseAmountToCents("1.234")).toBe(123400);
+  it("keeps the comma-style thousands reading for a trailing 3-digit group", () => {
     expect(parseAmountToCents("1,234")).toBe(123400);
-    expect(parseAmountToCents("1.234.567")).toBe(123456700);
+    expect(parseAmountToCents("1.234.567")).toBe(123456700); // multi-dot: only thousands reading
+  });
+
+  it("rejects a single-dot thousands/decimals collision as ambiguous", () => {
+    // '1.234' could be es-AR thousands (1234) or a dot-decimal typo for 1.23;
+    // the parser refuses to guess, so the user must disambiguate.
+    for (const ambiguous of ["1.234", "12.345", "123.456", "0.285", "1234.567", "$ 1.234"]) {
+      expect(() => parseAmountToCents(ambiguous)).toThrowError(AmbiguousAmountError);
+      try {
+        parseAmountToCents(ambiguous);
+      } catch (error) {
+        expect((error as AmbiguousAmountError).input).toBe(ambiguous);
+        expect(error).toBeInstanceOf(MoneyParseError);
+      }
+    }
+  });
+
+  it("still parses unambiguous inputs exactly as before", () => {
+    expect(parseAmountToCents("1234")).toBe(123400);
+    expect(parseAmountToCents("1.234,56")).toBe(123456);
+    expect(parseAmountToCents("1,23")).toBe(123);
+    expect(parseAmountToCents("12.345,67")).toBe(1234567);
+    expect(parseAmountToCents("1500.75")).toBe(150075); // explicit dot decimals stay accepted
+    expect(parseAmountToCents("2.500,00")).toBe(250000); // formatCents round-trip
   });
 
   it("accepts the other locale style when both separators are present (last wins)", () => {

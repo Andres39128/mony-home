@@ -45,6 +45,11 @@ export type CategoryResult =
   | { ok: true }
   | { ok: false; error: CategoryMutationError };
 
+/** Creation also reports the inserted row id (returned straight from INSERT). */
+export type CategoryCreateResult =
+  | { ok: true; id: string }
+  | { ok: false; error: CategoryMutationError };
+
 export async function listCategories(
   db: Database,
   kind?: "income" | "expense",
@@ -67,15 +72,20 @@ export async function listCategories(
 export async function createCategory(
   db: Database,
   input: CategoryInput,
-): Promise<CategoryResult> {
+): Promise<CategoryCreateResult> {
   try {
-    await db.insert(categories).values({
-      name: input.name,
-      kind: input.kind,
-      color: input.color,
-      icon: input.icon ? input.icon : null,
-    });
-    return { ok: true };
+    // The INSERT itself yields the id: no name-based re-lookup, so a
+    // concurrent same-name category can never be mistaken for this one.
+    const [created] = await db
+      .insert(categories)
+      .values({
+        name: input.name,
+        kind: input.kind,
+        color: input.color,
+        icon: input.icon ? input.icon : null,
+      })
+      .returning({ id: categories.id });
+    return { ok: true, id: created.id };
   } catch (error) {
     // categories.name is UNIQUE.
     if (hasPgError(error, "23505")) return { ok: false, error: "name_taken" };

@@ -2,17 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { categories } from "@/db/schema";
 import { requireUser } from "@/features/auth/session";
 import {
   categorySchema,
   createCategory,
 } from "@/features/categories/service";
 import {
+  createQuickTransaction,
   createTransaction,
   movementSchema,
+  quickMovementSchema,
   removeTransaction,
   updateTransaction,
 } from "@/features/transactions/service";
@@ -35,6 +35,18 @@ function readMovementForm(formData: FormData) {
     groupId: formData.get("groupId") ?? "",
     scope: formData.get("scope") ?? "common",
     note: formData.get("note") ?? "",
+    // Server actions receive File entries natively via FormData.
+    receipt: formData.get("receipt"),
+  };
+}
+
+/** Captura rápida: the receipt is the movement; the rest stays untouched. */
+function readQuickMovementForm(formData: FormData) {
+  return {
+    date: formData.get("date") ?? "",
+    memberId: formData.get("memberId") ?? "",
+    type: formData.get("type") ?? undefined,
+    receipt: formData.get("receipt"),
   };
 }
 
@@ -47,6 +59,14 @@ function mapMovementError(error: string): FormState {
   if (error === "invalid_amount") {
     return { fieldErrors: { amount: "El monto no es válido." } };
   }
+  if (error === "ambiguous_amount") {
+    return {
+      fieldErrors: {
+        amount:
+          "Monto ambiguo: para miles escribe 1234 o 1.234,00; para centavos usa la coma (1,23).",
+      },
+    };
+  }
   if (error === "category_kind_mismatch") {
     return {
       fieldErrors: { categoryId: "La categoría no corresponde al tipo de movimiento." },
@@ -55,11 +75,27 @@ function mapMovementError(error: string): FormState {
   if (error === "envelope_member_mismatch") {
     return { fieldErrors: { envelopeId: "La bolsa no pertenece al integrante del movimiento." } };
   }
+  if (error === "envelope_scope_mismatch") {
+    return {
+      fieldErrors: { envelopeId: "El ámbito de la bolsa no coincide con el ámbito del movimiento." },
+    };
+  }
   if (error === "envelope_inactive") {
     return { fieldErrors: { envelopeId: "La bolsa está inactiva." } };
   }
+  if (error === "member_inactive") {
+    return { fieldErrors: { memberId: "El integrante seleccionado está inactivo." } };
+  }
   if (error === "group_closed") {
     return { fieldErrors: { groupId: "El grupo está cerrado." } };
+  }
+  if (error === "receipt_too_large") {
+    return { fieldErrors: { receipt: "La imagen supera el máximo de 2 MB." } };
+  }
+  if (error === "receipt_invalid_type") {
+    return {
+      fieldErrors: { receipt: "El archivo no es una imagen válida: usá JPG, PNG o WebP." },
+    };
   }
   if (error === "not_found") {
     return { error: "Alguno de los datos seleccionados ya no existe. Recarga e intenta de nuevo." };
@@ -81,6 +117,19 @@ export async function createMovementAction(
   formData: FormData,
 ): Promise<FormState> {
   const user = await requireUser();
+
+  // Captura rápida (momento de afán): only the receipt + date are read; the
+  // movement files as PENDING ("Pendiente incluir detalles.").
+  if (formData.get("quick") === "1") {
+    const parsed = quickMovementSchema.safeParse(readQuickMovementForm(formData));
+    if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
+
+    const result = await createQuickTransaction(getDb(), user, parsed.data);
+    if (!result.ok) return mapMovementError(result.error);
+
+    revalidateMovements();
+    return { ok: true };
+  }
 
   const parsed = movementSchema.safeParse(readMovementForm(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
@@ -170,13 +219,6 @@ export async function createCategoryInlineAction(
       : { error: "No se pudo crear la categoría." };
   }
 
-  // names are UNIQUE — safe lookup for the just-created row.
-  const [created] = await getDb()
-    .select({ id: categories.id })
-    .from(categories)
-    .where(eq(categories.name, parsed.data.name))
-    .limit(1);
-
   revalidateMovements();
-  return { ok: true, categoryId: created?.id, categoryName: parsed.data.name };
+  return { ok: true, categoryId: result.id, categoryName: parsed.data.name };
 }

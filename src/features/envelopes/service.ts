@@ -126,6 +126,8 @@ export async function monthlyProgress(
       and(
         eq(transactions.envelopeId, envelopes.id),
         eq(transactions.type, "expense"),
+        // Pending quick-capture rows are placeholders, not spend.
+        eq(transactions.needsDetails, false),
         gte(transactions.date, bounds.start),
         lte(transactions.date, bounds.end),
       ),

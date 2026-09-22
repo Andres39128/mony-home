@@ -8,14 +8,19 @@ import {
   categories,
   envelopes,
   expenseGroups,
+  movementReceipts,
   transactions,
   users,
 } from "@/db/schema";
 import {
+  PENDING_DETAILS_NOTE,
+  RECEIPT_MAX_BYTES,
+  createQuickTransaction,
   movementSchema,
   createTransaction,
   getTransaction,
   listTransactions,
+  quickMovementSchema,
   removeTransaction,
   todayIso,
   transactionTotals,
@@ -317,7 +322,7 @@ describe("transactions service (integration on PGlite)", () => {
     ).toEqual({ ok: false, error: "category_kind_mismatch" });
   });
 
-  it("rejects an inactive envelope and an individual envelope of another member", async () => {
+  it("rejects an inactive envelope and scope/owner mismatches for individual envelopes", async () => {
     expect(
       await createTransaction(
         appDb,
@@ -325,21 +330,58 @@ describe("transactions service (integration on PGlite)", () => {
         parseInput({ envelopeId: inactiveEnvelope.id }),
       ),
     ).toEqual({ ok: false, error: "envelope_inactive" });
+    // A common-scope movement cannot draw from a personal envelope...
     expect(
       await createTransaction(
         appDb,
         mate,
-        parseInput({ envelopeId: anaEnvelope.id }),
+        parseInput({ envelopeId: anaEnvelope.id, scope: "common" }),
+      ),
+    ).toEqual({ ok: false, error: "envelope_scope_mismatch" });
+    // ...nor an individual movement from a common envelope.
+    expect(
+      await createTransaction(
+        appDb,
+        mate,
+        parseInput({ envelopeId: commonEnvelope.id, scope: "individual" }),
+      ),
+    ).toEqual({ ok: false, error: "envelope_scope_mismatch" });
+    // Same scope, wrong owner → ownership error.
+    expect(
+      await createTransaction(
+        appDb,
+        mate,
+        parseInput({ envelopeId: anaEnvelope.id, scope: "individual" }),
       ),
     ).toEqual({ ok: false, error: "envelope_member_mismatch" });
-    // Ana CAN use her own individual envelope.
+    // Ana CAN use her own individual envelope with an individual movement.
     expect(
       await createTransaction(
         appDb,
         ana,
-        parseInput({ date: "2026-08-21", envelopeId: anaEnvelope.id }),
+        parseInput({ date: "2026-08-21", envelopeId: anaEnvelope.id, scope: "individual" }),
       ),
     ).toEqual({ ok: true });
+  });
+
+  it("rejects movements targeting a deactivated member", async () => {
+    const [inactive] = await db
+      .insert(users)
+      .values({ username: "baja", name: "Baja", passwordHash: "x", isActive: false })
+      .returning();
+    expect(
+      await createTransaction(
+        appDb,
+        admin,
+        parseInput({ memberId: inactive.id, scope: "individual" }),
+      ),
+    ).toEqual({ ok: false, error: "member_inactive" });
+  });
+
+  it("rejects an ambiguous dot-thousands amount with a typed error", async () => {
+    expect(
+      await createTransaction(appDb, mate, parseInput({ amount: "1.234" })),
+    ).toEqual({ ok: false, error: "ambiguous_amount" });
   });
 
   it("rejects a closed group for new movements", async () => {
@@ -374,7 +416,7 @@ describe("transactions service (integration on PGlite)", () => {
         appDb,
         mate,
         fixtureTx.id,
-        parseInput({ amount: "2.500", note: "Compra mensual" }),
+        parseInput({ amount: "2.500,00", note: "Compra mensual" }),
       );
       expect(result).toEqual({ ok: true });
       const [row] = await db.select().from(transactions).where(eq(transactions.id, fixtureTx.id));
@@ -403,7 +445,7 @@ describe("transactions service (integration on PGlite)", () => {
         appDb,
         admin,
         anaTx.id,
-        parseInput({ memberId: anaId, amount: "7.000" }),
+        parseInput({ memberId: anaId, amount: "7.000,00" }),
       );
       expect(result).toEqual({ ok: true });
       const [row] = await db.select().from(transactions).where(eq(transactions.id, anaTx.id));
@@ -452,9 +494,17 @@ describe("transactions service (integration on PGlite)", () => {
         appDb,
         mate,
         fixtureTx.id,
-        parseInput({ envelopeId: anaEnvelope.id }),
+        parseInput({ envelopeId: anaEnvelope.id, scope: "individual" }),
       ),
     ).toEqual({ ok: false, error: "envelope_member_mismatch" });
+    expect(
+      await updateTransaction(
+        appDb,
+        mate,
+        fixtureTx.id,
+        parseInput({ envelopeId: anaEnvelope.id, scope: "common" }),
+      ),
+    ).toEqual({ ok: false, error: "envelope_scope_mismatch" });
   });
 
   describe("delete permission matrix (rule 6)", () => {
@@ -493,6 +543,183 @@ describe("transactions service (integration on PGlite)", () => {
     });
   });
 
+  describe("quick capture + receipts", () => {
+    const JPEG_HEAD = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01];
+    const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d];
+    const WEBP_HEAD = [0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50];
+
+    function imageFile(mime = "image/jpeg", bytes: number[] = JPEG_HEAD): File {
+      return new File([new Uint8Array(bytes)], "ticket", { type: mime });
+    }
+
+    function quickParse(overrides: Record<string, unknown> = {}) {
+      // memberId "" mirrors the action, which always sends the field.
+      return quickMovementSchema.parse({
+        receipt: imageFile(),
+        date: "",
+        memberId: "",
+        ...overrides,
+      });
+    }
+
+    it("quick create files a pending movement (0, no category) with its receipt", async () => {
+      const totalsBefore = await transactionTotals(appDb, { month: MONTH });
+      const result = await createQuickTransaction(appDb, ana, quickParse({ date: "2026-09-15" }));
+      expect(result).toEqual({ ok: true });
+
+      const [row] = await db
+        .select()
+        .from(transactions)
+        .where(and(eq(transactions.memberId, anaId), eq(transactions.needsDetails, true)));
+      expect(row).toMatchObject({
+        date: "2026-09-15",
+        amountCents: 0,
+        type: "expense",
+        categoryId: null,
+        memberId: anaId,
+        scope: "common",
+        note: PENDING_DETAILS_NOTE,
+      });
+
+      const [receipt] = await db
+        .select()
+        .from(movementReceipts)
+        .where(eq(movementReceipts.transactionId, row.id));
+      expect(receipt.mimeType).toBe("image/jpeg");
+      expect(Array.from(receipt.bytes as Uint8Array)).toEqual(JPEG_HEAD);
+
+      // Totals unchanged: pending rows are placeholders, not money...
+      expect(await transactionTotals(appDb, { month: MONTH })).toEqual(totalsBefore);
+
+      // ...but the list keeps them visible so they can be completed.
+      const listed = await listTransactions(appDb, { month: MONTH });
+      expect(listed.find((t) => t.id === row.id)).toMatchObject({
+        needsDetails: true,
+        receiptId: receipt.id,
+        categoryId: null,
+        categoryName: null,
+      });
+    });
+
+    it("completing a pending movement counts it in totals again", async () => {
+      // A pending row WITH a positive amount must still stay out of totals.
+      const [pending] = await db
+        .insert(transactions)
+        .values({
+          date: "2026-09-18",
+          amountCents: 5_000,
+          type: "expense",
+          memberId: mateId,
+          needsDetails: true,
+          note: PENDING_DETAILS_NOTE,
+        })
+        .returning();
+      const totalsPending = await transactionTotals(appDb, { month: MONTH });
+
+      const result = await updateTransaction(
+        appDb,
+        admin,
+        pending.id,
+        parseInput({ date: "2026-09-18", amount: "5.000,00", memberId: mateId }),
+      );
+      expect(result).toEqual({ ok: true });
+
+      const [row] = await db.select().from(transactions).where(eq(transactions.id, pending.id));
+      expect(row).toMatchObject({
+        needsDetails: false,
+        amountCents: 500_000,
+        categoryId: expenseCat.id,
+        note: null, // the pending annotation is cleared on completion
+      });
+
+      const totalsCompleted = await transactionTotals(appDb, { month: MONTH });
+      expect(totalsCompleted.expenseCents).toBe(totalsPending.expenseCents + 500_000);
+      expect(totalsCompleted.incomeCents).toBe(totalsPending.incomeCents);
+    });
+
+    it("rejects oversized, wrong-typed and fake-byte receipts with typed errors", async () => {
+      const oversize = new File([new Uint8Array(RECEIPT_MAX_BYTES + 1)], "big.jpg", {
+        type: "image/jpeg",
+      });
+      expect(
+        await createQuickTransaction(appDb, mate, quickParse({ receipt: oversize })),
+      ).toEqual({ ok: false, error: "receipt_too_large" });
+
+      // Declared GIF → outside the allow-list.
+      expect(
+        await createQuickTransaction(appDb, mate, quickParse({ receipt: imageFile("image/gif") })),
+      ).toEqual({ ok: false, error: "receipt_invalid_type" });
+
+      // Declared JPEG but wrong magic bytes → sniffed and rejected.
+      const fake = imageFile("image/jpeg", [0x00, 0x11, 0x22, 0x33, 0, 0, 0, 0, 0, 0, 0, 0]);
+      expect(
+        await createQuickTransaction(appDb, mate, quickParse({ receipt: fake })),
+      ).toEqual({ ok: false, error: "receipt_invalid_type" });
+    });
+
+    it("quick schema demands a real image file", () => {
+      expect(quickMovementSchema.safeParse({ date: "" }).success).toBe(false);
+      expect(
+        quickMovementSchema.safeParse({
+          date: "",
+          receipt: new File([], "empty.jpg", { type: "image/jpeg" }),
+        }).success,
+      ).toBe(false);
+    });
+
+    it("full movements attach an optional receipt; update replaces it", async () => {
+      const createResult = await createTransaction(
+        appDb,
+        mate,
+        parseInput({
+          date: "2026-08-25",
+          amount: "900",
+          receipt: imageFile("image/png", PNG_HEAD),
+        }),
+      );
+      expect(createResult).toEqual({ ok: true });
+      const [created] = await db
+        .select()
+        .from(transactions)
+        .where(and(eq(transactions.memberId, mateId), eq(transactions.date, "2026-08-25")));
+      expect(created.needsDetails).toBe(false);
+      const [receipt] = await db
+        .select()
+        .from(movementReceipts)
+        .where(eq(movementReceipts.transactionId, created.id));
+      expect(receipt.mimeType).toBe("image/png");
+
+      // Replacing on edit: still exactly one receipt, now a WebP.
+      expect(
+        await updateTransaction(
+          appDb,
+          mate,
+          created.id,
+          parseInput({ date: "2026-08-25", amount: "900", receipt: imageFile("image/webp", WEBP_HEAD) }),
+        ),
+      ).toEqual({ ok: true });
+      const receipts = await db
+        .select()
+        .from(movementReceipts)
+        .where(eq(movementReceipts.transactionId, created.id));
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0].mimeType).toBe("image/webp");
+
+      // Updating WITHOUT a receipt leaves the stored one untouched.
+      expect(
+        await updateTransaction(
+          appDb,
+          mate,
+          created.id,
+          parseInput({ date: "2026-08-25", amount: "1.000,00" }),
+        ),
+      ).toEqual({ ok: true });
+      expect(
+        await db.select().from(movementReceipts).where(eq(movementReceipts.transactionId, created.id)),
+      ).toHaveLength(1);
+    });
+  });
+
   describe("input schema (trust boundary)", () => {
     it("rejects malformed dates, ids and over-long notes", () => {
       expect(movementSchema.safeParse({ ...rawInput(), date: "17/09/2026" }).success).toBe(false);
@@ -508,5 +735,20 @@ describe("transactions service (integration on PGlite)", () => {
       expect(movementSchema.parse({ ...rawInput(), date: "2027-01-31" }).date).toBe("2027-01-31");
       expect(movementSchema.parse({ ...rawInput(), date: "" }).date).toBe(todayIso());
     });
+  });
+});
+
+/**
+ * Pure clock tests (no DB): 'today' must follow the app timezone
+ * (America/Argentina/Buenos_Aires), never the server's local TZ — a UTC
+ * server would otherwise file no-JS submissions under the wrong day around
+ * midnight (00:00-03:00 AR time).
+ */
+describe("todayIso (app timezone)", () => {
+  it("formats the calendar day in America/Argentina/Buenos_Aires as YYYY-MM-DD", () => {
+    // 2026-09-22 01:59 UTC is still 2026-09-21 in Buenos Aires (UTC-3).
+    expect(todayIso(new Date("2026-09-22T01:59:00Z"))).toBe("2026-09-21");
+    // 03:00 UTC is already 2026-09-22 there.
+    expect(todayIso(new Date("2026-09-22T03:00:00Z"))).toBe("2026-09-22");
   });
 });

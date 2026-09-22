@@ -7,7 +7,7 @@
  * Deleting a group is ALWAYS allowed: transactions.group_id is FK SET NULL,
  * so movements survive without a group.
  */
-import { asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { expenseGroups, transactions } from "@/db/schema";
 import type { Database } from "@/db";
@@ -44,7 +44,15 @@ export async function listExpenseGroups(db: Database): Promise<ExpenseGroupView[
       transactionCount: count(transactions.id),
     })
     .from(expenseGroups)
-    .leftJoin(transactions, eq(transactions.groupId, expenseGroups.id))
+    .leftJoin(
+      transactions,
+      and(
+        eq(transactions.groupId, expenseGroups.id),
+        // Pending quick-capture rows never carry a group, but keep the
+        // count honest if that ever changes.
+        eq(transactions.needsDetails, false),
+      ),
+    )
     .groupBy(expenseGroups.id)
     .orderBy(asc(expenseGroups.name));
 }

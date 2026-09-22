@@ -17,6 +17,7 @@ import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { percentage } from "@/lib/money";
 import {
+  completedOnly,
   filtersWhere,
   type TransactionFilters,
 } from "@/features/transactions/service";
@@ -38,17 +39,20 @@ export async function expensesByCategory(
   filters: TransactionFilters = {},
 ): Promise<CategoryExpenseSlice[]> {
   // The chart is about expenses; the type filter is forced, never inherited.
+  // Pending quick-capture rows are placeholders, not money → excluded.
   const rows = await db
     .select({
-      categoryId: transactions.categoryId,
+      // categories.id (inner-joined): never null, unlike the nullable
+      // transactions.category_id of pending rows.
+      categoryId: categories.id,
       name: categories.name,
       color: categories.color,
       cents: sum(transactions.amountCents),
     })
     .from(transactions)
     .innerJoin(categories, eq(transactions.categoryId, categories.id))
-    .where(filtersWhere({ ...filters, type: "expense" }))
-    .groupBy(transactions.categoryId, categories.name, categories.color)
+    .where(completedOnly(filtersWhere({ ...filters, type: "expense" })))
+    .groupBy(categories.id, categories.name, categories.color)
     .orderBy(desc(sum(transactions.amountCents)));
 
   const slices = rows.map((row) => ({ ...row, cents: Number(row.cents ?? 0) }));
@@ -103,7 +107,7 @@ export async function monthlyTotals(
         gte(transactions.date, `${months[0]}-01`),
         lte(transactions.date, endingBounds.end),
         // The window replaces any incoming month filter.
-        filtersWhere({ ...filters, month: undefined }),
+        completedOnly(filtersWhere({ ...filters, month: undefined })),
       ),
     )
     .groupBy(monthKey);
@@ -178,7 +182,7 @@ export async function cumulativeBudgetVsActual(
           eq(transactions.type, "expense"),
           gte(transactions.date, `${firstMonth}-01`),
           lte(transactions.date, endBounds.end),
-          filtersWhere({ ...filters, month: undefined, type: undefined }),
+          completedOnly(filtersWhere({ ...filters, month: undefined, type: undefined })),
         ),
       )
       .groupBy(sql`to_char(${transactions.date}, 'YYYY-MM')`),

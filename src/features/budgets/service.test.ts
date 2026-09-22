@@ -82,7 +82,7 @@ describe("budgets service (integration on PGlite)", () => {
   it("roundtrips set + get with exact cents, totals and reused context totals", async () => {
     await seedSeptemberMovements();
     const entries: BudgetEntryInput[] = [
-      { categoryId: superId, amount: "1.000" },
+      { categoryId: superId, amount: "1.000,00" },
       { categoryId: ocioId, amount: "500,50" },
     ];
     expect(await setForMonth(appDb, admin, "2026-09", entries)).toEqual({ ok: true });
@@ -153,7 +153,7 @@ describe("budgets service (integration on PGlite)", () => {
 
   it("replaces the whole month on a second set (old rows fully gone)", async () => {
     expect(
-      await setForMonth(appDb, admin, "2026-09", [{ categoryId: superId, amount: "2.000" }]),
+      await setForMonth(appDb, admin, "2026-09", [{ categoryId: superId, amount: "2.000,00" }]),
     ).toEqual({ ok: true });
 
     const view = await getMonth(appDb, "2026-09");
@@ -175,7 +175,7 @@ describe("budgets service (integration on PGlite)", () => {
   it("copies budgets from the previous month and reports nothing_to_copy when empty", async () => {
     expect(
       await setForMonth(appDb, admin, "2026-08", [
-        { categoryId: superId, amount: "1.500" },
+        { categoryId: superId, amount: "1.500,00" },
         { categoryId: ocioId, amount: "250" },
       ]),
     ).toEqual({ ok: true });

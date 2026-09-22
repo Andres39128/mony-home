@@ -234,7 +234,7 @@ describe("catchUpInterest (integration on PGlite)", () => {
       .returning();
 
     // Statement says $1.000: +80000 as ONE "Ajuste de saldo" row.
-    expect(await updateOutstanding(appDb, user, loan.id, "1.000")).toEqual({ ok: true });
+    expect(await updateOutstanding(appDb, user, loan.id, "1.000,00")).toEqual({ ok: true });
     let rows = await ledgerRows(db, loan.id);
     const ajuste = rows.find((r) => r.note === "Ajuste de saldo")!;
     expect(ajuste).toMatchObject({ kind: "interest", memberId: null, amountCents: 80_000 });

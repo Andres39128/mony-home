@@ -7,6 +7,7 @@ import {
   categories,
   envelopes,
   expenseGroups,
+  movementReceipts,
   loanPayments,
   loans,
   savingsContributions,
@@ -306,6 +307,77 @@ describe("migration 0005 (savings realism invariants)", () => {
     await db.delete(savingsContributions).where(eq(savingsContributions.id, contribution.id));
 
     const remaining = await db.select().from(transactions).where(eq(transactions.id, mirror.id));
+    expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("migration 0007 (quick capture invariants)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("completed movements require amount + category; pending rows are exempt", async () => {
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u11", passwordHash: "h", name: "U11" })
+      .returning();
+    const [category] = await db
+      .insert(categories)
+      .values({ name: "C11", kind: "expense" })
+      .returning();
+
+    // Completed without category → rejected by the category CHECK.
+    await expectPgError(
+      db.insert(transactions).values({ amountCents: 100, type: "expense", memberId: user.id }),
+      "23514",
+    );
+    // Completed with a 0 amount → rejected by the amount CHECK.
+    await expectPgError(
+      db.insert(transactions).values({
+        amountCents: 0,
+        type: "expense",
+        categoryId: category.id,
+        memberId: user.id,
+      }),
+      "23514",
+    );
+    // Pending with 0 and no category → legal (quick capture).
+    const [pending] = await db
+      .insert(transactions)
+      .values({ amountCents: 0, type: "expense", memberId: user.id, needsDetails: true })
+      .returning();
+    expect(pending.categoryId).toBeNull();
+    expect(pending.needsDetails).toBe(true);
+  });
+
+  it("deleting a movement cascades to its receipt", async () => {
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u12", passwordHash: "h", name: "U12" })
+      .returning();
+    const [pending] = await db
+      .insert(transactions)
+      .values({ amountCents: 0, type: "expense", memberId: user.id, needsDetails: true })
+      .returning();
+    await db.insert(movementReceipts).values({
+      transactionId: pending.id,
+      bytes: Buffer.from([1, 2, 3]),
+      mimeType: "image/png",
+    });
+
+    await db.delete(transactions).where(eq(transactions.id, pending.id));
+
+    const remaining = await db
+      .select()
+      .from(movementReceipts)
+      .where(eq(movementReceipts.transactionId, pending.id));
     expect(remaining).toHaveLength(0);
   });
 });

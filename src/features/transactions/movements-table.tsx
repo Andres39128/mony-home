@@ -8,7 +8,7 @@ import type { MovementFormOptions } from "@/features/transactions/form-options";
 import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
 import { FormError } from "@/components/forms";
-import { ArrowsIcon, PencilIcon, TrashIcon } from "@/components/icons";
+import { ArrowsIcon, PaperclipIcon, PencilIcon, TrashIcon } from "@/components/icons";
 import { Card } from "@/components/card";
 import { Sheet } from "@/components/sheet";
 
@@ -37,6 +37,31 @@ function amountChipClass(type: TransactionView["type"]): string {
 /** Scope chip: Común → mint, Individual → honey (constant across themes). */
 function scopeChipClass(scope: TransactionView["scope"]): string {
   return scope === "individual" ? "bg-honey text-on-accent" : "bg-mint text-on-accent";
+}
+
+/** Pending quick-capture chip: honey soft tint + ink text (both themes). */
+const PENDING_CHIP_CLASS = "rounded-full bg-honey-soft px-2 py-0.5 text-xs font-medium text-ink";
+
+/** Category cell/line content: pending rows have no category yet. */
+function CategoryCell({ row, className }: { row: TransactionView; className?: string }) {
+  if (row.needsDetails) {
+    return <span className={PENDING_CHIP_CLASS}>Pendiente</span>;
+  }
+  return (
+    <span className={className}>
+      <span
+        aria-hidden
+        className="inline-block size-2.5 shrink-0 rounded-full"
+        style={{ backgroundColor: row.categoryColor ?? undefined }}
+      />
+      <span className="truncate">{row.categoryName}</span>
+    </span>
+  );
+}
+
+/** Small receipt indicator: paperclip next to the row's detail. */
+function ReceiptIndicator() {
+  return <PaperclipIcon className="size-3.5 shrink-0 text-muted" />;
 }
 
 /**
@@ -148,12 +173,7 @@ export default function MovementsTable({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="flex items-center gap-2 text-sm font-medium text-ink">
-                        <span
-                          aria-hidden
-                          className="inline-block size-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: row.categoryColor }}
-                        />
-                        <span className="truncate">{row.categoryName}</span>
+                        <CategoryCell row={row} className="flex min-w-0 items-center gap-2" />
                       </p>
                       <p className="mt-0.5 text-xs text-muted">
                         {row.memberName} · {shortDate(row.date)}
@@ -172,6 +192,10 @@ export default function MovementsTable({
                     >
                       {row.scope === "individual" ? "Individual" : "Común"}
                     </span>
+                    {row.needsDetails && (
+                      <span className={PENDING_CHIP_CLASS}>Pendiente</span>
+                    )}
+                    {row.receiptId && <ReceiptIndicator />}
                     {row.envelopeName && (
                       <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
                         {row.envelopeName}
@@ -217,17 +241,13 @@ export default function MovementsTable({
                   <tr key={row.id} className="border-b border-line last:border-0">
                     <td className="whitespace-nowrap px-4 py-3 text-muted">{shortDate(row.date)}</td>
                     <td className="px-4 py-3">
-                      <span className="flex items-center gap-2">
-                        <span
-                          aria-hidden
-                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: row.categoryColor }}
-                        />
-                        {row.categoryName}
-                      </span>
+                      <CategoryCell row={row} className="flex items-center gap-2" />
                     </td>
-                    <td className="max-w-48 truncate px-4 py-3 text-muted">
-                      {row.note ?? "—"}
+                    <td className="max-w-48 px-4 py-3 text-muted">
+                      <span className="flex items-center gap-1.5">
+                        {row.receiptId && <ReceiptIndicator />}
+                        <span className="truncate">{row.note ?? "—"}</span>
+                      </span>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted">{row.memberName}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted">

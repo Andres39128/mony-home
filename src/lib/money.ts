@@ -9,6 +9,12 @@
  * - When only ONE separator type appears and the trailing group has exactly
  *   3 digits, it is a thousands separator (es-AR convention: '1.234' = 1234);
  *   any other trailing length is decimals ('1500,75' = 1500.75).
+ * - EXCEPT when that single separator is a '.' with no other groups
+ *   ('1.234', '12.345'): the es-AR thousands reading (1234) and a
+ *   dot-as-decimal typo for '1.23' collide, so AmbiguousAmountError is
+ *   thrown. Comma inputs ('2,285' = 2285) and multi-dot groups
+ *   ('1.234.567' = 1234567) keep the thousands reading — neither admits a
+ *   decimal reading.
  * - More than two decimal digits round half-up to the nearest cent
  *   ('1.2345' → 123 cents).
  * - Negative inputs ('-1500,75') parse to negative cents; positivity of
@@ -22,6 +28,14 @@ export class MoneyParseError extends Error {
     super(`Cannot parse amount "${input}": ${reason}`);
     this.name = "MoneyParseError";
     this.input = input;
+  }
+}
+
+/** A single-dot '1.234' input: thousands (1234) or dot-decimal typo for 1.23? */
+export class AmbiguousAmountError extends MoneyParseError {
+  constructor(input: string) {
+    super(input, "ambiguous amount — write 1234 or 1.234,00 for thousands, or 1,23 for decimals");
+    this.name = "AmbiguousAmountError";
   }
 }
 
@@ -78,7 +92,12 @@ export function parseAmountToCents(input: string): number {
       // Only one separator type present.
       const groups = intRaw.split(decSep);
       if (decPart.length === 3) {
-        // Ambiguous trailing 3-digit group → es-AR thousands: '1.234' = 1234.
+        // Trailing 3-digit group → es-AR thousands: '1.234' = 1234. With a
+        // single dot and no comma the decimal reading ('1.23' + stray digit)
+        // collides, so that one shape is rejected instead of guessed.
+        if (decSep === "." && groups.length === 1) {
+          throw new AmbiguousAmountError(input);
+        }
         validateGroups(groups, input);
         intPart = groups.join("") + decPart;
         decPart = "";

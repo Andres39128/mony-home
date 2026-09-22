@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -14,6 +15,13 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+/** Postgres bytea — receipt image bytes (drivers map Buffer both ways). */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 /**
  * Database schema for mony-home — single source of truth.
@@ -112,9 +120,7 @@ export const transactions = pgTable(
     date: date("date", { mode: "string" }).notNull().default(sql`CURRENT_DATE`),
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
     type: transactionTypeEnum("type").notNull(),
-    categoryId: uuid("category_id")
-      .notNull()
-      .references(() => categories.id, { onDelete: "restrict" }),
+    categoryId: uuid("category_id").references(() => categories.id, { onDelete: "restrict" }),
     memberId: uuid("member_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -130,11 +136,22 @@ export const transactions = pgTable(
     }),
     scope: scopeKindEnum("scope").notNull().default("common"),
     note: text("note"),
+    /** Quick-capture placeholder ("momento de afán"): details pending. */
+    needsDetails: boolean("needs_details").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check("transactions_amount_positive", sql`${table.amountCents} > 0`),
+    // Completed movements must be positive and categorized; pending
+    // quick-capture rows are exempt (they start at 0 with no category).
+    check(
+      "transactions_completed_amount_positive",
+      sql`${table.needsDetails} OR ${table.amountCents} > 0`,
+    ),
+    check(
+      "transactions_completed_category_present",
+      sql`${table.needsDetails} OR ${table.categoryId} IS NOT NULL`,
+    ),
     index("transactions_date_idx").on(table.date),
     index("transactions_category_id_idx").on(table.categoryId),
     index("transactions_member_id_idx").on(table.memberId),
@@ -144,6 +161,23 @@ export const transactions = pgTable(
     index("transactions_loan_payment_id_idx").on(table.loanPaymentId),
   ],
 );
+
+/**
+ * Receipt images attached to movements (max one per movement, enforced by the
+ * service: attaching on edit deletes the previous row first). Bytes live in
+ * Postgres — the app runs on serverless with no writable disk. Deletion of
+ * the movement cascades to its receipt.
+ */
+export const movementReceipts = pgTable("movement_receipts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  transactionId: uuid("transaction_id")
+    .notNull()
+    .references(() => transactions.id, { onDelete: "cascade" }),
+  bytes: bytea("bytes").notNull(),
+  /** Sniffed/allow-listed image type: image/jpeg | image/png | image/webp. */
+  mimeType: text("mime_type").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const assistantUsage = pgTable(
   "assistant_usage",

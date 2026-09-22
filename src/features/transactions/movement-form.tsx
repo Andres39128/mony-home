@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useActionState, useTransition } from "react";
+import { useEffect, useRef, useState, useActionState, useTransition, type ChangeEvent } from "react";
 import type { CategoryView } from "@/features/categories/service";
 import type { EnvelopeView } from "@/features/envelopes/service";
 import type { ExpenseGroupView } from "@/features/expense-groups/service";
@@ -38,6 +38,9 @@ interface MovementFormProps {
 }
 
 const INLINE_CATEGORY = "__new__";
+
+/** Client-side receipt cap; keep in sync with the service's RECEIPT_MAX_BYTES. */
+const MAX_RECEIPT_BYTES = 2 * 1024 * 1024;
 
 /** Client-local ISO date ('YYYY-MM-DD') — the authoritative "today" for entry. */
 function localToday(): string {
@@ -133,6 +136,8 @@ export default function MovementForm({
   const [extraCategories, setExtraCategories] = useState<
     { id: string; name: string; kind: "income" | "expense" }[]
   >([]);
+  /** Client-side best effort; the service re-checks size and file bytes. */
+  const [receiptError, setReceiptError] = useState<string | null>(null);
 
   const amountRef = useRef<HTMLInputElement>(null);
   const dateRef = useRef<HTMLInputElement>(null);
@@ -152,6 +157,17 @@ export default function MovementForm({
     const result = await baseAction(prev, formData);
     if (result.ok) onSuccess?.();
     return result;
+  }
+
+  // Best-effort pre-submit size check; magic bytes and MIME stay server-side.
+  function changeReceipt(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file && file.size > MAX_RECEIPT_BYTES) {
+      setReceiptError("La imagen no puede superar los 2 MB.");
+      event.target.value = "";
+    } else {
+      setReceiptError(null);
+    }
   }
 
   // Inline category creation runs OUTSIDE the main form (explicit action
@@ -223,19 +239,82 @@ export default function MovementForm({
   const groupOptions = groups.filter((group) => group.status === "active" || group.id === groupId);
 
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form action={formAction} className="group flex flex-col gap-4">
       {mode === "edit" && transaction && <input type="hidden" name="id" value={transaction.id} />}
 
+      {/* Pending quick-capture being completed: visible annotation + its image. */}
+      {mode === "edit" && transaction?.needsDetails && (
+        <p className="rounded-lg bg-honey px-3 py-2 text-sm font-medium text-on-accent">
+          Pendiente incluir detalles: completá monto y categoría para cerrar el movimiento.
+        </p>
+      )}
+      {transaction?.receiptId && (
+        <div className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Comprobante actual</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/receipts/${transaction.receiptId}`}
+            alt="Comprobante del movimiento"
+            className="max-h-48 w-fit rounded-lg border border-line"
+          />
+        </div>
+      )}
+
+      {/* Captura rápida toggle: native radios + CSS (works without JS). */}
+      {mode === "create" && (
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-muted">Modo de carga</span>
+          <div className="inline-flex w-fit overflow-hidden rounded-lg border border-line">
+            <label className="cursor-pointer bg-surface px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base has-checked:bg-ink has-checked:text-base">
+              <input
+                type="radio"
+                name="quick"
+                value="0"
+                defaultChecked
+                className="sr-only"
+              />
+              Completo
+            </label>
+            <label className="cursor-pointer bg-surface px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base has-checked:bg-ink has-checked:text-base">
+              <input
+                type="radio"
+                name="quick"
+                id="quick-on"
+                value="1"
+                className="sr-only"
+              />
+              Captura rápida
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Quick-mode notice: shown only when "Captura rápida" is checked. */}
+      {mode === "create" && (
+        <p
+          className="hidden rounded-lg border border-line bg-base px-3 py-2 text-sm text-muted group-has-[#quick-on:checked]:block"
+        >
+          ¿Momento de afán? Se guarda solo la foto y el movimiento queda{" "}
+          <span className="font-medium text-ink">Pendiente incluir detalles</span>. Después
+          lo editás para completar monto y categoría.
+        </p>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm">
+        <label
+          className="flex flex-col gap-1 text-sm group-has-[#quick-on:checked]:hidden"
+        >
           <span className="font-medium text-muted">Monto</span>
           <input
             ref={amountRef}
             name="amount"
-            defaultValue={transaction ? formatCents(transaction.amountCents) : undefined}
+            defaultValue={
+              transaction && !transaction.needsDetails
+                ? formatCents(transaction.amountCents)
+                : undefined
+            }
             inputMode="decimal"
             placeholder="1.234,56"
-            required
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.amount} />
@@ -253,7 +332,21 @@ export default function MovementForm({
         </label>
       </div>
 
-      <section className="flex flex-col gap-4 border-t border-line pt-4">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="font-medium text-muted">Comprobante (imagen)</span>
+        <input
+          type="file"
+          name="receipt"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={changeReceipt}
+          className={inputClass}
+        />
+        <FieldError message={receiptError ?? state.fieldErrors?.receipt} />
+      </label>
+
+      <section
+        className="flex flex-col gap-4 border-t border-line pt-4 group-has-[#quick-on:checked]:hidden"
+      >
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Detalles</h3>
 
         <div className="flex flex-col gap-1">
@@ -327,7 +420,6 @@ export default function MovementForm({
                 setCategoryId(event.target.value);
               }
             }}
-            required
             className={inputClass}
           >
             <option value="" disabled>
@@ -431,7 +523,11 @@ export default function MovementForm({
         <input
           ref={noteRef}
           name="note"
-          defaultValue={transaction?.note ?? undefined}
+          // Pending rows keep their "Pendiente incluir detalles." annotation
+          // out of the input, so completing them clears it (empty note → null).
+          defaultValue={
+            transaction && !transaction.needsDetails ? transaction.note ?? undefined : undefined
+          }
           maxLength={200}
           className={inputClass}
         />

@@ -56,7 +56,7 @@ describe("categories service (integration on PGlite)", () => {
 
   it("creates a category with an empty icon normalized to null", async () => {
     const result = await createCategory(appDb, validInput);
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, id: expect.any(String) });
 
     const [row] = await db.select().from(categories).where(eq(categories.name, "Supermercado"));
     expect(row).toMatchObject({ kind: "expense", color: "#ef4444", icon: null, isActive: true });
@@ -190,7 +190,7 @@ describe("categories service (integration on PGlite)", () => {
 
   it("enforces authorization at service level (member can create, not administer)", async () => {
     const created = await createCategory(appDb, { ...validInput, name: "DeMiembro" });
-    expect(created).toEqual({ ok: true });
+    expect(created).toEqual({ ok: true, id: expect.any(String) });
     const [row] = await db.select().from(categories).where(eq(categories.name, "DeMiembro"));
 
     expect(await updateCategory(appDb, member, row.id, validInput)).toEqual({
