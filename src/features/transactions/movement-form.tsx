@@ -8,6 +8,7 @@ import type { TransactionView } from "@/features/transactions/service";
 import type { InlineCategoryState } from "@/features/transactions/actions";
 import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
+import { compressReceiptImage } from "@/lib/receipt-image";
 import { FALLBACK_COLOR } from "@/features/analytics/transform";
 import { FieldError, FormError, inputClass } from "@/components/forms";
 
@@ -138,10 +139,14 @@ export default function MovementForm({
   >([]);
   /** Client-side best effort; the service re-checks size and file bytes. */
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  /** Object-URL preview of the pending local selection (create AND edit). */
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [receiptProcessing, setReceiptProcessing] = useState(false);
 
   const amountRef = useRef<HTMLInputElement>(null);
   const dateRef = useRef<HTMLInputElement>(null);
   const noteRef = useRef<HTMLInputElement>(null);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
 
   // Mount: focus the amount and take the user-local "today" (the server date
   // is only an SSR fallback, so swapping the value avoids hydration drift).
@@ -149,6 +154,14 @@ export default function MovementForm({
     amountRef.current?.focus();
     if (!transaction && dateRef.current) dateRef.current.value = localToday();
   }, [transaction]);
+
+  // Reclaim the preview blob whenever it is replaced or the form unmounts
+  // (sheet close). Cleanup only — no state updates.
+  useEffect(() => {
+    return () => {
+      if (receiptPreview) URL.revokeObjectURL(receiptPreview);
+    };
+  }, [receiptPreview]);
 
   // Post-success behavior lives in the action wrapper (async callback, not an
   // effect): the caller closes its sheet (or the /nuevo page's server action
@@ -159,15 +172,69 @@ export default function MovementForm({
     return result;
   }
 
-  // Best-effort pre-submit size check; magic bytes and MIME stay server-side.
-  function changeReceipt(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file && file.size > MAX_RECEIPT_BYTES) {
+  // ONE canonical name="receipt" input serves both capture paths: the camera
+  // intent is set right before the click and cleared again on selection, so
+  // two same-name inputs can never collide in FormData.
+  function openReceiptPicker(capture: boolean) {
+    const input = receiptInputRef.current;
+    if (!input) return;
+    // setAttribute/removeAttribute instead of the .capture IDL property:
+    // reflection support varies across browsers, the attribute does not.
+    if (capture) input.setAttribute("capture", "environment");
+    else input.removeAttribute("capture");
+    input.click();
+  }
+
+  function clearReceiptSelection() {
+    if (receiptInputRef.current) receiptInputRef.current.value = "";
+    setReceiptPreview(null);
+    setReceiptError(null);
+  }
+
+  // Best-effort pre-submit pipeline: compress camera-sized images first, then
+  // run the client 2 MB check on the RESULT; magic bytes and MIME stay
+  // server-side. The compressed File is swapped into the input via
+  // DataTransfer so FormData still carries a single "receipt" entry.
+  async function changeReceipt(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    // The capture mode is single-shot: reset it so a later plain pick can't
+    // inherit the camera intent (e.g. after a cancelled camera open).
+    input.removeAttribute("capture");
+    const file = input.files?.[0];
+    if (!file) return;
+
+    setReceiptProcessing(true);
+    const compressed = await compressReceiptImage(file);
+    setReceiptProcessing(false);
+
+    // The user hit "Quitar" (or picked another file) while compressing:
+    // nothing pending, nothing to preview.
+    if (!input.files?.length) return;
+
+    if (compressed.size > MAX_RECEIPT_BYTES) {
       setReceiptError("La imagen no puede superar los 2 MB.");
-      event.target.value = "";
-    } else {
-      setReceiptError(null);
+      input.value = "";
+      setReceiptPreview(null);
+      return;
     }
+
+    // Swap the re-encoded file into the input. If the DataTransfer
+    // constructor is unsupported, the original file stays and the server
+    // cap still rejects oversize uploads with its own message.
+    let pending = file;
+    if (compressed !== file) {
+      try {
+        const transfer = new DataTransfer();
+        transfer.items.add(compressed);
+        input.files = transfer.files;
+        pending = compressed;
+      } catch {
+        // Older Safari: keep the original, server validation is authoritative.
+      }
+    }
+
+    setReceiptPreview(URL.createObjectURL(pending));
+    setReceiptError(null);
   }
 
   // Inline category creation runs OUTSIDE the main form (explicit action
@@ -332,17 +399,68 @@ export default function MovementForm({
         </label>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
+      {/* Comprobante: two phone-first capture affordances sharing ONE
+          canonical input. Without JS the buttons do nothing, so they hide
+          via the scripting media query and the plain input stays usable. */}
+      <div className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-muted">Comprobante (imagen)</span>
+        <div className="flex flex-wrap gap-2 [@media(scripting:none)]:hidden">
+          <button
+            type="button"
+            onClick={() => openReceiptPicker(true)}
+            className="inline-flex min-h-11 items-center rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-base"
+          >
+            Tomar foto
+          </button>
+          <button
+            type="button"
+            onClick={() => openReceiptPicker(false)}
+            className="inline-flex min-h-11 items-center rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:bg-base"
+          >
+            Galería
+          </button>
+        </div>
         <input
+          ref={receiptInputRef}
           type="file"
           name="receipt"
           accept="image/jpeg,image/png,image/webp"
           onChange={changeReceipt}
-          className={inputClass}
+          className={`${inputClass} [@media(scripting:enabled)]:hidden`}
         />
+        {receiptProcessing && (
+          <p role="status" className="text-muted">
+            Procesando imagen…
+          </p>
+        )}
+        {receiptPreview && (
+          <div className="flex flex-col gap-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={receiptPreview}
+              alt="Vista previa del comprobante"
+              className="max-h-48 w-fit rounded-lg border border-line"
+            />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => openReceiptPicker(false)}
+                className="text-muted underline-offset-2 hover:underline"
+              >
+                Cambiar
+              </button>
+              <button
+                type="button"
+                onClick={clearReceiptSelection}
+                className="text-muted underline-offset-2 hover:underline"
+              >
+                Quitar
+              </button>
+            </div>
+          </div>
+        )}
         <FieldError message={receiptError ?? state.fieldErrors?.receipt} />
-      </label>
+      </div>
 
       <section
         className="flex flex-col gap-4 border-t border-line pt-4 group-has-[#quick-on:checked]:hidden"
@@ -556,7 +674,7 @@ export default function MovementForm({
       >
         <button
           type="submit"
-          disabled={pending}
+          disabled={pending || receiptProcessing}
           className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-ink px-4 text-sm font-medium text-base transition-colors hover:bg-ink/90 disabled:opacity-50"
         >
           {mode === "edit" ? "Guardar cambios" : "Guardar movimiento"}
