@@ -19,6 +19,7 @@ import {
   TagIcon,
   UsersIcon,
 } from "@/components/icons";
+import { InstallSheetRow } from "@/components/install-prompt";
 import { Sheet } from "@/components/sheet";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -125,6 +126,8 @@ export function BottomNav() {
           ))}
 
           <hr className="my-2 border-line" />
+
+          <InstallSheetRow active={menuOpen} />
 
           <TourSheetRow />
 

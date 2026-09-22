@@ -20,5 +20,13 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // PWA assets are excluded: pre-auth visitors (login page) still need the
+  // manifest, icons and apple-touch icon for installability, and the service
+  // worker (/sw.js) plus its /offline.html fallback must be fetchable with no
+  // session. Everything app-related stays gated. `icon`/`apple-icon` (no
+  // extension) are the Next file-convention routes for src/app/icon.svg and
+  // src/app/apple-icon.png.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.webmanifest|offline\\.html|icon\\.svg|icon-[\\w-]+\\.png|icon$|apple-icon).*)",
+  ],
 };

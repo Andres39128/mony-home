@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Standalone version of the AppMark in src/app/(app)/layout.tsx: honey
+       rounded square (rounded-xl ratio) with the bold on-accent "M". -->
+  <rect width="512" height="512" rx="170" fill="#ffe5a3"/>
+  <path d="M148 352V160l108 128 108-128v192" fill="none" stroke="#1a2530" stroke-width="56" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>
