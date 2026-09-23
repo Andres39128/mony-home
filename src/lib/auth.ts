@@ -276,6 +276,11 @@ export function requireAdmin(user: SessionUser): void {
   if (user.role !== "admin") throw new ForbiddenError();
 }
 
+/** Verify a password against a stored argon2 hash (login + self-service). */
+export function verifyPassword(passwordHash: string, password: string): Promise<boolean> {
+  return verify(passwordHash, password);
+}
+
 /** argon2id with library defaults (m=19456, t=2, p=1). */
 export function hashPassword(password: string): Promise<string> {
   return hash(password);

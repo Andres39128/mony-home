@@ -13,7 +13,7 @@
  * 1. Category kind must match the transaction type.
  * 2. Only active expense groups can be attached to new/updated movements.
  */
-import { and, desc, eq, gte, lte, sql, sum, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, lte, sql, sum, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   categories,
@@ -120,6 +120,8 @@ export interface TransactionFilters {
   type?: "income" | "expense";
   /** Ámbito: household-wide or personal movements (dashboard filter). */
   scope?: "individual" | "common";
+  /** Case-insensitive substring match on the note (%/_ are literal). */
+  q?: string;
 }
 
 const viewColumns = {
@@ -180,6 +182,11 @@ export function filtersWhere(filters: TransactionFilters): SQL | undefined {
   if (filters.groupId) conds.push(eq(transactions.groupId, filters.groupId));
   if (filters.type) conds.push(eq(transactions.type, filters.type));
   if (filters.scope) conds.push(eq(transactions.scope, filters.scope));
+  if (filters.q) {
+    // Escape LIKE wildcards so user input is always a literal substring.
+    const pattern = `%${filters.q.replace(/[\\%_]/g, "\\$&")}%`;
+    conds.push(sql`${transactions.note} ILIKE ${pattern}`);
+  }
   const clean = conds.filter((c): c is SQL => c !== undefined);
   return clean.length > 0 ? and(...clean) : undefined;
 }
@@ -202,6 +209,46 @@ export async function listTransactions(
   return baseQuery(db)
     .where(filtersWhere(filters))
     .orderBy(desc(transactions.date), desc(transactions.createdAt));
+}
+
+export interface TransactionPage {
+  rows: TransactionView[];
+  /** Total matching rows (independent of pagination). */
+  total: number;
+  /** Requested page clamped to [1, lastPage]. */
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * Paged listing for the /movimientos screen: LIMIT/OFFSET on the same
+ * base query plus one COUNT with the identical WHERE. A requested page
+ * beyond the last one is clamped so the UI never renders an empty page
+ * that actually has rows.
+ */
+export async function listTransactionsPage(
+  db: Database,
+  filters: TransactionFilters,
+  page: number,
+  pageSize: number,
+): Promise<TransactionPage> {
+  const where = filtersWhere(filters);
+  const [countRow] = await db
+    .select({ total: count() })
+    .from(transactions)
+    .where(where);
+  const total = countRow.total;
+
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), lastPage);
+
+  const rows = await baseQuery(db)
+    .where(where)
+    .orderBy(desc(transactions.date), desc(transactions.createdAt))
+    .limit(pageSize)
+    .offset((safePage - 1) * pageSize);
+
+  return { rows, total, page: safePage, pageSize };
 }
 
 export async function getTransaction(

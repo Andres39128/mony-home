@@ -5,11 +5,15 @@ import { getDb } from "@/db";
 import { ForbiddenError, requireAdmin } from "@/lib/auth";
 import { requireUser } from "@/features/auth/session";
 import {
+  changeOwnPassword,
   createMember,
   createMemberSchema,
   deleteMember,
+  ownNameSchema,
+  ownPasswordSchema,
   updateMember,
   updateMemberSchema,
+  updateOwnName,
   type MemberFormState,
 } from "@/features/members/service";
 
@@ -111,5 +115,65 @@ export async function deleteMemberAction(
   }
 
   revalidatePath("/integrantes");
+  return { ok: true };
+}
+
+/**
+ * Self-service actions for the Perfil page. Only the current user is ever
+ * touched (requireUser), so a member can never modify someone else's row.
+ */
+export async function changeOwnPasswordAction(
+  _prev: MemberFormState,
+  formData: FormData,
+): Promise<MemberFormState> {
+  const user = await requireUser();
+
+  const parsed = ownPasswordSchema.safeParse({
+    currentPassword: formData.get("currentPassword"),
+    newPassword: formData.get("newPassword"),
+  });
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
+
+  // Typo guard: the repeat field must match the new password exactly.
+  const repeat = formData.get("repeatPassword");
+  if (repeat !== parsed.data.newPassword) {
+    return { fieldErrors: { repeatPassword: "Las contraseñas no coinciden." } };
+  }
+
+  const result = await changeOwnPassword(
+    getDb(),
+    user.id,
+    parsed.data.currentPassword,
+    parsed.data.newPassword,
+  );
+  if (!result.ok) {
+    if (result.error === "wrong_current_password") {
+      return { fieldErrors: { currentPassword: "La contraseña actual no es correcta." } };
+    }
+    if (result.error === "invalid_password") {
+      return {
+        fieldErrors: { newPassword: "La nueva contraseña debe tener al menos 8 caracteres." },
+      };
+    }
+    return { error: "No se pudo cambiar la contraseña." };
+  }
+
+  revalidatePath("/perfil");
+  return { ok: true };
+}
+
+export async function updateOwnNameAction(
+  _prev: MemberFormState,
+  formData: FormData,
+): Promise<MemberFormState> {
+  const user = await requireUser();
+
+  const parsed = ownNameSchema.safeParse({ name: formData.get("name") });
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
+
+  const result = await updateOwnName(getDb(), user.id, parsed.data.name);
+  if (!result.ok) return { error: "No se pudo guardar el nombre." };
+
+  revalidatePath("/perfil");
   return { ok: true };
 }

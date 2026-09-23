@@ -7,13 +7,17 @@ import type { Database } from "@/db";
 import { categories, transactions, users } from "@/db/schema";
 import { verify } from "@node-rs/argon2";
 import {
+  changeOwnPassword,
   createMember,
   createMemberSchema,
   deleteMember,
   listMembers,
+  ownNameSchema,
   updateMember,
   updateMemberSchema,
+  updateOwnName,
 } from "@/features/members/service";
+import { login } from "@/lib/auth";
 
 /**
  * Members service suite: create/edit/deactivate/delete policies against
@@ -187,6 +191,77 @@ describe("members service (integration on PGlite)", () => {
       expect(updateMemberSchema.safeParse({ name: "X", role: "member", isActive: true, newPassword: "" }).success).toBe(true);
       expect(updateMemberSchema.safeParse({ name: "X", role: "member", isActive: true, newPassword: "nueva-clave-1" }).success).toBe(true);
       expect(updateMemberSchema.safeParse({ name: "X", role: "member", isActive: true, newPassword: "corta" }).success).toBe(false);
+    });
+  });
+
+  describe("self-service profile (changeOwnPassword / updateOwnName)", () => {
+    it("rejects a wrong current password and keeps the old one working", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "cambiapw" });
+      if (!created.ok) throw new Error("setup failed");
+
+      expect(
+        await changeOwnPassword(appDb, created.member.id, "contraseña-erronea", "nueva-clave-99"),
+      ).toEqual({ ok: false, error: "wrong_current_password" });
+
+      // The old credential still logs in; the new one was never set.
+      expect((await login(appDb, "cambiapw", validInput.password)).ok).toBe(true);
+      expect((await login(appDb, "cambiapw", "nueva-clave-99")).ok).toBe(false);
+    });
+
+    it("rejects a policy-violating new password before touching anything", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "politica" });
+      if (!created.ok) throw new Error("setup failed");
+
+      expect(
+        await changeOwnPassword(appDb, created.member.id, validInput.password, "corta"),
+      ).toEqual({ ok: false, error: "invalid_password" });
+
+      expect((await login(appDb, "politica", validInput.password)).ok).toBe(true);
+    });
+
+    it("on success re-hashes and the new password verifies via the login path", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "exitopw" });
+      if (!created.ok) throw new Error("setup failed");
+      await db
+        .update(users)
+        .set({ failedAttempts: 3, lockedUntil: null })
+        .where(eq(users.id, created.member.id));
+
+      const result = await changeOwnPassword(
+        appDb,
+        created.member.id,
+        validInput.password,
+        "nueva-clave-99",
+      );
+      expect(result).toEqual({ ok: true });
+
+      const [row] = await db.select().from(users).where(eq(users.id, created.member.id));
+      expect(row.passwordHash).toMatch(/^\$argon2id\$/);
+      expect(row.passwordHash).not.toBe(validInput.password);
+      // Same path login uses: old fails, new passes; lockout counters cleared.
+      expect(await login(appDb, "exitopw", validInput.password)).toMatchObject({
+        ok: false,
+        error: "invalid_credentials",
+      });
+      expect(await login(appDb, "exitopw", "nueva-clave-99")).toMatchObject({
+        ok: true,
+        user: { username: "exitopw" },
+      });
+      expect(row.failedAttempts).toBe(0);
+    });
+
+    it("renames own display name following the member-edit name policy", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "renombre" });
+      if (!created.ok) throw new Error("setup failed");
+
+      // Same policy as the admin edit form: trimmed, 1-80 chars.
+      expect(ownNameSchema.safeParse({ name: "   " }).success).toBe(false);
+      expect(ownNameSchema.safeParse({ name: "x".repeat(81) }).success).toBe(false);
+      expect(ownNameSchema.safeParse({ name: "  Nombre Nuevo  " }).success).toBe(true);
+
+      expect(await updateOwnName(appDb, created.member.id, "Nombre Nuevo")).toEqual({ ok: true });
+      const members = await listMembers(appDb);
+      expect(members.find((m) => m.id === created.member.id)?.name).toBe("Nombre Nuevo");
     });
   });
 });

@@ -9,7 +9,7 @@ import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { users } from "@/db/schema";
 import type { Database } from "@/db";
-import { hashPassword } from "@/lib/auth";
+import { hashPassword, verifyPassword } from "@/lib/auth";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 
 export interface MemberView {
@@ -133,4 +133,71 @@ export async function deleteMember(
     if (hasPgFkError(error)) return { ok: false, error: "has_movements" };
     throw error;
   }
+}
+
+/**
+ * Self-service profile (Perfil page): the acting user may change their own
+ * password and rename themselves. Authorization lives in the server actions
+ * (requireUser); the service enforces the credential and policy checks.
+ */
+
+/** Same password policy as member create/edit (min 8, max 128). */
+export const ownPasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Ingresá la contraseña actual"),
+  newPassword: createMemberSchema.shape.password,
+});
+
+/** Same name policy as the admin member edit form. */
+export const ownNameSchema = updateMemberSchema.pick({ name: true });
+
+export type OwnPasswordError =
+  | "wrong_current_password"
+  | "invalid_password"
+  | "member_not_found";
+
+/**
+ * Change the caller's own password: the current one is verified with the
+ * same argon2 path as login, then the new one is hashed via hashPassword.
+ */
+export async function changeOwnPassword(
+  db: Database,
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: true } | { ok: false; error: OwnPasswordError }> {
+  if (!ownPasswordSchema.shape.newPassword.safeParse(newPassword).success) {
+    return { ok: false, error: "invalid_password" };
+  }
+
+  const [user] = await db
+    .select({ passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user) return { ok: false, error: "member_not_found" };
+  if (!(await verifyPassword(user.passwordHash, currentPassword))) {
+    return { ok: false, error: "wrong_current_password" };
+  }
+
+  // A password change also clears any lockout state (same as admin reset).
+  await db
+    .update(users)
+    .set({ passwordHash: await hashPassword(newPassword), failedAttempts: 0, lockedUntil: null })
+    .where(eq(users.id, userId));
+  return { ok: true };
+}
+
+/** Rename the caller's own display name. */
+export async function updateOwnName(
+  db: Database,
+  userId: string,
+  name: string,
+): Promise<{ ok: true } | { ok: false; error: "member_not_found" }> {
+  const updated = await db
+    .update(users)
+    .set({ name })
+    .where(eq(users.id, userId))
+    .returning({ id: users.id });
+  if (updated.length === 0) return { ok: false, error: "member_not_found" };
+  return { ok: true };
 }

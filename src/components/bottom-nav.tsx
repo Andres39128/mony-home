@@ -17,6 +17,7 @@ import {
   PouchIcon,
   SparklesIcon,
   TagIcon,
+  UserIcon,
   UsersIcon,
 } from "@/components/icons";
 import { InstallSheetRow } from "@/components/install-prompt";
@@ -31,6 +32,7 @@ const TABS = [
 ] as const;
 
 const MENU_LINKS = [
+  { href: "/perfil", label: "Perfil", Icon: UserIcon },
   { href: "/prestamos", label: "Préstamos", Icon: CreditCardIcon },
   { href: "/asistente", label: "Asistente", Icon: SparklesIcon },
   { href: "/integrantes", label: "Integrantes", Icon: UsersIcon },

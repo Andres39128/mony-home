@@ -15,6 +15,7 @@ import {
   PENDING_DETAILS_NOTE,
   RECEIPT_MAX_BYTES,
   createQuickTransaction,
+  listTransactionsPage,
   movementSchema,
   createTransaction,
   getTransaction,
@@ -204,6 +205,47 @@ describe("transactions service (integration on PGlite)", () => {
       expenseCents: 5_500,
       balanceCents: -5_500,
     });
+  });
+
+  it("matches a note substring case-insensitively (q filter)", async () => {
+    const rows = await listTransactions(appDb, { month: MONTH, q: "COMPRA" });
+    expect(rows.map((t) => t.note)).toEqual(["Compra semanal"]);
+    expect(await listTransactions(appDb, { month: MONTH, q: "sueldo" }).then((r) => r.map((t) => t.note)))
+      .toEqual(["Sueldo septiembre"]);
+    // Rows with no note never match.
+    expect(await listTransactions(appDb, { month: MONTH, q: "zumba" })).toHaveLength(0);
+  });
+
+  it("treats LIKE wildcards in the search term as literals", async () => {
+    // Unescaped, '%' would match every row and '_' any single char.
+    expect(await listTransactions(appDb, { month: MONTH, q: "%" })).toHaveLength(0);
+    expect(await listTransactions(appDb, { month: MONTH, q: "_" })).toHaveLength(0);
+    expect(await listTransactions(appDb, { month: MONTH, q: "sueldo_septiembre" })).toHaveLength(0);
+    expect(await listTransactions(appDb, { month: MONTH, q: "sueldo septiembre" })).toHaveLength(1);
+  });
+
+  it("paginates: page 2 keeps the offset and the real total", async () => {
+    const page = await listTransactionsPage(appDb, { month: MONTH }, 2, 2);
+    expect(page).toMatchObject({ total: 3, page: 2, pageSize: 2 });
+    expect(page.rows.map((t) => t.date)).toEqual(["2026-09-05"]);
+  });
+
+  it("clamps a requested page beyond the last one", async () => {
+    const page = await listTransactionsPage(appDb, { month: MONTH }, 99, 2);
+    expect(page).toMatchObject({ total: 3, page: 2 });
+    expect(page.rows).toHaveLength(1);
+  });
+
+  it("clamps page 0 up to page 1", async () => {
+    const page = await listTransactionsPage(appDb, { month: MONTH }, 0, 2);
+    expect(page).toMatchObject({ total: 3, page: 1 });
+    expect(page.rows.map((t) => t.date)).toEqual(["2026-09-20", "2026-09-10"]);
+  });
+
+  it("returns an empty page 1 when nothing matches", async () => {
+    const page = await listTransactionsPage(appDb, { month: MONTH, q: "nada-que-ver" }, 4, 2);
+    expect(page).toMatchObject({ total: 0, page: 1 });
+    expect(page.rows).toHaveLength(0);
   });
 
   it("gets one transaction with joined names, or null", async () => {

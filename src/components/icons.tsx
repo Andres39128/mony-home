@@ -96,6 +96,15 @@ export function UsersIcon(props: IconProps) {
   );
 }
 
+export function UserIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M5 20a7 7 0 0 1 14 0" />
+    </Svg>
+  );
+}
+
 export function TagIcon(props: IconProps) {
   return (
     <Svg {...props}>
