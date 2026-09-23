@@ -4,6 +4,7 @@
  * Everything DB-related lives in src/lib/auth.ts (pure-ish, clock-injectable,
  * tested against PGlite); this module only adapts it to next/headers.
  */
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
@@ -28,6 +29,14 @@ export async function clearSessionCookie(): Promise<void> {
 }
 
 /**
+ * Per-request memoized session read: layout + page (+ adminGuard) share ONE
+ * sessions×users query (and at most one renewal UPDATE) per navigation
+ * instead of one per requireUser() call. React cache() scopes the memo to
+ * the current request; redirect semantics below are unchanged.
+ */
+const readSessionUser = cache(async (token: string) => getSessionUser(getDb(), token));
+
+/**
  * Current session user from the request cookie, or null.
  * Applies sliding renewal to the DB session; the cookie maxAge is refreshed
  * opportunistically when the context allows it (see requireUser).
@@ -35,7 +44,7 @@ export async function clearSessionCookie(): Promise<void> {
 export async function getOptionalUser(): Promise<SessionUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
-  const info = await getSessionUser(getDb(), token);
+  const info = await readSessionUser(token);
   return info?.user ?? null;
 }
 
@@ -53,7 +62,7 @@ export async function requireUser(): Promise<SessionUser> {
   const token = store.get(SESSION_COOKIE_NAME)?.value;
   if (!token) redirect("/login");
 
-  const info = await getSessionUser(getDb(), token);
+  const info = await readSessionUser(token);
   if (!info) {
     // Drop the stale cookie when the context allows writes (Server Functions);
     // during plain renders the browser keeps it until the next logout/login.

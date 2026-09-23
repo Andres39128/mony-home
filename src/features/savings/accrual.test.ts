@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
@@ -184,6 +184,33 @@ describe("catchUpInterest — daily engine (integration on PGlite)", () => {
     expect(second).toBe(0);
     const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
     expect(rows).toHaveLength(3);
+  });
+
+  it("cold path: zero complete days → no rows and NO write transaction", async () => {
+    const goal = await insertGoal(db, {
+      name: "Fría",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-08-20T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values({
+      goalId: goal.id,
+      memberId: depositorId,
+      kind: "deposit",
+      amountCents: 100_000,
+      date: "2026-08-20",
+    });
+
+    // Created 08-20, now 08-21 (app tz): yesterday = 08-20 = base day → the
+    // lock-free gate must return before any FOR UPDATE transaction opens.
+    const txSpy = vi.spyOn(appDb, "transaction");
+    const inserted = await catchUpInterest(appDb, goal.id, new Date("2026-08-21T12:00:00Z"));
+    expect(inserted).toBe(0);
+    expect(txSpy).not.toHaveBeenCalled();
+    txSpy.mockRestore();
+
+    // Only the deposit exists — no interest rows were written.
+    expect(await interestRows(db, goal.id)).toHaveLength(1);
   });
 
   it("continues from the last interest row and keeps old monthly rows", async () => {

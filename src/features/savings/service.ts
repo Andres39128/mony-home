@@ -694,9 +694,15 @@ export async function updateGoalValue(
  * value of investments, MINUS outstanding loan balances. Includes inactive
  * goals — deactivating a tracker does not withdraw the money — and inactive
  * loans — deactivating a debt does not forgive it.
+ *
+ * `goals` accepts a precomputed listGoals() result so callers that already
+ * ran the lazy catch-up (e.g. /bolsas) don't pay for a second goals query.
  */
-export async function getPatrimony(db: Database): Promise<Patrimony> {
-  const goals = await listGoals(db);
+export async function getPatrimony(
+  db: Database,
+  goals?: GoalView[],
+): Promise<Patrimony> {
+  goals ??= await listGoals(db);
   const debtCents = await getDebtCents(db);
   const breakdown: PatrimonyBreakdown[] = goals.map((goal) => ({
     id: goal.id,

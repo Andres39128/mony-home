@@ -49,16 +49,32 @@ interface AccrualBase {
  * Brings one loan's interest up to `now`. Returns the number of interest
  * rows inserted (0 when no rate / zero elapsed months / non-positive
  * outstanding).
+ *
+ * COLD GATE: the lock-free pre-check means steady-state reads open ZERO
+ * write transactions — only loans with pending months pay for FOR UPDATE.
  */
 export async function catchUpInterest(
   db: Database,
   loanId: string,
   now: Date = new Date(),
 ): Promise<number> {
+  // Lock-free pre-check: not a rate-bearing loan, or no elapsed whole month.
+  const [loan] = await db
+    .select({
+      annualRateBp: loans.annualRateBp,
+      createdAt: loans.createdAt,
+    })
+    .from(loans)
+    .where(eq(loans.id, loanId))
+    .limit(1);
+  if (!loan) return 0;
+  if (loan.annualRateBp === null) return 0;
+  if (monthIndexOfDate(now) <= (await baseMonthFor(db, loanId, loan.createdAt))) return 0;
+
   return db.transaction(async (tx) => {
     // Lock the loan row: concurrent view requests serialize here, so the
     // loser re-reads the base after the winner committed and no-ops.
-    const [loan] = await tx
+    const [locked] = await tx
       .select({
         annualRateBp: loans.annualRateBp,
         principalCents: loans.principalCents,
@@ -68,9 +84,9 @@ export async function catchUpInterest(
       .where(eq(loans.id, loanId))
       .limit(1)
       .for("update");
-    if (!loan) return 0;
+    if (!locked) return 0;
 
-    return accrueLoan(tx, loanId, loan as AccrualBase, now);
+    return accrueLoan(tx, loanId, locked as AccrualBase, now);
   });
 }
 
@@ -87,6 +103,24 @@ export async function catchUpAllLoanInterest(db: Database, now: Date = new Date(
 
 /** Any Postgres drizzle database — the app pool in production, PGlite in tests. */
 type AccrualDb = Parameters<Parameters<Database["transaction"]>[0]>[0];
+/** Read-only view (pool OR open transaction) for the cheap base query. */
+type AccrualReader = Pick<Database, "select">;
+
+/** Accrual base month: latest interest month, or the loan creation month. */
+async function baseMonthFor(
+  db: AccrualReader,
+  loanId: string,
+  createdAt: Date,
+): Promise<number> {
+  const [last] = await db
+    .select({ lastInterest: max(loanPayments.date) })
+    .from(loanPayments)
+    .where(and(eq(loanPayments.loanId, loanId), eq(loanPayments.kind, "interest")));
+  return Math.max(
+    monthIndexOfDate(createdAt),
+    last?.lastInterest ? monthIndexOfIso(last.lastInterest) : 0,
+  );
+}
 
 async function accrueLoan(
   db: AccrualDb,
@@ -97,15 +131,7 @@ async function accrueLoan(
   const rateBp = loan.annualRateBp;
   if (rateBp === null) return 0;
 
-  const [last] = await db
-    .select({ lastInterest: max(loanPayments.date) })
-    .from(loanPayments)
-    .where(and(eq(loanPayments.loanId, loanId), eq(loanPayments.kind, "interest")));
-
-  const baseMonth = Math.max(
-    monthIndexOfDate(loan.createdAt),
-    last?.lastInterest ? monthIndexOfIso(last.lastInterest) : 0,
-  );
+  const baseMonth = await baseMonthFor(db, loanId, loan.createdAt);
   const nowMonth = monthIndexOfDate(now);
   if (nowMonth <= baseMonth) return 0; // zero elapsed whole months → no-op
 

@@ -20,7 +20,9 @@ export default async function BolsasPage() {
   const goals = await listGoals(getDb());
   const [members, patrimony, contributions, pendingReviews] = await Promise.all([
     listMembers(getDb()),
-    getPatrimony(getDb()),
+    // Reuse the goals fetched above (they already triggered the catch-up):
+    // patrimony is pure aggregation over them, no second goals query.
+    getPatrimony(getDb(), goals),
     listContributions(getDb()),
     listPendingRateReviews(getDb()),
   ]);
