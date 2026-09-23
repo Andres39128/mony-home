@@ -142,21 +142,37 @@ export const transactions = pgTable(
 );
 
 /**
- * Receipt images attached to movements (max one per movement, enforced by the
- * service: attaching on edit deletes the previous row first). Bytes live in
- * Postgres — the app runs on serverless with no writable disk. Deletion of
- * the movement cascades to its receipt.
+ * Receipt images attached to movements (max one per movement, enforced by
+ * the DB UNIQUE below AND by the service: attaching on edit deletes the
+ * previous row first). Bytes live in Postgres — the app runs on serverless
+ * with no writable disk. Deletion of the movement cascades to its receipt.
  */
 export const movementReceipts = pgTable("movement_receipts", {
   id: uuid("id").defaultRandom().primaryKey(),
   transactionId: uuid("transaction_id")
     .notNull()
+    .unique()
     .references(() => transactions.id, { onDelete: "cascade" }),
   bytes: bytea("bytes").notNull(),
   /** Sniffed/allow-listed image type: image/jpeg | image/png | image/webp. */
   mimeType: text("mime_type").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Per-IP failed-login ledger backing the login rate limit (migration 0009).
+ * Append-only log: no primary key because rows are never addressed — every
+ * query filters by (ip, attempted_at), which the index covers. Pruned
+ * opportunistically after each failed attempt (see src/lib/auth.ts).
+ */
+export const loginIpAttempts = pgTable(
+  "login_ip_attempts",
+  {
+    ip: text("ip").notNull(),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("login_ip_attempts_ip_attempted_at_idx").on(table.ip, table.attemptedAt)],
+);
 
 export const assistantUsage = pgTable(
   "assistant_usage",

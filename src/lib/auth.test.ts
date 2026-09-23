@@ -6,20 +6,26 @@ import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { users } from "@/db/schema";
 import {
+  IP_ATTEMPT_RETENTION_MS,
+  IP_WINDOW_MS,
   LOCKOUT_MS,
   MAX_FAILED_ATTEMPTS,
+  MAX_IP_ATTEMPTS,
   SESSION_TTL_MS,
+  UNKNOWN_IP,
   createSession,
   destroySession,
   getSessionUser,
   hashPassword,
   hashToken,
+  ipFromHeaders,
   login,
+  loginWithIpGuard,
   requireAdmin,
   setPassword,
   ForbiddenError,
 } from "@/lib/auth";
-import { sessions } from "@/db/schema";
+import { loginIpAttempts, sessions } from "@/db/schema";
 
 /**
  * Auth integration suite: login policy (lockout, inactive, uniform unknown
@@ -156,6 +162,108 @@ describe("auth (integration on PGlite)", () => {
       expect(result).toEqual({ ok: false, error: "inactive" });
       const [row] = await db.select().from(users).where(eq(users.id, user.id));
       expect(row.failedAttempts).toBe(0);
+    });
+  });
+
+  describe("per-IP rate limiting", () => {
+    const IP = "203.0.113.7";
+
+    /** Count the failed-login rows recorded for an IP. */
+    const attemptCount = async (ip: string = IP) => {
+      const rows = await db.select().from(loginIpAttempts).where(eq(loginIpAttempts.ip, ip));
+      return rows.length;
+    };
+
+    it("blocks an IP once MAX_IP_ATTEMPTS failures are recorded — even with valid credentials", async () => {
+      await createTestUser();
+
+      for (let i = 0; i < MAX_IP_ATTEMPTS; i++) {
+        const result = await loginWithIpGuard(appDb, IP, "andres", "wrong-password", clock);
+        // After MAX_FAILED_ATTEMPTS the account also locks; both count here.
+        expect(result.ok).toBe(false);
+      }
+      expect(await attemptCount()).toBe(MAX_IP_ATTEMPTS);
+
+      // The gate runs BEFORE the account lookup: correct password is rejected
+      // with rate_limited even though the lockout would say "locked".
+      const blocked = await loginWithIpGuard(appDb, IP, "andres", "correct-horse-1", clock);
+      expect(blocked).toEqual({ ok: false, error: "rate_limited" });
+      expect(await attemptCount()).toBe(MAX_IP_ATTEMPTS);
+    });
+
+    it("does not count successful logins against the IP", async () => {
+      await createTestUser();
+
+      for (let i = 0; i < MAX_IP_ATTEMPTS; i++) {
+        const result = await loginWithIpGuard(appDb, IP, "andres", "correct-horse-1", clock);
+        expect(result.ok).toBe(true);
+      }
+
+      const result = await loginWithIpGuard(appDb, IP, "andres", "wrong-password", clock);
+      expect(result).toEqual({ ok: false, error: "invalid_credentials" });
+    });
+
+    it("counts locked and inactive failures toward the IP too", async () => {
+      await createTestUser({ isActive: false });
+
+      expect(await loginWithIpGuard(appDb, IP, "andres", "whatever", clock)).toEqual({
+        ok: false,
+        error: "inactive",
+      });
+      expect(await attemptCount()).toBe(1);
+    });
+
+    it("reopens the IP once the window has passed (injected clock)", async () => {
+      await createTestUser();
+
+      for (let i = 0; i < MAX_IP_ATTEMPTS; i++) {
+        await loginWithIpGuard(appDb, IP, "andres", "wrong-password", clock);
+      }
+      now = new Date(now.getTime() + IP_WINDOW_MS + 1);
+
+      const result = await loginWithIpGuard(appDb, IP, "andres", "correct-horse-1", clock);
+      expect(result.ok).toBe(true);
+    });
+
+    it("prunes rows older than the retention window after a failed attempt", async () => {
+      await createTestUser();
+      const stale = new Date(now.getTime() - IP_ATTEMPT_RETENTION_MS - 1);
+      await db.insert(loginIpAttempts).values({ ip: IP, attemptedAt: stale });
+
+      await loginWithIpGuard(appDb, IP, "andres", "wrong-password", clock);
+
+      const rows = await db.select().from(loginIpAttempts);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].attemptedAt.getTime()).toBe(now.getTime());
+    });
+
+    it("keeps IPs isolated from each other", async () => {
+      await createTestUser();
+      for (let i = 0; i < MAX_IP_ATTEMPTS; i++) {
+        await loginWithIpGuard(appDb, "198.51.100.1", "andres", "wrong-password", clock);
+      }
+      // The failed attempts also locked the ACCOUNT; expire the lockout so
+      // only the IP gate differentiates the two clients below.
+      now = new Date(now.getTime() + LOCKOUT_MS + 1);
+
+      const fromBlockedIp = await loginWithIpGuard(
+        appDb,
+        "198.51.100.1",
+        "andres",
+        "correct-horse-1",
+        clock,
+      );
+      expect(fromBlockedIp).toEqual({ ok: false, error: "rate_limited" });
+      const fromCleanIp = await loginWithIpGuard(appDb, IP, "andres", "correct-horse-1", clock);
+      expect(fromCleanIp.ok).toBe(true);
+    });
+
+    it("ipFromHeaders takes the first forwarded value and falls back to the shared bucket", () => {
+      expect(
+        ipFromHeaders(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" })),
+      ).toBe("203.0.113.9");
+      expect(ipFromHeaders(new Headers())).toBe(UNKNOWN_IP);
+      expect(ipFromHeaders(new Headers({ "x-forwarded-for": "  " }))).toBe(UNKNOWN_IP);
     });
   });
 

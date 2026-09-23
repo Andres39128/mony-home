@@ -12,6 +12,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_credentials: "Usuario o contraseña incorrectos",
   locked: "Cuenta bloqueada temporalmente",
   inactive: "Cuenta desactivada",
+  rate_limited: "Demasiados intentos. Esperá unos minutos y volvé a intentar.",
 };
 
 export default function LoginForm({

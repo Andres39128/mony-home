@@ -6,6 +6,7 @@ import {
   budgets,
   categories,
   expenseGroups,
+  loginIpAttempts,
   movementReceipts,
   loanPayments,
   loans,
@@ -518,6 +519,93 @@ describe("migration 0006 (loans invariants)", () => {
 
     const remaining = await db.select().from(transactions).where(eq(transactions.id, mirror.id));
     expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("migration 0009 (receipt integrity + login IP attempts)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+  let memberId: string;
+  let transactionId: string;
+
+  const insertReceipt = () =>
+    db.insert(movementReceipts).values({
+      transactionId,
+      bytes: Buffer.from([1, 2, 3]),
+      mimeType: "image/png",
+    });
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u13", passwordHash: "h", name: "U13" })
+      .returning();
+    const [category] = await db
+      .insert(categories)
+      .values({ name: "C13", kind: "expense" })
+      .returning();
+    const [tx] = await db
+      .insert(transactions)
+      .values({ amountCents: 100, type: "expense", categoryId: category.id, memberId: user.id })
+      .returning();
+    memberId = user.id;
+    transactionId = tx.id;
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("rejects a second receipt for the same movement (UNIQUE)", async () => {
+    await insertReceipt();
+    await expectPgError(insertReceipt(), "23505");
+    const rows = await db
+      .select()
+      .from(movementReceipts)
+      .where(eq(movementReceipts.transactionId, transactionId));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("keeps the service replace-flow working: delete + insert in one transaction", async () => {
+    // Mirrors updateTransaction's replace path exactly (service.ts).
+    await db.transaction(async (tx) => {
+      await tx.delete(movementReceipts).where(eq(movementReceipts.transactionId, transactionId));
+      await tx.insert(movementReceipts).values({
+        transactionId,
+        bytes: Buffer.from([9, 9, 9]),
+        mimeType: "image/jpeg",
+      });
+    });
+    const rows = await db
+      .select()
+      .from(movementReceipts)
+      .where(eq(movementReceipts.transactionId, transactionId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].mimeType).toBe("image/jpeg");
+  });
+
+  it("still allows one receipt per DIFFERENT movement", async () => {
+    const [tx2] = await db
+      .insert(transactions)
+      .values({ amountCents: 0, type: "expense", memberId, needsDetails: true })
+      .returning();
+    await db.insert(movementReceipts).values({
+      transactionId: tx2.id,
+      bytes: Buffer.from([4, 5, 6]),
+      mimeType: "image/webp",
+    });
+    const rows = await db.select().from(movementReceipts);
+    expect(rows.map((r) => r.transactionId)).toContain(tx2.id);
+  });
+
+  it("stores login IP attempts with the (ip, attempted_at) index", async () => {
+    await db.insert(loginIpAttempts).values({ ip: "10.0.0.1", attemptedAt: new Date("2026-09-23T12:00:00Z") });
+    // attempted_at defaults to now() when omitted.
+    await db.insert(loginIpAttempts).values({ ip: "10.0.0.2" });
+    const rows = await db.select().from(loginIpAttempts);
+    expect(rows).toHaveLength(2);
+    expect(rows[1].attemptedAt).toBeInstanceOf(Date);
   });
 });
 

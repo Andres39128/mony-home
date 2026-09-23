@@ -14,11 +14,14 @@
  *   reveal whether an account exists.
  * - Lockout state lives on the user row; while locked, credentials are never
  *   verified.
+ * - Failed logins are also rate limited per client IP (login_ip_attempts):
+ *   the gate runs before the account lookup, complementing the per-account
+ *   lockout for attacks that rotate usernames.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
-import { and, eq, gt, lt } from "drizzle-orm";
-import { sessions, users, type roleEnum } from "@/db/schema";
+import { and, count, eq, gt, lt } from "drizzle-orm";
+import { loginIpAttempts, sessions, users, type roleEnum } from "@/db/schema";
 import type { Database } from "@/db";
 
 /** Cookie name; isolated in this module's public surface for the edge proxy. */
@@ -31,6 +34,13 @@ export const MAX_FAILED_ATTEMPTS = 5;
 /** Lockout window once MAX_FAILED_ATTEMPTS is reached. */
 export const LOCKOUT_MS = 10 * 60 * 1000;
 
+/** Failed logins allowed per IP before the IP is shut out of login. */
+export const MAX_IP_ATTEMPTS = 10;
+/** Sliding window over which login_ip_attempts rows count against an IP. */
+export const IP_WINDOW_MS = 15 * 60 * 1000;
+/** Rows older than this are pruned opportunistically after failed attempts. */
+export const IP_ATTEMPT_RETENTION_MS = 60 * 60 * 1000;
+
 export type UserRole = (typeof roleEnum.enumValues)[number];
 
 export interface SessionUser {
@@ -40,7 +50,7 @@ export interface SessionUser {
   role: UserRole;
 }
 
-export type LoginError = "invalid_credentials" | "locked" | "inactive";
+export type LoginError = "invalid_credentials" | "locked" | "inactive" | "rate_limited";
 
 export type LoginResult =
   | { ok: true; user: SessionUser }
@@ -115,6 +125,55 @@ export async function login(
     ok: true,
     user: { id: user.id, username: user.username, name: user.name, role: user.role },
   };
+}
+
+/**
+ * Client-bucket sentinel for requests whose IP cannot be determined (no
+ * trusted proxy header). Sharing one bucket is intentionally conservative.
+ */
+export const UNKNOWN_IP = "unknown";
+
+/** Extract the client IP from a headers map (as `next/headers` provides it). */
+export function ipFromHeaders(headers: Headers): string {
+  // Vercel (and standard proxies) put the client first in x-forwarded-for.
+  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || UNKNOWN_IP;
+}
+
+/**
+ * Login entry point with the per-IP brute-force guard composed with the
+ * per-account lockout. The IP gate runs BEFORE any account lookup so a
+ * flooded IP cannot even probe usernames; `rate_limited` reveals nothing
+ * about account existence and skips argon2 work (same early-exit shape as
+ * the `locked` path). Every failed attempt — invalid credentials, locked or
+ * inactive — counts against the IP, then opportunistically prunes rows older
+ * than IP_ATTEMPT_RETENTION_MS so the table stays small without a cron.
+ */
+export async function loginWithIpGuard(
+  db: Database,
+  ip: string,
+  username: string,
+  password: string,
+  now: Clock = defaultClock,
+): Promise<LoginResult> {
+  const windowStart = new Date(now().getTime() - IP_WINDOW_MS);
+  const [attempts] = await db
+    .select({ attempts: count() })
+    .from(loginIpAttempts)
+    .where(and(eq(loginIpAttempts.ip, ip), gt(loginIpAttempts.attemptedAt, windowStart)));
+
+  if (attempts.attempts >= MAX_IP_ATTEMPTS) {
+    return { ok: false, error: "rate_limited" };
+  }
+
+  const result = await login(db, username, password, now);
+  if (!result.ok) {
+    await db.insert(loginIpAttempts).values({ ip, attemptedAt: now() });
+    await db
+      .delete(loginIpAttempts)
+      .where(lt(loginIpAttempts.attemptedAt, new Date(now().getTime() - IP_ATTEMPT_RETENTION_MS)));
+  }
+  return result;
 }
 
 /** 32 random bytes, URL-safe. 256 bits of entropy; sent to the client verbatim. */

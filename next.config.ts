@@ -8,12 +8,30 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "3mb",
     },
   },
-  // Service worker header set from the bundled PWA guide
-  // (docs: progressive-web-apps): always revalidated so clients pick up
-  // updates, with a strict same-origin CSP.
+  // Global security headers on every route. CSP for HTML routes is
+  // deliberately skipped: the inline theme-init script + Next bootstrap would
+  // need nonce middleware (docs: content-security-policy); /sw.js keeps its
+  // own strict CSP below.
   async headers() {
     return [
       {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains",
+          },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // camera=(self): receipt capture scans codes/takes photos in-app.
+          { key: "Permissions-Policy", value: "camera=(self)" },
+        ],
+      },
+      {
+        // Service worker header set from the bundled PWA guide
+        // (docs: progressive-web-apps): always revalidated so clients pick up
+        // updates, with a strict same-origin CSP.
         source: "/sw.js",
         headers: [
           {
