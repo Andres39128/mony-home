@@ -42,7 +42,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "dashboard-filtros",
       title: "Filtros",
       description:
-        "Elegí mes, ámbito, integrante, categoría, bolsa o grupo. Todo lo que ves abajo se recalcula con estos filtros.",
+        "Elegí mes, ámbito, integrante, categoría o grupo. Todo lo que ves abajo se recalcula con estos filtros.",
     },
     {
       id: "dashboard-kpis",
@@ -56,14 +56,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "dashboard-patrimonio",
       title: "Patrimonio neto",
       description:
-        "Lo que tenés ahorrado e invertido, menos lo que debés en préstamos. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Ahorro.",
-    },
-    {
-      id: "dashboard-bolsas",
-      element: "dashboard-bolsas",
-      title: "Bolsas del mes",
-      description:
-        "Avance de cada bolsa del hogar. Hacé clic en una bolsa para ver sus movimientos de este mes.",
+        "Lo que tenés ahorrado e invertido, menos lo que debés en préstamos. No cuenta ingresos ni gastos del mes: es plata acumulada. Hacé clic para ver el detalle en Bolsas.",
     },
     {
       id: "dashboard-donut",
@@ -87,41 +80,48 @@ export const TOURS: Record<string, readonly TourStep[]> = {
         "Líneas del año: cuánto estaba presupuestado acumulado vs cuánto se gastó realmente, mes a mes.",
     },
   ],
-  "/ahorro": [
+  "/bolsas": [
     {
-      id: "ahorro-patrimonio",
-      element: "ahorro-patrimonio",
+      id: "bolsas-patrimonio",
+      element: "bolsas-patrimonio",
       title: "Patrimonio",
       description:
-        "Total ahorrado del hogar, dividido en metas de ahorro e inversiones. Cada aporte o retiro también genera un movimiento: los depósitos salen de tu saldo y los retiros lo reintegran.",
+        "Total ahorrado del hogar, dividido en bolsas de ahorro e inversiones. Cada depósito o retiro también genera un movimiento: los depósitos salen de tu saldo y los retiros lo reintegran.",
     },
     {
-      id: "ahorro-metas",
-      element: "ahorro-metas",
-      title: "Metas e inversiones",
+      id: "bolsas-revision",
+      element: "bolsas-revision",
+      title: "Revisión de tasas",
       description:
-        "Una meta acumula plata (con objetivo y plazo opcionales); una inversión guarda además su valor actual y el retorno respecto de lo invertido. Las metas con TNA generan intereses automáticamente cada mes, visibles en el historial.",
+        "Cada mes te avisamos para revisar la rentabilidad de tus bolsas. Ajustá la tasa en cada bolsa y marcalas como revisadas.",
     },
     {
-      id: "ahorro-aporte",
-      element: "ahorro-aporte",
-      title: "Aporte rápido",
+      id: "bolsas-metas",
+      element: "bolsas-metas",
+      title: "Bolsas e inversiones",
+      description:
+        "Una bolsa de ahorro acumula plata (con objetivo y plazo opcionales) y genera interés diario según su modo: TNA simple sobre el capital o TEA compuesta sobre el saldo. Una inversión guarda su valor actual, que se actualiza a mano.",
+    },
+    {
+      id: "bolsas-aporte",
+      element: "bolsas-aporte",
+      title: "Depósito rápido",
       description:
         "Escribí el monto, elegí depósito o retiro y presioná Enter: se guarda al instante. El monto queda listo para el próximo aporte.",
     },
     {
-      id: "ahorro-valor",
-      element: "ahorro-valor",
+      id: "bolsas-valor",
+      element: "bolsas-valor",
       title: "Actualizar valor (admin)",
       description:
         "El valor de una inversión no se calcula solo: actualizalo a mano cuando cambie y el retorno se recalcula.",
     },
     {
-      id: "ahorro-crear",
-      element: "ahorro-crear",
-      title: "Nueva meta (admin)",
+      id: "bolsas-crear",
+      element: "bolsas-crear",
+      title: "Nueva bolsa (admin)",
       description:
-        "Formulario para crear una meta de ahorro o una inversión del hogar, común o individual.",
+        "Formulario para crear una bolsa de ahorro o una inversión del hogar, común o individual.",
     },
   ],
   "/prestamos": [
@@ -212,28 +212,6 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       title: "Editar montos (admin)",
       description:
         "Acá se define cuánto se planea gastar por categoría. \"Copiar mes anterior\" rellena todo con los montos del mes previo.",
-    },
-  ],
-  "/bolsas": [
-    {
-      id: "bolsas-lista",
-      element: "bolsas-lista",
-      title: "Bolsas",
-      description:
-        "Dinero separado por objetivo: la bolsa Común es del hogar y las individuales son de cada integrante. La barra muestra cuánto llevás gastado del mes.",
-    },
-    {
-      id: "bolsas-editar",
-      element: "bolsas-editar",
-      title: "Editar una bolsa (admin)",
-      description:
-        "Tocá el lápiz en una bolsa para abrir el formulario de edición: nombre, monto mensual, tipo e integrante.",
-    },
-    {
-      id: "bolsas-crear",
-      element: "bolsas-crear",
-      title: "Nueva bolsa (admin)",
-      description: "Formulario para crear una bolsa nueva del hogar.",
     },
   ],
   "/asistente": [

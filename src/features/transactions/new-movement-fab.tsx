@@ -45,7 +45,6 @@ interface Props extends MovementFormOptions {
 export default function NewMovementFab({
   currentUser,
   categories,
-  envelopes,
   members,
   groups,
   serverToday,
@@ -113,7 +112,6 @@ export default function NewMovementFab({
         <MovementForm
           mode="create"
           categories={categories}
-          envelopes={envelopes}
           members={members}
           groups={groups}
           currentUser={currentUser}

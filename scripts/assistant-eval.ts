@@ -31,7 +31,7 @@
 import { performance } from "node:perf_hooks";
 import { getConfig } from "@/lib/config";
 import { getDb, closeDb } from "@/db";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { buildFinanceContext, toPromptContext } from "@/features/insights/context";
 import { buildAssistantMessages } from "@/features/assistant/service";
 import { chatCompletion } from "@/features/assistant/llm";

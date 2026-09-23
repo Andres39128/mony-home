@@ -49,7 +49,7 @@ const AMOUNT_SPLIT_RE = /(\$[\d.,]*[\d]|\b\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?%?)/g;
 /**
  * Empty-state suggestion chips. Every prompt is answerable from the
  * pre-computed finance context the assistant actually sees (month totals,
- * budget, top categories, envelopes, trend vs. previous months).
+ * budget, top categories, savings bags, trend vs. previous months).
  */
 const SUGGESTIONS = [
   "¿Cuánto gastamos este mes?",

@@ -7,42 +7,30 @@ import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { catchUpInterest } from "@/features/savings/accrual";
 import { getPatrimony, listGoals } from "@/features/savings/service";
-import type { SessionUser } from "@/lib/auth";
 
 /**
- * Accrual engine suite (R3): deterministic fixtures with injectable `now`.
- * Exact-cent monthly compounding: interest = round(balance × bp / 12 / 10000)
- * per elapsed whole month, dated the month start.
+ * Daily accrual engine suite (R3): deterministic fixtures with injectable
+ * `now`. Complete app-timezone days, one 'Interés diario' row per day:
+ * - compound: daily = (1+r)^(1/365) − 1 on the RUNNING balance (TEA),
+ * - simple: daily = r/365 on the PRINCIPAL only (TNA; interest never earns).
  */
 
-interface Fixture {
-  goalId: string;
-}
+const DAILY_NOTE = "Interés diario";
 
-/** Goal created 2026-08-15 at 12% TNA, $1.000 deposited on 2026-08-20. */
-async function seedCompoundFixture(
+/** Daily fraction implied by a 12% EFFECTIVE annual rate. */
+const COMPOUND_DAILY = Math.pow(1.12, 1 / 365) - 1;
+/** Daily fraction of a 12% NOMINAL annual rate. */
+const SIMPLE_DAILY = 0.12 / 365;
+
+async function insertGoal(
   db: PgliteDatabase,
-  depositorId: string,
-  name = "Compuesta",
-): Promise<Fixture> {
+  values: Partial<typeof savingsGoals.$inferInsert> & { name: string },
+) {
   const [goal] = await db
     .insert(savingsGoals)
-    .values({
-      name,
-      kind: "savings",
-      scope: "common",
-      annualRateBp: 1200,
-      createdAt: new Date("2026-08-15T12:00:00Z"),
-    })
+    .values({ kind: "savings", scope: "common", ...values })
     .returning();
-  await db.insert(savingsContributions).values({
-    goalId: goal.id,
-    memberId: depositorId,
-    kind: "deposit",
-    amountCents: 100_000,
-    date: "2026-08-20",
-  });
-  return { goalId: goal.id };
+  return goal;
 }
 
 async function interestRows(db: PgliteDatabase, goalId: string) {
@@ -53,7 +41,7 @@ async function interestRows(db: PgliteDatabase, goalId: string) {
     .orderBy(asc(savingsContributions.date));
 }
 
-describe("catchUpInterest (integration on PGlite)", () => {
+describe("catchUpInterest — daily engine (integration on PGlite)", () => {
   let db: PgliteDatabase;
   let appDb: Database;
   let client: PGlite;
@@ -73,189 +61,230 @@ describe("catchUpInterest (integration on PGlite)", () => {
     await client.close();
   });
 
-  it("accrues 3 elapsed months with exact-cent compounding", async () => {
-    const { goalId } = await seedCompoundFixture(db, depositorId);
+  it("compound mode: TEA applied to the running balance, interest earns interest", async () => {
+    // $100.000 at 12% TEA: daily ≈ 3105 → 3106 → 3107 cents (growing).
+    const goal = await insertGoal(db, {
+      name: "Compuesta",
+      annualRateBp: 1200,
+      accrualMode: "compound",
+      createdAt: new Date("2026-08-15T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values({
+      goalId: goal.id,
+      memberId: depositorId,
+      kind: "deposit",
+      amountCents: 10_000_000,
+      date: "2026-08-20",
+    });
 
-    const inserted = await catchUpInterest(appDb, goalId, new Date("2026-11-05T10:00:00Z"));
+    // now = 2026-08-24 12:00 UTC → app-tz today 08-24 → accrues 08-16..08-23.
+    // The deposit earns from 08-21: 3 earning days.
+    const inserted = await catchUpInterest(appDb, goal.id, new Date("2026-08-24T12:00:00Z"));
     expect(inserted).toBe(3);
 
-    const rows = (await interestRows(db, goalId)).filter((r) => r.kind === "interest");
-    expect(rows.map((r) => [r.date, r.amountCents])).toEqual([
-      ["2026-09-01", 1000], // 100000 × 1%
-      ["2026-10-01", 1010], // 101000 × 1%
-      ["2026-11-01", 1020], // 102010 × 1% → 1020.1 rounds to 1020
-    ]);
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
+    // Day 1 follows the exact formula; later days grow because interest
+    // earns interest (each day = round(previous integer balance × daily)).
+    expect(rows[0].amountCents).toBe(Math.round(10_000_000 * COMPOUND_DAILY));
+    expect(rows.map((r) => r.amountCents)).toEqual([3105, 3106, 3107]);
     expect(rows.every((r) => r.memberId === null)).toBe(true);
-    expect(rows[0].note).toBe("Interés 12% TNA");
+    expect(rows.every((r) => r.note === DAILY_NOTE)).toBe(true);
+  });
+
+  it("simple mode: TNA/365 linear on the principal, interest never earns", async () => {
+    const goal = await insertGoal(db, {
+      name: "Simple",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-08-15T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values({
+      goalId: goal.id,
+      memberId: depositorId,
+      kind: "deposit",
+      amountCents: 100_000,
+      date: "2026-08-20",
+    });
+
+    const inserted = await catchUpInterest(appDb, goal.id, new Date("2026-08-24T12:00:00Z"));
+    expect(inserted).toBe(3);
+
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
+    // 100000 × 0.12/365 = 32.88 → 33 every day (balance growth does NOT compound).
+    expect(rows.map((r) => [r.date, r.amountCents])).toEqual([
+      ["2026-08-21", Math.round(100_000 * SIMPLE_DAILY)],
+      ["2026-08-22", Math.round(100_000 * SIMPLE_DAILY)],
+      ["2026-08-23", Math.round(100_000 * SIMPLE_DAILY)],
+    ]);
+  });
+
+  it("a mid-stream deposit changes the earning base from the NEXT day", async () => {
+    const goal = await insertGoal(db, {
+      name: "Flujo",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-08-01T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values([
+      { goalId: goal.id, memberId: depositorId, kind: "deposit", amountCents: 100_000, date: "2026-08-01" },
+      { goalId: goal.id, memberId: depositorId, kind: "deposit", amountCents: 100_000, date: "2026-08-10" },
+    ]);
+
+    // Accrues 08-02..08-11: nine days at 100000, then 08-11 at 200000.
+    await catchUpInterest(appDb, goal.id, new Date("2026-08-12T12:00:00Z"));
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
+    const amounts = rows.map((r) => r.amountCents);
+    expect(amounts.filter((cents) => cents === Math.round(100_000 * SIMPLE_DAILY))).toHaveLength(9);
+    expect(amounts.at(-1)).toBe(Math.round(200_000 * SIMPLE_DAILY));
+  });
+
+  it("simple mode: a withdrawal above the principal eats interest and floors at 0", async () => {
+    const goal = await insertGoal(db, {
+      name: "Retiro grande",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-08-01T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values([
+      { goalId: goal.id, memberId: depositorId, kind: "deposit", amountCents: 50_000, date: "2026-08-01" },
+      { goalId: goal.id, memberId: depositorId, kind: "withdrawal", amountCents: 60_000, date: "2026-08-05" },
+    ]);
+
+    // Days 08-02..08-05: earn while the principal is positive, then stop.
+    await catchUpInterest(appDb, goal.id, new Date("2026-08-08T12:00:00Z"));
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
+    // 08-02..08-05 all have principal 50000 available (withdrawal dated 08-05
+    // enters the base on 08-06): four 16-cent days, then nothing.
+    expect(rows.map((r) => [r.date, r.amountCents])).toEqual([
+      ["2026-08-02", Math.round(50_000 * SIMPLE_DAILY)],
+      ["2026-08-03", Math.round(50_000 * SIMPLE_DAILY)],
+      ["2026-08-04", Math.round(50_000 * SIMPLE_DAILY)],
+      ["2026-08-05", Math.round(50_000 * SIMPLE_DAILY)],
+    ]);
   });
 
   it("is idempotent: re-running with the same now inserts nothing", async () => {
-    const { goalId } = await seedCompoundFixture(db, depositorId);
-    const now = new Date("2026-11-05T10:00:00Z");
-    await catchUpInterest(appDb, goalId, now);
+    const goal = await insertGoal(db, {
+      name: "Idempotente",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-08-15T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values({
+      goalId: goal.id,
+      memberId: depositorId,
+      kind: "deposit",
+      amountCents: 100_000,
+      date: "2026-08-20",
+    });
+    const now = new Date("2026-08-24T12:00:00Z");
+    await catchUpInterest(appDb, goal.id, now);
 
-    const second = await catchUpInterest(appDb, goalId, now);
+    const second = await catchUpInterest(appDb, goal.id, now);
     expect(second).toBe(0);
-    const rows = (await interestRows(db, goalId)).filter((r) => r.kind === "interest");
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
     expect(rows).toHaveLength(3);
   });
 
-  it("no-ops on partial months, same month, unknown goals and rateless goals", async () => {
-    const { goalId } = await seedCompoundFixture(db, depositorId);
+  it("continues from the last interest row and keeps old monthly rows", async () => {
+    const goal = await insertGoal(db, {
+      name: "Herencia mensual",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-07-15T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values([
+      { goalId: goal.id, memberId: depositorId, kind: "deposit", amountCents: 100_000, date: "2026-07-20" },
+      // Historical monthly row (old engine semantics) dated 2026-08-01.
+      { goalId: goal.id, memberId: null, kind: "interest", amountCents: 1000, date: "2026-08-01", note: "Interés 12% TNA" },
+    ]);
 
-    // Same month as creation → zero elapsed whole months.
-    expect(await catchUpInterest(appDb, goalId, new Date("2026-08-31T23:00:00Z"))).toBe(0);
-
-    // Zero-balance rate-bearing goal: months pass, balance 0 → no rows.
-    const [empty] = await db
-      .insert(savingsGoals)
-      .values({
-        name: "Vacía",
-        kind: "savings",
-        scope: "common",
-        annualRateBp: 500,
-        createdAt: new Date("2026-05-01T00:00:00Z"),
-      })
-      .returning();
-    expect(await catchUpInterest(appDb, empty.id, new Date("2026-08-01T00:00:00Z"))).toBe(0);
-    expect(await interestRows(db, empty.id)).toHaveLength(0);
-
-    // Ghost id and rateless goal: quiet no-ops.
-    expect(
-      await catchUpInterest(appDb, "00000000-0000-4000-8000-000000000000", new Date("2026-11-05")),
-    ).toBe(0);
-    const [plain] = await db
-      .insert(savingsGoals)
-      .values({ name: "Sin tasa", kind: "savings", scope: "common" })
-      .returning();
-    expect(await catchUpInterest(appDb, plain.id, new Date("2026-11-05"))).toBe(0);
+    await catchUpInterest(appDb, goal.id, new Date("2026-08-04T12:00:00Z"));
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
+    // Daily rows resume the day AFTER the last interest row; the monthly row stays.
+    expect(rows.map((r) => [r.date, r.note, r.amountCents])).toEqual([
+      ["2026-08-01", "Interés 12% TNA", 1000],
+      ["2026-08-02", DAILY_NOTE, Math.round(100_000 * SIMPLE_DAILY)],
+      ["2026-08-03", DAILY_NOTE, Math.round(100_000 * SIMPLE_DAILY)],
+    ]);
   });
 
-  it("uses value_updated_at as an accrual base when set", async () => {
-    const [goal] = await db
-      .insert(savingsGoals)
-      .values({
-        name: "Rebazada",
-        kind: "investment",
-        scope: "common",
-        annualRateBp: 1200,
-        currentValueCents: 100_000,
-        createdAt: new Date("2026-01-10T00:00:00Z"),
-        valueUpdatedAt: new Date("2026-06-20T00:00:00Z"),
-      })
-      .returning();
+  it("uses value_updated_at as a rebase and no-ops without complete days", async () => {
+    const rebased = await insertGoal(db, {
+      name: "Rebazada",
+      annualRateBp: 1200,
+      accrualMode: "compound",
+      createdAt: new Date("2026-01-10T12:00:00Z"),
+      valueUpdatedAt: new Date("2026-06-20T12:00:00Z"),
+    });
     await db.insert(savingsContributions).values({
-      goalId: goal.id,
+      goalId: rebased.id,
       memberId: depositorId,
       kind: "deposit",
       amountCents: 100_000,
       date: "2026-02-15",
     });
 
-    // Months Jan..Jun are before the rebase; only Jul and Aug accrue.
-    const inserted = await catchUpInterest(appDb, goal.id, new Date("2026-08-15T00:00:00Z"));
-    expect(inserted).toBe(2);
-    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
-    expect(rows.map((r) => [r.date, r.amountCents])).toEqual([
-      ["2026-07-01", 1000],
-      ["2026-08-01", 1010],
-    ]);
+    // now = 2026-06-24 (app tz) → accrues 06-21..06-23 only: nothing before
+    // the rebase day is re-earned.
+    const inserted = await catchUpInterest(appDb, rebased.id, new Date("2026-06-24T12:00:00Z"));
+    expect(inserted).toBe(3);
+    const rows = (await interestRows(db, rebased.id)).filter((r) => r.kind === "interest");
+    expect(rows.map((r) => r.date)).toEqual(["2026-06-21", "2026-06-22", "2026-06-23"]);
+
+    // Same-day as creation → zero complete days → no-op.
+    const fresh = await insertGoal(db, {
+      name: "Recién creada",
+      annualRateBp: 500,
+      accrualMode: "simple",
+      createdAt: new Date("2026-05-01T00:00:00Z"),
+    });
+    expect(await catchUpInterest(appDb, fresh.id, new Date("2026-05-01T10:00:00Z"))).toBe(0);
+
+    // Ghost id, rateless goal and investments: quiet no-ops.
+    expect(
+      await catchUpInterest(appDb, "00000000-0000-4000-8000-000000000000", new Date("2026-11-05")),
+    ).toBe(0);
+    const plain = await insertGoal(db, { name: "Sin tasa" });
+    expect(await catchUpInterest(appDb, plain.id, new Date("2026-11-05"))).toBe(0);
+    const stock = await insertGoal(db, {
+      name: "Acciones",
+      kind: "investment",
+      annualRateBp: 1200,
+      accrualMode: "compound",
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    expect(await catchUpInterest(appDb, stock.id, new Date("2026-11-05"))).toBe(0);
   });
 
   it("runs lazily from read paths: listGoals and getPatrimony trigger catch-up", async () => {
-    await seedCompoundFixture(db, depositorId, "CompuestaLectura");
-
-    // No catchUpInterest call here — the read path must do it.
-    const goals = await listGoals(appDb);
-    const goal = goals.find((g) => g.name === "CompuestaLectura")!;
-    // Real now: createdAt 2026-08 → every month start after August that has
-    // already passed accrues (one per elapsed month, ≥ 1 since Sep 2026).
-    const rows = await interestRows(db, goal.id);
-    const interest = rows.filter((r) => r.kind === "interest");
-    expect(interest.length).toBeGreaterThan(0);
-    expect(goal.interestTotalCents).toBe(
-      interest.reduce((sum, r) => sum + r.amountCents, 0),
-    );
-
-    const patrimony = await getPatrimony(appDb);
-    const patrimonyGoal = patrimony.goals.find((g) => g.name === "CompuestaLectura")!;
-    expect(patrimonyGoal.valueCents).toBe(goal.netCents);
-    expect(patrimonyGoal.valueCents).toBeGreaterThan(100_000);
-  });
-
-  it("credits true-up interest and rebases accrual (admin valuation)", async () => {
-    const [admin] = await db
-      .insert(users)
-      .values({ username: "accrual-admin", passwordHash: "x", name: "A", role: "admin" })
-      .returning();
-    const user: SessionUser = {
-      id: admin.id,
-      username: admin.username,
-      name: admin.name,
-      role: admin.role,
-    };
-
-    const [goal] = await db
-      .insert(savingsGoals)
-      .values({
-        name: "TrueUp",
-        kind: "investment",
-        scope: "common",
-        annualRateBp: 1200,
-        createdAt: new Date("2026-09-01T00:00:00Z"),
-      })
-      .returning();
+    const goal = await insertGoal(db, {
+      name: "Lectura",
+      annualRateBp: 1200,
+      accrualMode: "compound",
+      createdAt: new Date("2026-08-15T12:00:00Z"),
+    });
     await db.insert(savingsContributions).values({
       goalId: goal.id,
       memberId: depositorId,
       kind: "deposit",
-      amountCents: 20_000,
-      date: "2026-09-05",
+      amountCents: 100_000,
+      date: "2026-08-20",
     });
 
-    // Rebase to $215: +$1.50 visible as ONE "Ajuste de valoración" row.
-    const { updateGoalValue } = await import("@/features/savings/service");
-    expect(await updateGoalValue(appDb, user, goal.id, "215")).toEqual({ ok: true });
-
-    let rows = await interestRows(db, goal.id);
-    const trueUp = rows.find((r) => r.note === "Ajuste de valoración")!;
-    expect(trueUp.kind).toBe("interest");
-    expect(trueUp.memberId).toBeNull();
-    expect(trueUp.amountCents).toBe(1500);
-
-    // Ledger balance now equals the stated value; net = 21500.
+    // No catchUpInterest call here — the read path must do it.
     const goals = await listGoals(appDb);
-    expect(goals.find((g) => g.id === goal.id)).toMatchObject({ netCents: 21_500 });
+    const listed = goals.find((g) => g.name === "Lectura")!;
+    const rows = await interestRows(db, goal.id);
+    const interest = rows.filter((r) => r.kind === "interest");
+    expect(interest.length).toBeGreaterThan(0);
+    expect(listed.interestTotalCents).toBe(
+      interest.reduce((sum, r) => sum + r.amountCents, 0),
+    );
 
-    // The true-up row (dated this month) rebases accrual: next months accrue
-    // on the rebased balance.
-    await catchUpInterest(appDb, goal.id, new Date("2026-11-18T00:00:00Z"));
-    rows = await interestRows(db, goal.id);
-    const monthly = rows.filter((r) => r.note === "Interés 12% TNA");
-    expect(monthly.map((r) => [r.date, r.amountCents])).toEqual([
-      ["2026-10-01", 215], // 21500 × 1%
-      ["2026-11-01", 217], // 21715 × 1% → 217.15 → 217
-    ]);
-
-    // Losing valuation on the same day REPLACES the day's adjustment: the
-    // ledger keeps ONE net entry converging to the latest stated value.
-    expect(await updateGoalValue(appDb, user, goal.id, "210")).toEqual({ ok: true });
-    rows = await interestRows(db, goal.id);
-    const ajustes = rows.filter((r) => r.note === "Ajuste de valoración");
-    expect(ajustes).toHaveLength(1);
-    // Balance without the replaced +1500: 20000 + 215 + 217 = 20432 → +568.
-    expect(ajustes[0].amountCents).toBe(568);
-    const goalsAfter = await listGoals(appDb);
-    expect(goalsAfter.find((g) => g.id === goal.id)).toMatchObject({ netCents: 21_000 });
-
-    // A valuation BELOW the real balance writes a NEGATIVE interest entry.
-    // Same-day replace: the ajuste converges to 19000 − 20432 = −1432.
-    expect(await updateGoalValue(appDb, user, goal.id, "190")).toEqual({ ok: true });
-    rows = await interestRows(db, goal.id);
-    const ajustesAfterLoss = rows.filter((r) => r.note === "Ajuste de valoración");
-    expect(ajustesAfterLoss).toHaveLength(1);
-    expect(ajustesAfterLoss[0].amountCents).toBe(-1_432);
-    const goalsAfterLoss = await listGoals(appDb);
-    expect(goalsAfterLoss.find((g) => g.id === goal.id)).toMatchObject({ netCents: 19_000 });
+    const patrimony = await getPatrimony(appDb);
+    const patrimonyGoal = patrimony.goals.find((g) => g.name === "Lectura")!;
+    expect(patrimonyGoal.valueCents).toBe(listed.netCents);
+    expect(patrimonyGoal.valueCents).toBeGreaterThan(100_000);
   });
 });

@@ -2,11 +2,11 @@
  * Seed script — `npm run db:seed`.
  *
  * Idempotent-ish: rows are looked up by natural keys before inserting
- * (username, category name, envelope/group name, month+category), so re-runs
+ * (username, category name, group name, month+category), so re-runs
  * skip what already exists instead of duplicating it.
  *
  * `SEED_DEMO_DATA=false` turns this into a production bootstrap: categories
- * and the admin user only — no demo members, envelopes, group, transactions
+ * and the admin user only — no demo members, group, transactions
  * or budgets.
  *
  * Seed DATA (category names, notes) is user-facing and therefore Spanish.
@@ -18,7 +18,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type AppConfig } from "../lib/config.ts";
-import { budgets, categories, envelopes, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "./schema.ts";
+import { budgets, categories, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "./schema.ts";
 
 /** Any Postgres drizzle database — postgres-js in the CLI, PGlite in tests. */
 type SeedDb = PgDatabase<PgQueryResultHKT>;
@@ -97,30 +97,6 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     return found.id;
   };
 
-  // --- Envelopes (no unique constraint on name → check by name) ---
-  const envelopeRows = await db.select().from(envelopes);
-  if (!envelopeRows.some((e) => e.name === "Supermercado")) {
-    await db.insert(envelopes).values({
-      name: "Supermercado",
-      scope: "common",
-      monthlyAmountCents: 300000,
-    });
-  }
-  if (!envelopeRows.some((e) => e.name === "Plata de Andrés")) {
-    await db.insert(envelopes).values({
-      name: "Plata de Andrés",
-      scope: "individual",
-      memberId: userId("andres"),
-      monthlyAmountCents: 150000,
-    });
-  }
-  const envelopeRowsAfter = await db.select().from(envelopes);
-  const envelopeId = (name: string): string => {
-    const found = envelopeRowsAfter.find((e) => e.name === name);
-    if (!found) throw new Error(`Seed envelope "${name}" missing after insert`);
-    return found.id;
-  };
-
   // --- Expense groups ---
   const groupRows = await db.select().from(expenseGroups);
   if (!groupRows.some((g) => g.name === "Vacaciones 2027")) {
@@ -166,7 +142,6 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
         categoryId: categoryId("Supermercado"),
         memberId: userId("andres"),
         scope: "common",
-        envelopeId: envelopeId("Supermercado"),
         note: "Compra semanal",
       },
       {
@@ -213,7 +188,6 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
         categoryId: categoryId("Supermercado"),
         memberId: userId("maria"),
         scope: "common",
-        envelopeId: envelopeId("Supermercado"),
         note: "Verdulería y almacén",
       },
       {
@@ -252,6 +226,9 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
         // 3-6 months of expenses: $15.000 target by end of the current year.
         targetCents: 1500000,
         deadline: isoDay(year, 12, 31, 31),
+        // 36,5% TNA nominal: exercises the DAILY simple accrual engine.
+        annualRateBp: 3650,
+        accrualMode: "simple",
       })
       .returning();
     await db.insert(savingsContributions).values([
@@ -269,8 +246,10 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
         currentValueCents: 165000,
         valueUpdatedAt: now,
         institution: "Banco Nación",
-        // 70% TNA: the demo shows the yield feature from day one.
+        // 70% annual: investments are manual valuation only, so this rate is
+        // dormant — the compound mode rides along for completeness.
         annualRateBp: 7000,
+        accrualMode: "compound",
       })
       .returning();
     await db.insert(savingsContributions).values([

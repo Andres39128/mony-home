@@ -17,6 +17,8 @@ import {
   investmentValueCents,
   listContributions,
   listGoals,
+  listPendingRateReviews,
+  markRateReviewed,
   monthsUntilDeadline,
   removeGoal,
   toggleGoalActive,
@@ -25,7 +27,8 @@ import {
   type ContributionInput,
   type GoalInput,
 } from "@/features/savings/service";
-import { todayIso, transactionTotals } from "@/features/transactions/service";
+import { transactionTotals } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import type { SessionUser } from "@/lib/auth";
 
 /**
@@ -45,6 +48,7 @@ const savingsInput: GoalInput = {
   currentValue: "",
   institution: "",
   annualRate: "",
+  accrualMode: "",
 };
 
 const investmentInput: GoalInput = {
@@ -57,6 +61,7 @@ const investmentInput: GoalInput = {
   currentValue: "",
   institution: "",
   annualRate: "",
+  accrualMode: "",
 };
 
 /** Empty date mirrors the zod transform: "" → today. */
@@ -167,7 +172,7 @@ describe("savings goals CRUD (integration on PGlite)", () => {
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
     expect(parsed.error.issues.find((i) => i.path[0] === "memberId")?.message).toBe(
-      "Las metas individuales requieren un integrante.",
+      "Las bolsas individuales requieren un integrante.",
     );
 
     const withMember = goalSchema.safeParse({ ...savingsInput, memberId });
@@ -343,7 +348,7 @@ describe("savings goals CRUD (integration on PGlite)", () => {
 
   it("accumulates net across months (month-agnostic) in exact cents", async () => {
     const [row] = await db.select().from(savingsGoals).where(eq(savingsGoals.name, "Emergencias"));
-    // Past months count too — unlike bolsas monthly progress.
+    // Past months count too — unlike budget monthly progress.
     await db.insert(savingsContributions).values([
       { goalId: row.id, memberId, kind: "deposit", amountCents: 100_50, date: "2025-01-15" },
     ]);
@@ -352,6 +357,83 @@ describe("savings goals CRUD (integration on PGlite)", () => {
     const goal = goals.find((g) => g.id === row.id);
     // 5000 + 7000 - 1234 + 2345 + 10050 = 23161 exact cents.
     expect(goal).toMatchObject({ netCents: 23_161, contributionCount: 5 });
+  });
+
+  it("defaults accrual mode to simple, honors compound and stamps the review month", async () => {
+    // Rate without an explicit mode → 'simple' + review month stamped.
+    expect(
+      await createGoal(appDb, admin, {
+        ...savingsInput,
+        name: "ModoDefault",
+        annualRate: "35,5",
+      }),
+    ).toEqual({ ok: true });
+    // Explicit compound + rate → 'compound'.
+    expect(
+      await createGoal(appDb, admin, {
+        ...savingsInput,
+        name: "ModoCompuesto",
+        annualRate: "35,5",
+        accrualMode: "compound",
+      }),
+    ).toEqual({ ok: true });
+    // Rateless goal → mode and review month null.
+    expect(await createGoal(appDb, admin, { ...savingsInput, name: "ModoNull" })).toEqual({
+      ok: true,
+    });
+
+    const goals = await listGoals(appDb);
+    const currentMonthStart = `${todayIso().slice(0, 7)}-01`;
+    expect(goals.find((g) => g.name === "ModoDefault")).toMatchObject({
+      accrualMode: "simple",
+      rateReviewedMonth: currentMonthStart,
+    });
+    expect(goals.find((g) => g.name === "ModoCompuesto")).toMatchObject({
+      accrualMode: "compound",
+      rateReviewedMonth: currentMonthStart,
+    });
+    expect(goals.find((g) => g.name === "ModoNull")).toMatchObject({
+      accrualMode: null,
+      rateReviewedMonth: null,
+    });
+
+    // Removing the rate clears mode and review stamp.
+    const [row] = await db.select().from(savingsGoals).where(eq(savingsGoals.name, "ModoDefault"));
+    expect(
+      await updateGoal(appDb, admin, row.id, { ...savingsInput, name: "ModoDefault" }),
+    ).toEqual({ ok: true });
+    const [after] = await db.select().from(savingsGoals).where(eq(savingsGoals.id, row.id));
+    expect(after).toMatchObject({ annualRateBp: null, accrualMode: null, rateReviewedMonth: null });
+  });
+
+  it("flags pending rate reviews and marks them reviewed (admin-only)", async () => {
+    // ModoCompuesto still has a rate and (already) this month's stamp from
+    // creation... so make one stale by writing last month directly.
+    const [row] = await db
+      .select()
+      .from(savingsGoals)
+      .where(eq(savingsGoals.name, "ModoCompuesto"));
+    const lastMonth = (() => {
+      const [y, m] = todayIso().split("-").map(Number);
+      const date = new Date(Date.UTC(y, m - 2, 1));
+      return date.toISOString().slice(0, 10);
+    })();
+    await db
+      .update(savingsGoals)
+      .set({ rateReviewedMonth: lastMonth })
+      .where(eq(savingsGoals.id, row.id));
+
+    // Rateless goals never appear in the review list.
+    const pendingBefore = await listPendingRateReviews(appDb);
+    expect(pendingBefore.map((g) => g.name)).toEqual(["ModoCompuesto"]);
+    expect(pendingBefore[0]).toMatchObject({ annualRateBp: 3550, accrualMode: "compound" });
+
+    // Members cannot mark reviewed; admins can, and the flag clears.
+    expect(await markRateReviewed(appDb, member)).toEqual({ ok: false, error: "forbidden" });
+    expect(await markRateReviewed(appDb, admin)).toEqual({ ok: true });
+    expect(await listPendingRateReviews(appDb)).toEqual([]);
+    const [after] = await db.select().from(savingsGoals).where(eq(savingsGoals.id, row.id));
+    expect(after.rateReviewedMonth).toBe(`${todayIso().slice(0, 7)}-01`);
   });
 });
 

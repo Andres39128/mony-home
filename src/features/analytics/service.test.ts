@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, envelopes, expenseGroups, transactions, users } from "@/db/schema";
+import { budgets, categories, expenseGroups, transactions, users } from "@/db/schema";
 import {
   DEFAULT_MONTHS_BACK,
   cumulativeBudgetVsActual,
@@ -13,7 +13,7 @@ import {
 
 /**
  * Analytics suite: exact-cent groupings per chart, gap-month zero-fill,
- * filter honoring (member/scope/category/envelope/group) and cumulative
+ * filter honoring (member/scope/category/group) and cumulative
  * budget-vs-actual math (missing budget month carries 0) — against
  * in-memory Postgres with the real migrations.
  */
@@ -26,7 +26,6 @@ describe("analytics service (integration on PGlite)", () => {
   let sueldo: { id: string };
   let superCat: { id: string };
   let ocio: { id: string };
-  let mercado: { id: string };
   let vacaciones: { id: string };
 
   beforeAll(async () => {
@@ -53,11 +52,6 @@ describe("analytics service (integration on PGlite)", () => {
       ])
       .returning();
 
-    [mercado] = await db
-      .insert(envelopes)
-      .values([{ name: "Mercado", scope: "common" }])
-      .returning();
-
     [vacaciones] = await db
       .insert(expenseGroups)
       .values([{ name: "Vacaciones", status: "active" }])
@@ -73,7 +67,7 @@ describe("analytics service (integration on PGlite)", () => {
       // 2026-02 intentionally empty (gap month).
       // 2026-03.
       { date: "2026-03-02", amountCents: 20_000, type: "expense", categoryId: superCat.id, memberId: mateId, scope: "common", groupId: vacaciones.id },
-      { date: "2026-03-15", amountCents: 8_000, type: "expense", categoryId: ocio.id, memberId: anaId, scope: "common", envelopeId: mercado.id },
+      { date: "2026-03-15", amountCents: 8_000, type: "expense", categoryId: ocio.id, memberId: anaId, scope: "common" },
       { date: "2026-03-30", amountCents: 60_000, type: "income", categoryId: sueldo.id, memberId: mateId, scope: "common" },
     ]);
 
@@ -102,7 +96,7 @@ describe("analytics service (integration on PGlite)", () => {
       expect(slices.map((slice) => slice.name)).toEqual(["Super", "Ocio"]);
     });
 
-    it("honors member, scope, envelope, group and category filters", async () => {
+    it("honors member, scope, group and category filters", async () => {
       expect(
         (await expensesByCategory(appDb, { month: "2026-01", memberId: anaId })).map((s) => s.cents),
       ).toEqual([5_000]);
@@ -110,9 +104,6 @@ describe("analytics service (integration on PGlite)", () => {
       expect(
         (await expensesByCategory(appDb, { month: "2026-01", scope: "common" })).map((s) => s.name),
       ).toEqual(["Super"]);
-      expect(
-        (await expensesByCategory(appDb, { month: "2026-03", envelopeId: mercado.id })).map((s) => s.cents),
-      ).toEqual([8_000]);
       expect(
         (await expensesByCategory(appDb, { month: "2026-03", groupId: vacaciones.id })).map((s) => s.cents),
       ).toEqual([20_000]);

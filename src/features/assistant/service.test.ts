@@ -139,7 +139,7 @@ describe("assistant service (integration on PGlite, mocked llm)", () => {
       topExpenseCategories: [],
       otherCategories: null,
       categoryChanges: [],
-      envelopes: [],
+      bolsas: [],
       trend: { months: 12, avgExpenseCents: 0, currentVsAvgPct: 0 },
       notes: [],
     };

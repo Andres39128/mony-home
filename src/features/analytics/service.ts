@@ -74,8 +74,8 @@ export const DEFAULT_MONTHS_BACK = 12;
  * Income/expense totals for the `monthsBack` months ending at `endingMonth`
  * (inclusive), oldest first. Gap months come back as ZERO rows (never
  * missing keys) so charts never break on an empty month. The month range is
- * owned by this window; every OTHER filter (member/scope/category/envelope/
- * group) is honored.
+ * owned by this window; every OTHER filter (member/scope/category/group) is
+ * honored.
  */
 export async function monthlyTotals(
   db: Database,
@@ -136,8 +136,8 @@ export interface CumulativeBudgetPoint {
  * always passes the selected month, so no future-zero spam). A month with
  * no budget row contributes 0 to the planned curve; the actual curve sums
  * expense transactions honoring the movement filters. The budget plan side
- * honors the category filter (plans are per category); member/scope/
- * envelope/group have no meaning for a plan and are ignored there.
+ * honors the category filter (plans are per category); member/scope/group
+ * have no meaning for a plan and are ignored there.
  * No data at all → [] (the chart shows its empty state).
  */
 export async function cumulativeBudgetVsActual(

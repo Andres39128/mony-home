@@ -39,7 +39,7 @@ const KIND_LABELS = {
   other: "Otro",
 } as const;
 
-/** "Común" / "Individual · {member}" badge, same pattern as the ahorro panel. */
+/** "Común" / "Individual · {member}" badge, same pattern as the bolsas panel. */
 function ScopeBadge({ loan }: { loan: LoanView }) {
   return loan.scope === "common" ? (
     <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
@@ -167,7 +167,7 @@ function HistoryDetails({
 /**
  * Quick payment: monto first (autoFocused on the first card), Enter saves
  * natively, form resets after success — same philosophy as the quick
- * contribution form on /ahorro.
+ * contribution form on /bolsas.
  */
 function QuickPaymentForm({
   loan,

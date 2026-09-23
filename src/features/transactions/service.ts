@@ -11,15 +11,12 @@
  *
  * Integrity rules enforced here (never trusted to the UI):
  * 1. Category kind must match the transaction type.
- * 2. Envelopes must be active; an individual envelope only accepts movements
- *    from its own member (common envelopes accept anyone).
- * 3. Only active expense groups can be attached to new/updated movements.
+ * 2. Only active expense groups can be attached to new/updated movements.
  */
 import { and, desc, eq, gte, lte, sql, sum, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   categories,
-  envelopes,
   expenseGroups,
   movementReceipts,
   transactions,
@@ -29,22 +26,9 @@ import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import { AmbiguousAmountError, parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
+import { todayIso } from "@/lib/date";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** App-wide calendar day: filing never depends on the server's TZ setting. */
-const APP_TIME_ZONE = "America/Argentina/Buenos_Aires";
-
-/** ISO date ('YYYY-MM-DD') in the app timezone; shared by schema default and pages. */
-export function todayIso(now = new Date()): string {
-  // en-CA renders Intl dates as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: APP_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
 
 /** Annotation stamped on quick-capture rows until their details are completed. */
 export const PENDING_DETAILS_NOTE = "Pendiente incluir detalles.";
@@ -71,7 +55,6 @@ export const movementSchema = z.object({
   categoryId: z.string().regex(UUID_RE, "Categoría inválida"),
   /** Empty string = the acting user (create default); admins may target anyone. */
   memberId: z.union([z.string().regex(UUID_RE, "Integrante inválido"), z.literal("")]),
-  envelopeId: z.union([z.string().regex(UUID_RE, "Bolsa inválida"), z.literal("")]),
   groupId: z.union([z.string().regex(UUID_RE, "Grupo inválido"), z.literal("")]),
   scope: z.enum(["individual", "common"]).default("common"),
   note: z.union([z.string().trim().max(200, "Máximo 200 caracteres"), z.literal("")]),
@@ -98,9 +81,6 @@ export type MovementMutationError =
   | "invalid_amount"
   | "ambiguous_amount"
   | "category_kind_mismatch"
-  | "envelope_member_mismatch"
-  | "envelope_scope_mismatch"
-  | "envelope_inactive"
   | "member_inactive"
   | "group_closed"
   | "receipt_too_large"
@@ -125,8 +105,6 @@ export interface TransactionView {
   categoryColor: string | null;
   memberId: string;
   memberName: string;
-  envelopeId: string | null;
-  envelopeName: string | null;
   groupId: string | null;
   groupName: string | null;
   needsDetails: boolean;
@@ -138,7 +116,6 @@ export interface TransactionFilters {
   month?: string;
   categoryId?: string;
   memberId?: string;
-  envelopeId?: string;
   groupId?: string;
   type?: "income" | "expense";
   /** Ámbito: household-wide or personal movements (dashboard filter). */
@@ -157,8 +134,6 @@ const viewColumns = {
   categoryColor: categories.color,
   memberId: transactions.memberId,
   memberName: users.name,
-  envelopeId: transactions.envelopeId,
-  envelopeName: envelopes.name,
   groupId: transactions.groupId,
   groupName: expenseGroups.name,
   needsDetails: transactions.needsDetails,
@@ -173,7 +148,6 @@ function baseQuery(db: Database) {
     // yet and MUST stay visible in the list (that is how users find them).
     .leftJoin(categories, eq(transactions.categoryId, categories.id))
     .innerJoin(users, eq(transactions.memberId, users.id))
-    .leftJoin(envelopes, eq(transactions.envelopeId, envelopes.id))
     .leftJoin(expenseGroups, eq(transactions.groupId, expenseGroups.id))
     // At most one receipt per movement (service replaces by delete+insert).
     .leftJoin(movementReceipts, eq(movementReceipts.transactionId, transactions.id));
@@ -203,7 +177,6 @@ export function filtersWhere(filters: TransactionFilters): SQL | undefined {
   }
   if (filters.categoryId) conds.push(eq(transactions.categoryId, filters.categoryId));
   if (filters.memberId) conds.push(eq(transactions.memberId, filters.memberId));
-  if (filters.envelopeId) conds.push(eq(transactions.envelopeId, filters.envelopeId));
   if (filters.groupId) conds.push(eq(transactions.groupId, filters.groupId));
   if (filters.type) conds.push(eq(transactions.type, filters.type));
   if (filters.scope) conds.push(eq(transactions.scope, filters.scope));
@@ -291,30 +264,22 @@ type RowLoader = Pick<Database, "select">;
 interface ReferencedRows {
   member: { isActive: boolean } | null;
   category: { kind: "income" | "expense" } | null;
-  envelope: { isActive: boolean; scope: "individual" | "common"; memberId: string | null } | null;
   group: { status: "active" | "closed" } | null;
 }
 
-/** Loads member/category/envelope/group so rules 1-3 can be checked before writing. */
-async function loadReferencedRows(
+/** Loads member/category/group so rules 1-2 can be checked before writing. */
+function loadReferencedRows(
   db: RowLoader,
   memberId: string,
   input: MovementInput,
 ): Promise<ReferencedRows> {
-  const [member, category, envelope, group] = await Promise.all([
+  return Promise.all([
     db.select({ isActive: users.isActive }).from(users).where(eq(users.id, memberId)).limit(1),
     db
       .select({ kind: categories.kind })
       .from(categories)
       .where(eq(categories.id, input.categoryId))
       .limit(1),
-    input.envelopeId
-      ? db
-          .select({ isActive: envelopes.isActive, scope: envelopes.scope, memberId: envelopes.memberId })
-          .from(envelopes)
-          .where(eq(envelopes.id, input.envelopeId))
-          .limit(1)
-      : Promise.resolve([]),
     input.groupId
       ? db
           .select({ status: expenseGroups.status })
@@ -322,35 +287,22 @@ async function loadReferencedRows(
           .where(eq(expenseGroups.id, input.groupId))
           .limit(1)
       : Promise.resolve([]),
-  ]);
-  return {
+  ]).then(([member, category, group]) => ({
     member: member[0] ?? null,
     category: category[0] ?? null,
-    envelope: envelope[0] ?? null,
     group: group[0] ?? null,
-  };
+  }));
 }
 
-/** Rules 1-3: member status, category kind, envelope scope/activity/ownership, group status. */
+/** Rules 1-2: member status, category kind, group status. */
 function checkReferencedRows(
   rows: ReferencedRows,
   input: MovementInput,
-  memberId: string,
 ): MovementMutationError | null {
   if (!rows.member) return "not_found";
   if (!rows.member.isActive) return "member_inactive";
   if (!rows.category) return "not_found";
   if (rows.category.kind !== input.type) return "category_kind_mismatch";
-  if (input.envelopeId) {
-    if (!rows.envelope) return "not_found";
-    if (!rows.envelope.isActive) return "envelope_inactive";
-    // Envelope and movement must live in the same scope: a household
-    // movement cannot draw from a personal envelope, nor the reverse.
-    if (rows.envelope.scope !== input.scope) return "envelope_scope_mismatch";
-    if (rows.envelope.scope === "individual" && rows.envelope.memberId !== memberId) {
-      return "envelope_member_mismatch";
-    }
-  }
   if (input.groupId) {
     if (!rows.group) return "not_found";
     if (rows.group.status !== "active") return "group_closed";
@@ -365,7 +317,6 @@ function movementValues(input: MovementInput, memberId: string, cents: number) {
     type: input.type,
     categoryId: input.categoryId,
     memberId,
-    envelopeId: input.envelopeId ? input.envelopeId : null,
     groupId: input.groupId ? input.groupId : null,
     scope: input.scope,
     note: input.note ? input.note : null,
@@ -428,7 +379,7 @@ export async function createTransaction(
   try {
     return await db.transaction<MovementResult>(async (tx) => {
       const rows = await loadReferencedRows(tx, member.memberId, input);
-      const ruleError = checkReferencedRows(rows, input, member.memberId);
+      const ruleError = checkReferencedRows(rows, input);
       if (ruleError) return { ok: false, error: ruleError };
       if (input.receipt) {
         const receiptError = await validateReceipt(input.receipt);
@@ -526,7 +477,7 @@ export async function updateTransaction(
       }
 
       const rows = await loadReferencedRows(tx, member.memberId, input);
-      const ruleError = checkReferencedRows(rows, input, member.memberId);
+      const ruleError = checkReferencedRows(rows, input);
       if (ruleError) return { ok: false, error: ruleError };
       if (input.receipt) {
         const receiptError = await validateReceipt(input.receipt);

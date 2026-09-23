@@ -1,7 +1,7 @@
 import type { ProgressStatus } from "@/features/budgets/progress";
 
 /**
- * Shared monthly-progress bar (budget page + envelope cards). Width is the
+ * Shared monthly-progress bar (budget page + savings goal cards). Width is the
  * percentage capped at 100%; color comes from the shared status thresholds
  * (ok / warn >= 75% / over >= 100%) so every screen agrees on the semantics.
  */

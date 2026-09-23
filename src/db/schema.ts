@@ -43,6 +43,7 @@ export const scopeKindEnum = pgEnum("scope_kind", ["individual", "common"]);
 export const groupStatusEnum = pgEnum("group_status", ["active", "closed"]);
 export const savingsKindEnum = pgEnum("savings_kind", ["savings", "investment"]);
 export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "withdrawal", "interest"]);
+export const accrualModeEnum = pgEnum("accrual_mode", ["simple", "compound"]);
 export const loanKindEnum = pgEnum("loan_kind", ["credit_card", "investment_line", "mortgage", "other"]);
 export const loanPaymentKindEnum = pgEnum("loan_payment_kind", ["payment", "interest"]);
 
@@ -85,26 +86,6 @@ export const categories = pgTable("categories", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const envelopes = pgTable(
-  "envelopes",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    name: text("name").notNull(),
-    scope: scopeKindEnum("scope").notNull(),
-    /** null = common/shared envelope; required when scope is 'individual'. */
-    memberId: uuid("member_id").references(() => users.id),
-    monthlyAmountCents: bigint("monthly_amount_cents", { mode: "number" }).notNull().default(0),
-    isActive: boolean("is_active").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    check(
-      "envelopes_individual_requires_member",
-      sql`${table.scope} <> 'individual' OR ${table.memberId} IS NOT NULL`,
-    ),
-  ],
-);
-
 export const expenseGroups = pgTable("expense_groups", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
@@ -124,7 +105,6 @@ export const transactions = pgTable(
     memberId: uuid("member_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
-    envelopeId: uuid("envelope_id").references(() => envelopes.id, { onDelete: "restrict" }),
     groupId: uuid("group_id").references(() => expenseGroups.id, { onDelete: "set null" }),
     /** Set on mirror rows: the savings contribution that generated this movement. */
     savingsContributionId: uuid("savings_contribution_id").references(() => savingsContributions.id, {
@@ -155,7 +135,6 @@ export const transactions = pgTable(
     index("transactions_date_idx").on(table.date),
     index("transactions_category_id_idx").on(table.categoryId),
     index("transactions_member_id_idx").on(table.memberId),
-    index("transactions_envelope_id_idx").on(table.envelopeId),
     index("transactions_group_id_idx").on(table.groupId),
     index("transactions_savings_contribution_id_idx").on(table.savingsContributionId),
     index("transactions_loan_payment_id_idx").on(table.loanPaymentId),
@@ -241,8 +220,18 @@ export const savingsGoals = pgTable(
     valueUpdatedAt: timestamp("value_updated_at", { withTimezone: true }),
     /** Where the money is held (banco, billetera, fondo…); free text, optional. */
     institution: text("institution"),
-    /** Annual nominal rate (TNA) in basis points; null = no yield. 0..100000 = 0..1000%. */
+    /** Annual rate in basis points; null = no yield. 0..100000 = 0..1000%. */
     annualRateBp: integer("annual_rate_bp"),
+    /**
+     * Daily accrual mode (savings goals with a rate only):
+     * 'simple' treats the rate as NOMINAL annual (TNA) earned on the
+     * principal only; 'compound' treats it as EFFECTIVE annual (TEA) earned
+     * on the running balance. Null when there is no rate (or for
+     * investments, which accrue nothing — manual valuation only).
+     */
+    accrualMode: accrualModeEnum("accrual_mode"),
+    /** 'YYYY-MM-01' — month the rate was last reviewed; drives the review banner. */
+    rateReviewedMonth: date("rate_reviewed_month", { mode: "string" }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

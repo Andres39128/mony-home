@@ -127,7 +127,6 @@ export default function MovementsTable({
   rows,
   currentUser,
   categories,
-  envelopes,
   members,
   groups,
   serverToday,
@@ -196,11 +195,6 @@ export default function MovementsTable({
                       <span className={PENDING_CHIP_CLASS}>Pendiente</span>
                     )}
                     {row.receiptId && <ReceiptIndicator />}
-                    {row.envelopeName && (
-                      <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
-                        {row.envelopeName}
-                      </span>
-                    )}
                     {row.groupName && (
                       <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
                         {row.groupName}
@@ -227,7 +221,6 @@ export default function MovementsTable({
                   <th className="px-4 py-3 font-medium">Categoría</th>
                   <th className="px-4 py-3 font-medium">Detalle</th>
                   <th className="px-4 py-3 font-medium">Integrante</th>
-                  <th className="px-4 py-3 font-medium">Bolsa</th>
                   <th className="px-4 py-3 font-medium">Grupo</th>
                   <th className="px-4 py-3 font-medium">Ámbito</th>
                   <th className="px-4 py-3 text-right font-medium">Monto</th>
@@ -250,9 +243,6 @@ export default function MovementsTable({
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted">{row.memberName}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-muted">
-                      {row.envelopeName ?? "—"}
-                    </td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted">
                       {row.groupName ?? "—"}
                     </td>
@@ -286,7 +276,6 @@ export default function MovementsTable({
             mode="edit"
             transaction={editing}
             categories={categories}
-            envelopes={envelopes}
             members={members}
             groups={groups}
             currentUser={currentUser}

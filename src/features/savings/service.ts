@@ -11,14 +11,14 @@
  * Contributions are a ledger SEPARATE from transactions: saving is neither
  * income nor expense and must never pollute those stats.
  */
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { categories, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { getDebtCents } from "@/features/loans/service";
 import { catchUpAllInterest } from "./accrual";
 // Pure math lives in a client-safe module; re-exported here so the service
@@ -55,17 +55,19 @@ export const goalSchema = z
     institution: z.union([z.string().trim().max(64, "Máximo 64 caracteres"), z.literal("")]),
     /** AR-tolerant annual percent ("35,5" = 35,5% TNA); empty string = no yield. */
     annualRate: optionalAmount,
+    /** Interest mode (savings goals with a rate); empty string = default 'simple'. */
+    accrualMode: z.union([z.enum(["simple", "compound"]), z.literal("")]).default(""),
   })
   .refine((v) => v.scope !== "individual" || v.memberId !== "", {
-    message: "Las metas individuales requieren un integrante.",
+    message: "Las bolsas individuales requieren un integrante.",
     path: ["memberId"],
   })
   .refine((v) => v.scope !== "common" || v.memberId === "", {
-    message: "Las metas comunes no llevan integrante.",
+    message: "Las bolsas comunes no llevan integrante.",
     path: ["memberId"],
   })
   .refine((v) => v.kind !== "savings" || v.currentValue === "", {
-    message: "Las metas de ahorro no llevan valor actual.",
+    message: "Las bolsas de ahorro no llevan valor actual.",
     path: ["currentValue"],
   })
   .refine((v) => v.kind !== "investment" || (v.target === "" && v.deadline === ""), {
@@ -107,8 +109,12 @@ export interface GoalView {
   valueUpdatedAt: Date | null;
   /** Where the money is held; null = unset. */
   institution: string | null;
-  /** Annual nominal rate in bp; null = no yield. */
+  /** Annual rate in bp; null = no yield. */
   annualRateBp: number | null;
+  /** Daily accrual mode; null when there is no rate (or for investments). */
+  accrualMode: "simple" | "compound" | null;
+  /** 'YYYY-MM-01' — month the rate was last reviewed (review banner flag). */
+  rateReviewedMonth: string | null;
   /** Sum of interest entries — what the goal has generated so far. */
   interestTotalCents: number;
   isActive: boolean;
@@ -170,6 +176,8 @@ export async function listGoals(db: Database): Promise<GoalView[]> {
       valueUpdatedAt: savingsGoals.valueUpdatedAt,
       institution: savingsGoals.institution,
       annualRateBp: savingsGoals.annualRateBp,
+      accrualMode: savingsGoals.accrualMode,
+      rateReviewedMonth: savingsGoals.rateReviewedMonth,
       isActive: savingsGoals.isActive,
       net: sql<string | null>`coalesce(sum(case ${savingsContributions.kind} when 'deposit' then ${savingsContributions.amountCents} when 'withdrawal' then -${savingsContributions.amountCents} else ${savingsContributions.amountCents} end), 0)`,
       interestTotal: sql<string | null>`coalesce(sum(case when ${savingsContributions.kind} = 'interest' then ${savingsContributions.amountCents} else 0 end), 0)`,
@@ -242,7 +250,22 @@ function goalValues(input: GoalInput, targetCents: number | null, rateBp: number
     deadline: input.kind === "savings" && input.deadline !== "" ? input.deadline : null,
     institution: input.institution !== "" ? input.institution : null,
     annualRateBp: rateBp,
+    // Mode only applies to savings goals with a rate; unset defaults to 'simple'
+    // (the historical rate/12 semantics). Investments accrue nothing.
+    accrualMode:
+      rateBp === null || input.kind !== "savings"
+        ? null
+        : input.accrualMode === ""
+          ? ("simple" as const)
+          : input.accrualMode,
+    // Creating/updating a rate stamps the review month automatically.
+    rateReviewedMonth: rateBp === null ? null : currentMonthStart(),
   };
+}
+
+/** 'YYYY-MM-01' of the current app-tz month (comparable, ISO date column). */
+function currentMonthStart(): string {
+  return `${todayIso().slice(0, 7)}-01`;
 }
 
 export type GoalResult =
@@ -391,6 +414,48 @@ export async function removeGoal(
 }
 
 // ---------------------------------------------------------------------------
+// Monthly rate review
+// ---------------------------------------------------------------------------
+
+export interface RateReviewView {
+  id: string;
+  name: string;
+  annualRateBp: number | null;
+  accrualMode: "simple" | "compound" | null;
+}
+
+/** Active savings bolsas with a rate not reviewed this month — the banner list. */
+const pendingReviewWhere = () => {
+  const monthStart = currentMonthStart();
+  return and(
+    eq(savingsGoals.isActive, true),
+    eq(savingsGoals.kind, "savings"),
+    isNotNull(savingsGoals.annualRateBp),
+    or(isNull(savingsGoals.rateReviewedMonth), lt(savingsGoals.rateReviewedMonth, monthStart)),
+  );
+};
+
+export async function listPendingRateReviews(db: Database): Promise<RateReviewView[]> {
+  return db
+    .select({
+      id: savingsGoals.id,
+      name: savingsGoals.name,
+      annualRateBp: savingsGoals.annualRateBp,
+      accrualMode: savingsGoals.accrualMode,
+    })
+    .from(savingsGoals)
+    .where(pendingReviewWhere())
+    .orderBy(asc(savingsGoals.name));
+}
+
+/** Admin-only: stamps rate_reviewed_month = current month on every pending goal. */
+export async function markRateReviewed(db: Database, user: SessionUser): Promise<GoalResult> {
+  if (user.role !== "admin") return { ok: false, error: "forbidden" };
+  await db.update(savingsGoals).set({ rateReviewedMonth: currentMonthStart() }).where(pendingReviewWhere());
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Contributions
 // ---------------------------------------------------------------------------
 
@@ -493,7 +558,7 @@ export async function addContribution(
   });
 }
 
-/** Full history (optionally one goal's), newest first. Feeds the /ahorro cards. */
+/** Full history (optionally one goal's), newest first. Feeds the /bolsas cards. */
 export async function listContributions(
   db: Database,
   goalId?: string,

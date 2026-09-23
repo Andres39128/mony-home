@@ -6,7 +6,6 @@ import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import {
   categories,
-  envelopes,
   expenseGroups,
   movementReceipts,
   transactions,
@@ -22,18 +21,17 @@ import {
   listTransactions,
   quickMovementSchema,
   removeTransaction,
-  todayIso,
   transactionTotals,
   updateTransaction,
 } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import type { MovementInput } from "@/features/transactions/service";
 import type { SessionUser } from "@/lib/auth";
 
 /**
- * Transactions service suite: integrity rules 1-7 (category kind, envelope
- * activity/ownership, group status, AR amount parsing, member ownership for
- * edit/delete), filters, exact-cent totals — against in-memory Postgres with
- * the real migrations.
+ * Transactions service suite: integrity rules (category kind, group status,
+ * AR amount parsing, member ownership for edit/delete), filters, exact-cent
+ * totals — against in-memory Postgres with the real migrations.
  *
  * Filter/totals assertions run against the pure fixture FIRST; successful
  * creates run afterwards so their rows can never pollute those assertions.
@@ -49,9 +47,6 @@ describe("transactions service (integration on PGlite)", () => {
   let anaId: string;
   let incomeCat: { id: string };
   let expenseCat: { id: string };
-  let commonEnvelope: { id: string };
-  let anaEnvelope: { id: string };
-  let inactiveEnvelope: { id: string };
   let activeGroup: { id: string };
   let closedGroup: { id: string };
   let fixtureTx: { id: string };
@@ -67,7 +62,6 @@ describe("transactions service (integration on PGlite)", () => {
       type: "expense",
       categoryId: expenseCat.id,
       memberId: "",
-      envelopeId: "",
       groupId: "",
       scope: "common",
       note: "",
@@ -109,15 +103,6 @@ describe("transactions service (integration on PGlite)", () => {
       ])
       .returning();
 
-    [commonEnvelope, anaEnvelope, inactiveEnvelope] = await db
-      .insert(envelopes)
-      .values([
-        { name: "Mercado", scope: "common" },
-        { name: "Gastos de Ana", scope: "individual", memberId: anaId },
-        { name: "Vieja", scope: "common", isActive: false },
-      ])
-      .returning();
-
     [activeGroup, closedGroup] = await db
       .insert(expenseGroups)
       .values([
@@ -144,7 +129,6 @@ describe("transactions service (integration on PGlite)", () => {
           type: "expense",
           categoryId: expenseCat.id,
           memberId: mateId,
-          envelopeId: commonEnvelope.id,
           groupId: activeGroup.id,
           note: "Compra semanal",
         },
@@ -182,9 +166,6 @@ describe("transactions service (integration on PGlite)", () => {
     const byMember = await listTransactions(appDb, { memberId: mateId });
     expect(byMember.map((t) => t.date)).toEqual(["2026-10-01", "2026-09-20", "2026-09-10"]);
 
-    const byEnvelope = await listTransactions(appDb, { envelopeId: commonEnvelope.id });
-    expect(byEnvelope.map((t) => t.date)).toEqual(["2026-09-10"]);
-
     const byActiveGroup = await listTransactions(appDb, { groupId: activeGroup.id });
     expect(byActiveGroup.map((t) => t.date)).toEqual(["2026-09-10"]);
 
@@ -202,7 +183,6 @@ describe("transactions service (integration on PGlite)", () => {
       categoryName: "Super",
       categoryColor: "#16a34a",
       memberName: "Mate",
-      envelopeName: "Mercado",
       groupName: "Vacaciones",
       amountCents: 25_000,
     });
@@ -232,14 +212,13 @@ describe("transactions service (integration on PGlite)", () => {
     expect(await getTransaction(appDb, GHOST)).toBeNull();
   });
 
-  it("creates an expense (common) with envelope and group, parsing AR amounts", async () => {
+  it("creates an expense (common) with group, parsing AR amounts", async () => {
     const result = await createTransaction(
       appDb,
       mate,
       parseInput({
         date: "2026-08-15",
         amount: "1.234,56",
-        envelopeId: commonEnvelope.id,
         groupId: activeGroup.id,
         note: "Almacén",
       }),
@@ -253,7 +232,6 @@ describe("transactions service (integration on PGlite)", () => {
       type: "expense",
       scope: "common",
       memberId: mateId,
-      envelopeId: commonEnvelope.id,
       groupId: activeGroup.id,
     });
   });
@@ -276,7 +254,7 @@ describe("transactions service (integration on PGlite)", () => {
       .where(
         and(eq(transactions.categoryId, incomeCat.id), eq(transactions.date, "2026-08-01")),
       );
-    expect(row).toMatchObject({ scope: "common", note: null, envelopeId: null, groupId: null });
+    expect(row).toMatchObject({ scope: "common", note: null, groupId: null });
   });
 
   it("attributes an individual-scope movement to the acting member", async () => {
@@ -322,48 +300,6 @@ describe("transactions service (integration on PGlite)", () => {
     ).toEqual({ ok: false, error: "category_kind_mismatch" });
   });
 
-  it("rejects an inactive envelope and scope/owner mismatches for individual envelopes", async () => {
-    expect(
-      await createTransaction(
-        appDb,
-        mate,
-        parseInput({ envelopeId: inactiveEnvelope.id }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_inactive" });
-    // A common-scope movement cannot draw from a personal envelope...
-    expect(
-      await createTransaction(
-        appDb,
-        mate,
-        parseInput({ envelopeId: anaEnvelope.id, scope: "common" }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_scope_mismatch" });
-    // ...nor an individual movement from a common envelope.
-    expect(
-      await createTransaction(
-        appDb,
-        mate,
-        parseInput({ envelopeId: commonEnvelope.id, scope: "individual" }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_scope_mismatch" });
-    // Same scope, wrong owner → ownership error.
-    expect(
-      await createTransaction(
-        appDb,
-        mate,
-        parseInput({ envelopeId: anaEnvelope.id, scope: "individual" }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_member_mismatch" });
-    // Ana CAN use her own individual envelope with an individual movement.
-    expect(
-      await createTransaction(
-        appDb,
-        ana,
-        parseInput({ date: "2026-08-21", envelopeId: anaEnvelope.id, scope: "individual" }),
-      ),
-    ).toEqual({ ok: true });
-  });
-
   it("rejects movements targeting a deactivated member", async () => {
     const [inactive] = await db
       .insert(users)
@@ -400,9 +336,6 @@ describe("transactions service (integration on PGlite)", () => {
     const ghost = "00000000-0000-4000-8000-000000000001";
     expect(
       await createTransaction(appDb, admin, parseInput({ categoryId: ghost })),
-    ).toEqual({ ok: false, error: "not_found" });
-    expect(
-      await createTransaction(appDb, admin, parseInput({ envelopeId: ghost })),
     ).toEqual({ ok: false, error: "not_found" });
     expect(await createTransaction(appDb, admin, parseInput({ groupId: ghost }))).toEqual({
       ok: false,
@@ -464,7 +397,7 @@ describe("transactions service (integration on PGlite)", () => {
     });
   });
 
-  it("update re-runs the integrity rules (category kind, envelope, group)", async () => {
+  it("update re-runs the integrity rules (category kind, group)", async () => {
     expect(
       await updateTransaction(
         appDb,
@@ -478,33 +411,9 @@ describe("transactions service (integration on PGlite)", () => {
         appDb,
         mate,
         fixtureTx.id,
-        parseInput({ envelopeId: inactiveEnvelope.id }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_inactive" });
-    expect(
-      await updateTransaction(
-        appDb,
-        mate,
-        fixtureTx.id,
         parseInput({ groupId: closedGroup.id }),
       ),
     ).toEqual({ ok: false, error: "group_closed" });
-    expect(
-      await updateTransaction(
-        appDb,
-        mate,
-        fixtureTx.id,
-        parseInput({ envelopeId: anaEnvelope.id, scope: "individual" }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_member_mismatch" });
-    expect(
-      await updateTransaction(
-        appDb,
-        mate,
-        fixtureTx.id,
-        parseInput({ envelopeId: anaEnvelope.id, scope: "common" }),
-      ),
-    ).toEqual({ ok: false, error: "envelope_scope_mismatch" });
   });
 
   describe("delete permission matrix (rule 6)", () => {

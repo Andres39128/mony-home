@@ -1,58 +1,6 @@
-import { getDb } from "@/db";
-import { requireUser } from "@/features/auth/session";
-import { getPatrimony, listContributions, listGoals } from "@/features/savings/service";
-import { listMembers } from "@/features/members/service";
-import {
-  addContributionAction,
-  createGoalAction,
-  deleteGoalAction,
-  toggleGoalAction,
-  updateGoalAction,
-  updateGoalValueAction,
-} from "@/features/savings/actions";
-import SavingsPanel from "./savings-panel";
+import { redirect } from "next/navigation";
 
-export default async function AhorroPage() {
-  const user = await requireUser();
-  // listGoals FIRST: it triggers the lazy interest catch-up, so the history
-  // query below is guaranteed to see the freshly materialized entries.
-  const goals = await listGoals(getDb());
-  const [members, patrimony, contributions] = await Promise.all([
-    listMembers(getDb()),
-    getPatrimony(getDb()),
-    listContributions(getDb()),
-  ]);
-
-  // One query for every card's collapsible history, grouped here.
-  const contributionsByGoal: Record<string, typeof contributions> = {};
-  for (const entry of contributions) {
-    const list = contributionsByGoal[entry.goalId] ?? [];
-    list.push(entry);
-    contributionsByGoal[entry.goalId] = list;
-  }
-
-  return (
-    <section className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-ink">
-        Ahorro
-      </h1>
-      <SavingsPanel
-        goals={goals}
-        members={members.map((m) => ({ id: m.id, name: m.name }))}
-        isAdmin={user.role === "admin"}
-        patrimony={{
-          savingsCents: patrimony.savingsCents,
-          investmentsCents: patrimony.investmentsCents,
-          totalCents: patrimony.totalCents,
-        }}
-        contributionsByGoal={contributionsByGoal}
-        createAction={createGoalAction}
-        updateAction={updateGoalAction}
-        toggleAction={toggleGoalAction}
-        deleteAction={deleteGoalAction}
-        valueAction={updateGoalValueAction}
-        contributionAction={addContributionAction}
-      />
-    </section>
-  );
+/** The savings UI lives at /bolsas; this stub keeps old links working. */
+export default function AhorroPage() {
+  redirect("/bolsas");
 }

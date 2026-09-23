@@ -24,7 +24,8 @@ import {
   type LoanPaymentInput,
 } from "@/features/loans/service";
 import { getPatrimony } from "@/features/savings/service";
-import { todayIso, transactionTotals } from "@/features/transactions/service";
+import { transactionTotals } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import type { SessionUser } from "@/lib/auth";
 
 /**

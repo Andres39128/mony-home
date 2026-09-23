@@ -2,10 +2,10 @@ import Link from "next/link";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import {
-  todayIso,
   transactionTotals,
   type TransactionFilters,
 } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { movementFormOptions } from "@/features/transactions/form-options";
 import { monthLabel, shiftMonth } from "@/features/transactions/month-nav";
 import {
@@ -26,7 +26,6 @@ import MonthlyBars from "@/features/analytics/charts/monthly-bars";
 import BudgetLines from "@/features/analytics/charts/budget-lines";
 import { monthBounds, computeProgress } from "@/features/budgets/progress";
 import { getMonth } from "@/features/budgets/service";
-import { monthlyProgress } from "@/features/envelopes/service";
 import { getPatrimony } from "@/features/savings/service";
 import NewMovementFab, {
   QUICK_TILE_CLASS,
@@ -167,7 +166,6 @@ export default async function DashboardPage({
     memberId: singleParam(params, "memberId"),
     scope: scopeParam === "individual" || scopeParam === "common" ? scopeParam : undefined,
     categoryId: singleParam(params, "categoryId"),
-    envelopeId: singleParam(params, "envelopeId"),
     groupId: singleParam(params, "groupId"),
   };
 
@@ -176,17 +174,15 @@ export default async function DashboardPage({
   if (filters.memberId) baseParams.set("memberId", filters.memberId);
   if (filters.scope) baseParams.set("scope", filters.scope);
   if (filters.categoryId) baseParams.set("categoryId", filters.categoryId);
-  if (filters.envelopeId) baseParams.set("envelopeId", filters.envelopeId);
   if (filters.groupId) baseParams.set("groupId", filters.groupId);
 
-  const [options, totals, slices, monthlyRows, budgetMonth, envelopeRows, cumulativeRows, patrimony] =
+  const [options, totals, slices, monthlyRows, budgetMonth, cumulativeRows, patrimony] =
     await Promise.all([
       movementFormOptions(),
       transactionTotals(getDb(), filters),
       expensesByCategory(getDb(), filters),
       monthlyTotals(getDb(), month, DEFAULT_MONTHS_BACK, filters),
       getMonth(getDb(), month),
-      monthlyProgress(getDb(), month),
       cumulativeBudgetVsActual(getDb(), Number(month.slice(0, 4)), filters),
       getPatrimony(getDb()),
     ]);
@@ -222,14 +218,6 @@ export default async function DashboardPage({
       href: hrefWith(params, { categoryId: null }),
     });
   }
-  const envelope = options.envelopes.find((item) => item.id === filters.envelopeId);
-  if (envelope) {
-    activeFilters.push({
-      param: "envelopeId",
-      label: `Bolsa: ${envelope.name}`,
-      href: hrefWith(params, { envelopeId: null }),
-    });
-  }
   const group = options.groups.find((item) => item.id === filters.groupId);
   if (group) {
     activeFilters.push({
@@ -244,9 +232,6 @@ export default async function DashboardPage({
   const donutQuery = drillQuery(baseParams, ["categoryId"], { month });
   // Bars drill: same filters, the clicked month replaces the current one.
   const barsQuery = drillQuery(baseParams, ["month"]);
-  // Envelope progress ignores the other filters → drill carries month+bolsa only.
-  const envelopeHref = (envelopeId: string) =>
-    `/movimientos?${drillQuery(baseParams, ["envelopeId"], { month, envelopeId })}`;
 
   return (
     <section className="flex flex-col gap-6">
@@ -295,17 +280,6 @@ export default async function DashboardPage({
               <option key={category.id} value={category.id}>
                 {category.name}
                 {category.isActive ? "" : " (inactiva)"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-muted">Bolsa</span>
-          <select name="envelopeId" defaultValue={filters.envelopeId ?? ""} className={inputClass}>
-            <option value="">—</option>
-            {options.envelopes.map((envelope) => (
-              <option key={envelope.id} value={envelope.id}>
-                {envelope.name}
               </option>
             ))}
           </select>
@@ -366,7 +340,7 @@ export default async function DashboardPage({
             fed by the savings ledger and the loans ledger, never the movements
             stats. Debts surface in red when there is anything outstanding. */}
         <Link
-          href="/ahorro"
+          href="/bolsas"
           data-tour="dashboard-patrimonio"
           className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-2xl border border-honey bg-honey/40 p-5 shadow-sm transition-colors hover:bg-honey/60"
         >
@@ -398,7 +372,6 @@ export default async function DashboardPage({
           variant="tile"
           currentUser={user}
           categories={options.categories}
-          envelopes={options.envelopes}
           members={options.members}
           groups={options.groups}
           serverToday={today}
@@ -418,37 +391,6 @@ export default async function DashboardPage({
           Asistente
         </Link>
       </nav>
-
-      {/* Envelope progress for the period, one row per bolsa. */}
-      <ChartCard
-        title={`Bolsas de ${month}`}
-        tourId="dashboard-bolsas"
-        emptyMessage={envelopeRows.length === 0 ? "Sin bolsas activas" : null}
-      >
-        <ul className="flex flex-col gap-4">
-          {envelopeRows.map((row) => (
-            <li key={row.id}>
-              <Link
-                href={envelopeHref(row.id)}
-                className="group block rounded-lg transition-colors hover:bg-base"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                  <span className="font-medium text-muted group-hover:underline">
-                    {row.name}
-                    {row.scope === "individual" && row.memberName ? ` · ${row.memberName}` : ""}
-                  </span>
-                  <span className="tabular-nums text-muted">
-                    {formatCents(row.spentCents)} / {formatCents(row.plannedCents)}
-                  </span>
-                </div>
-                <div className="mt-1.5">
-                  <ProgressBar pct={row.pct} status={row.status} />
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </ChartCard>
 
       {/* Charts collapsed by default (mobile-first): a native <details>
           keeps it no-JS; the tour opens ancestors before highlighting. */}

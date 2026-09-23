@@ -129,7 +129,7 @@ export async function deleteMember(
     if (deleted.length === 0) return { ok: false, error: "member_not_found" };
     return { ok: true };
   } catch (error) {
-    // RESTRICT FKs (movements, envelopes) → 23001 on PGlite, 23503 on PG 17.
+    // RESTRICT FKs (movements, savings/loan ledgers) → 23001 on PGlite, 23503 on PG 17.
     if (hasPgFkError(error)) return { ok: false, error: "has_movements" };
     throw error;
   }

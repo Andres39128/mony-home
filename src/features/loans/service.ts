@@ -21,7 +21,7 @@ import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { catchUpAllLoanInterest, catchUpInterest } from "./accrual";
 // Pure math lives in a client-safe module; re-exported here so the service
 // stays the single import surface for server-side callers and tests.

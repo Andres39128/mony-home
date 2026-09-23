@@ -57,6 +57,13 @@
       "when": 1790111518898,
       "tag": "0007_worthless_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790173070807,
+      "tag": "0008_lethal_nico_minoru",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import type { ContributionView, GoalView } from "@/features/savings/service";
+import type { ContributionView, GoalView, RateReviewView } from "@/features/savings/service";
 import {
   computeGoalProgress,
   computeInvestmentReturn,
@@ -22,7 +22,7 @@ import {
   inputClass,
 } from "@/components/forms";
 
-type SavingsAction = (state: FormState, formData: FormData) => Promise<FormState>;
+type BolsaAction = (state: FormState, formData: FormData) => Promise<FormState>;
 
 interface Props {
   goals: GoalView[];
@@ -30,15 +30,17 @@ interface Props {
   isAdmin: boolean;
   patrimony: { savingsCents: number; investmentsCents: number; totalCents: number };
   contributionsByGoal: Record<string, ContributionView[]>;
-  createAction: SavingsAction;
-  updateAction: SavingsAction;
-  toggleAction: SavingsAction;
-  deleteAction: SavingsAction;
-  valueAction: SavingsAction;
-  contributionAction: SavingsAction;
+  pendingReviews: RateReviewView[];
+  createAction: BolsaAction;
+  updateAction: BolsaAction;
+  toggleAction: BolsaAction;
+  deleteAction: BolsaAction;
+  valueAction: BolsaAction;
+  contributionAction: BolsaAction;
+  markReviewedAction: BolsaAction;
 }
 
-/** "Común" / "Individual · {member}" badge, same pattern as the bolsas panel. */
+/** "Común" / "Individual · {member}" badge, same pattern as the other panels. */
 function ScopeBadge({ goal }: { goal: GoalView }) {
   return goal.scope === "common" ? (
     <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
@@ -51,12 +53,12 @@ function ScopeBadge({ goal }: { goal: GoalView }) {
   );
 }
 
-/** Yield badge: the goal's annual nominal rate (TNA). */
+/** Yield badge: annual rate with its mode — TNA (simple) / TEA (compound). */
 function RateBadge({ goal }: { goal: GoalView }) {
-  if (goal.annualRateBp === null) return null;
+  if (goal.annualRateBp === null || goal.kind !== "savings") return null;
   return (
     <span className="rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-ink">
-      TNA {formatRatePercent(goal.annualRateBp)}%
+      {goal.accrualMode === "compound" ? "TEA" : "TNA"} {formatRatePercent(goal.annualRateBp)}%
     </span>
   );
 }
@@ -83,8 +85,15 @@ const KIND_LABELS = {
   interest: "Interés",
 } as const;
 
+/** Shared es-AR date rendering for ledger rows and valuation stamps. */
+const dateFormatter = new Intl.DateTimeFormat("es-AR", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
 /**
- * Per-goal collapsible history of every ledger entry. Interest rows carry
+ * Per-bolsa collapsible history of every ledger entry. Interest rows carry
  * the "Interés" badge and no member attribution; deposit/withdrawal mirrors
  * are NOT listed here — those live in /movimientos.
  */
@@ -92,11 +101,6 @@ function ContributionHistory({ entries }: { entries: ContributionView[] }) {
   if (entries.length === 0) {
     return <p className="text-xs text-muted">Sin movimientos registrados todavía.</p>;
   }
-  const dateFormatter = new Intl.DateTimeFormat("es-AR", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
   // Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
   // UTC-3 rendering never shifts the day backwards.
   const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
@@ -206,8 +210,8 @@ function KindToggle({
 
 /**
  * Quick contribution: monto first (autoFocused on the first card), Enter
- * saves natively, form resets after success — same philosophy as the
- * movement quick-entry form.
+ * saves natively, form resets after success. Explicit microcopy: a deposit
+ * leaves the available money; a withdrawal returns as income.
  */
 function QuickContributionForm({
   goal,
@@ -216,7 +220,7 @@ function QuickContributionForm({
   tourId,
 }: {
   goal: GoalView;
-  action: SavingsAction;
+  action: BolsaAction;
   autoFocus: boolean;
   tourId?: string;
 }) {
@@ -240,8 +244,10 @@ function QuickContributionForm({
   return (
     <form action={formAction} data-tour={tourId} className="flex flex-col gap-2 border-t border-line pt-3">
       <input type="hidden" name="id" value={goal.id} />
-      <p className="text-xs font-medium text-muted">
-        Aportar a esta meta — monto y Enter; el toggle cambia a retiro
+      <p className="text-xs text-muted">
+        {kind === "deposit"
+          ? "El depósito sale del dinero disponible (queda registrado como gasto de ahorro)."
+          : "El retiro vuelve como ingreso a tu dinero disponible."}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <KindToggle value={kind} onChange={setKind} />
@@ -264,7 +270,7 @@ function QuickContributionForm({
   );
 }
 
-function GoalCard({
+function BolsaCard({
   goal,
   contributionAction,
   autoFocusContribution,
@@ -272,7 +278,7 @@ function GoalCard({
   entries,
 }: {
   goal: GoalView;
-  contributionAction: SavingsAction;
+  contributionAction: BolsaAction;
   autoFocusContribution: boolean;
   tourId?: string;
   entries: ContributionView[];
@@ -340,8 +346,8 @@ function InvestmentCard({
 }: {
   goal: GoalView;
   isAdmin: boolean;
-  contributionAction: SavingsAction;
-  valueAction: SavingsAction;
+  contributionAction: BolsaAction;
+  valueAction: BolsaAction;
   autoFocusContribution: boolean;
   valueTourId?: string;
   entries: ContributionView[];
@@ -365,10 +371,7 @@ function InvestmentCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium text-ink">{goal.name}</span>
-        <div className="flex flex-wrap items-center gap-2">
-          <ScopeBadge goal={goal} />
-          <RateBadge goal={goal} />
-        </div>
+        <ScopeBadge goal={goal} />
       </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
@@ -400,10 +403,7 @@ function InvestmentCard({
       <YieldLine goal={goal} />
       {goal.valueUpdatedAt && (
         <p className="text-xs text-muted">
-          actualizado{" "}
-          {new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short", year: "numeric" }).format(
-            goal.valueUpdatedAt,
-          )}
+          actualizado {dateFormatter.format(goal.valueUpdatedAt)}
         </p>
       )}
       {isAdmin && goal.isActive && (
@@ -441,7 +441,7 @@ function InvestmentCard({
   );
 }
 
-function GoalFields({
+function BolsaFields({
   state,
   members,
   goal,
@@ -467,8 +467,8 @@ function GoalFields({
             onChange={(event) => setKind(event.target.value as "savings" | "investment")}
             className={inputClass}
           >
-            <option value="savings">Meta de ahorro</option>
-            <option value="investment">Inversión</option>
+            <option value="savings">Bolsa de ahorro</option>
+            <option value="investment">Inversión (acciones)</option>
           </select>
           <FieldError message={state.fieldErrors?.kind} />
         </label>
@@ -545,47 +545,63 @@ function GoalFields({
           />
           <FieldError message={state.fieldErrors?.institution} />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-muted">
-            Rentabilidad anual TNA % (opcional)
-          </span>
-          <input
-            name="annualRate"
-            inputMode="decimal"
-            placeholder="35,5"
-            defaultValue={goal?.annualRateBp != null ? formatRatePercent(goal.annualRateBp) : undefined}
-            className={inputClass}
-          />
-          <FieldError message={state.fieldErrors?.annualRate} />
-        </label>
+        {kind === "savings" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">
+                Rentabilidad anual % (opcional)
+              </span>
+              <input
+                name="annualRate"
+                inputMode="decimal"
+                placeholder="35,5"
+                defaultValue={goal?.annualRateBp != null ? formatRatePercent(goal.annualRateBp) : undefined}
+                className={inputClass}
+              />
+              <FieldError message={state.fieldErrors?.annualRate} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Modo de interés</span>
+              <select
+                name="accrualMode"
+                defaultValue={goal?.accrualMode ?? "simple"}
+                className={inputClass}
+              >
+                <option value="simple">Simple — TNA sobre el capital</option>
+                <option value="compound">Compuesto — TEA sobre el saldo</option>
+              </select>
+              <FieldError message={state.fieldErrors?.accrualMode} />
+            </label>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function CreateGoalForm({
+function CreateBolsaForm({
   action,
   members,
 }: {
-  action: SavingsAction;
+  action: BolsaAction;
   members: { id: string; name: string }[];
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   return (
     <form
       action={formAction}
-      data-tour="ahorro-crear"
+      data-tour="bolsas-crear"
       className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
-      <h2 className="font-semibold text-ink">Nueva meta</h2>
-      <GoalFields state={state} members={members} />
+      <h2 className="font-semibold text-ink">Nueva bolsa</h2>
+      <BolsaFields state={state} members={members} />
       <FormError state={state} />
-      <SubmitButton pending={pending}>Crear meta</SubmitButton>
+      <SubmitButton pending={pending}>Crear bolsa</SubmitButton>
     </form>
   );
 }
 
-function EditGoalForm({
+function EditBolsaForm({
   goal,
   members,
   updateAction,
@@ -594,9 +610,9 @@ function EditGoalForm({
 }: {
   goal: GoalView;
   members: { id: string; name: string }[];
-  updateAction: SavingsAction;
-  toggleAction: SavingsAction;
-  deleteAction: SavingsAction;
+  updateAction: BolsaAction;
+  toggleAction: BolsaAction;
+  deleteAction: BolsaAction;
 }) {
   const [state, formAction, pending] = useActionState(updateAction, {});
   const [toggleState, toggleFormAction, togglePending] = useActionState(toggleAction, {});
@@ -621,7 +637,7 @@ function EditGoalForm({
     >
       <form action={formAction} className="flex flex-col gap-4">
         <input type="hidden" name="id" value={goal.id} />
-        <GoalFields state={state} members={members} goal={goal} />
+        <BolsaFields state={state} members={members} goal={goal} />
         <FormError state={state} />
         <OkMessage state={state} />
         <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
@@ -637,7 +653,7 @@ function EditGoalForm({
         <form action={deleteFormAction} className="flex flex-col gap-2">
           <input type="hidden" name="id" value={goal.id} />
           <FormError state={deleteState} />
-          <OkMessage state={deleteState} text="Meta eliminada." />
+          <OkMessage state={deleteState} text="Bolsa eliminada." />
           <SubmitButton pending={deletePending} variant="danger">
             Eliminar
           </SubmitButton>
@@ -647,18 +663,58 @@ function EditGoalForm({
   );
 }
 
-export default function SavingsPanel({
+/** Monthly review banner: rate-bearing bolsas not reviewed this month. */
+function ReviewBanner({
+  pendingReviews,
+  isAdmin,
+  markReviewedAction,
+}: {
+  pendingReviews: RateReviewView[];
+  isAdmin: boolean;
+  markReviewedAction: BolsaAction;
+}) {
+  const [state, formAction, pending] = useActionState(markReviewedAction, {});
+  if (pendingReviews.length === 0) return null;
+  return (
+    <div
+      data-tour="bolsas-revision"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-honey bg-honey/40 px-5 py-4"
+    >
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-semibold text-ink">Revisá la tasa de tus bolsas</p>
+        <p className="text-sm text-ink">
+          {pendingReviews
+            .map((bolsa) => `${bolsa.name} (${formatRatePercent(bolsa.annualRateBp!)}%)`)
+            .join(" · ")}
+        </p>
+      </div>
+      {isAdmin && (
+        <form action={formAction} className="flex flex-col items-end gap-1">
+          <SubmitButton pending={pending} variant="secondary">
+            Marcar revisadas
+          </SubmitButton>
+          <FormError state={state} />
+          <OkMessage state={state} text="Bolsas marcadas como revisadas." />
+        </form>
+      )}
+    </div>
+  );
+}
+
+export default function BolsasPanel({
   goals,
   members,
   isAdmin,
   patrimony,
   contributionsByGoal,
+  pendingReviews,
   createAction,
   updateAction,
   toggleAction,
   deleteAction,
   valueAction,
   contributionAction,
+  markReviewedAction,
 }: Props) {
   const savings = goals.filter((goal) => goal.kind === "savings");
   const investments = goals.filter((goal) => goal.kind === "investment");
@@ -669,7 +725,7 @@ export default function SavingsPanel({
   return (
     <div className="flex flex-col gap-6">
       <div
-        data-tour="ahorro-patrimonio"
+        data-tour="bolsas-patrimonio"
         className="grid gap-4 sm:grid-cols-3"
       >
         {[
@@ -695,20 +751,26 @@ export default function SavingsPanel({
         ))}
       </div>
 
-      <div data-tour="ahorro-metas" className="flex flex-col gap-3">
+      <ReviewBanner
+        pendingReviews={pendingReviews}
+        isAdmin={isAdmin}
+        markReviewedAction={markReviewedAction}
+      />
+
+      <div data-tour="bolsas-metas" className="flex flex-col gap-3">
         {savings.length > 0 && (
           <h2 className="text-sm font-medium uppercase tracking-wide text-muted">
-            Metas de ahorro
+            Bolsas de ahorro
           </h2>
         )}
         <ul className="grid gap-3 sm:grid-cols-2">
           {savings.map((goal) => (
-            <GoalCard
+            <BolsaCard
               key={goal.id}
               goal={goal}
               contributionAction={contributionAction}
               autoFocusContribution={goal.id === firstActiveId}
-              tourId={goal.id === firstActiveId ? "ahorro-aporte" : undefined}
+              tourId={goal.id === firstActiveId ? "bolsas-aporte" : undefined}
               entries={contributionsByGoal[goal.id] ?? []}
             />
           ))}
@@ -728,24 +790,24 @@ export default function SavingsPanel({
               contributionAction={contributionAction}
               valueAction={valueAction}
               autoFocusContribution={false}
-              valueTourId={isAdmin && index === 0 && goal.isActive ? "ahorro-valor" : undefined}
+              valueTourId={isAdmin && index === 0 && goal.isActive ? "bolsas-valor" : undefined}
               entries={contributionsByGoal[goal.id] ?? []}
             />
           ))}
         </ul>
         {goals.length === 0 && (
           <p className="rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-muted">
-            Todavía no hay metas ni inversiones.
+            Todavía no hay bolsas ni inversiones.
           </p>
         )}
       </div>
 
       {isAdmin && (
         <>
-          <CreateGoalForm action={createAction} members={members} />
+          <CreateBolsaForm action={createAction} members={members} />
           <div className="flex flex-col gap-3">
             {goals.map((goal) => (
-              <EditGoalForm
+              <EditBolsaForm
                 key={goal.id}
                 goal={goal}
                 members={members}

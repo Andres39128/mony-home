@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, envelopes, transactions, users } from "@/db/schema";
+import { budgets, categories, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import {
   buildFinanceContext,
   monthLabel,
@@ -22,8 +22,8 @@ import {
  *   2026-08 expenses: Alquiler 150000, Supermercado 48000, Transporte 25000,
  *   Ocio 20000, Servicios 20000 → 263000. 2026-07: Varios 100000.
  *   Income 2026-09: 800000. Budgets 2026-09: Supermercado 100000,
- *   Transporte 50000. Envelopes: Mercado común 80000 (gasta 60000),
- *   Ocio individual 40000 (gasta 50000).
+ *   Transporte 50000. Bolsas: Mercado (savings, con tasa, neto 60000),
+ *   Ocio (inversión, neto 50000).
  */
 describe("insights context (integration on PGlite)", () => {
   let db: PgliteDatabase;
@@ -66,29 +66,39 @@ describe("insights context (integration on PGlite)", () => {
       return found.id;
     };
 
-    const [mercado, ocio] = await db
-      .insert(envelopes)
-      .values([
-        { name: "Mercado", scope: "common", monthlyAmountCents: 80_000 },
-        {
-          name: "Ocio",
-          scope: "individual",
-          memberId,
-          monthlyAmountCents: 40_000,
-        },
-      ])
+    // Bolsas fixture: one rate-bearing savings bag (neto 60000) and one
+    // investment (neto 50000). Created "today" so the lazy daily accrual has
+    // no complete days to fill → deterministic net figures.
+    const [mercado] = await db
+      .insert(savingsGoals)
+      .values({
+        name: "Mercado",
+        kind: "savings",
+        scope: "common",
+        institution: "Banco Nación",
+        annualRateBp: 3550,
+        accrualMode: "simple",
+      })
       .returning();
+    const [ocioBolsa] = await db
+      .insert(savingsGoals)
+      .values({ name: "Ocio", kind: "investment", scope: "common" })
+      .returning();
+    await db.insert(savingsContributions).values([
+      { goalId: mercado.id, memberId, kind: "deposit", amountCents: 60_000, date: "2026-09-03" },
+      { goalId: ocioBolsa.id, memberId, kind: "deposit", amountCents: 50_000, date: "2026-09-04" },
+    ]);
 
     await db.insert(transactions).values([
       // 2026-09 — income
       { date: "2026-09-05", amountCents: 800_000, type: "income", categoryId: categoryId("Sueldo"), memberId },
       // 2026-09 — expenses (total 306000)
       { date: "2026-09-01", amountCents: 150_000, type: "expense", categoryId: categoryId("Alquiler"), memberId, scope: "common" },
-      { date: "2026-09-03", amountCents: 20_000, type: "expense", categoryId: categoryId("Supermercado"), memberId, envelopeId: mercado.id },
-      { date: "2026-09-08", amountCents: 20_000, type: "expense", categoryId: categoryId("Supermercado"), memberId, envelopeId: mercado.id },
-      { date: "2026-09-12", amountCents: 20_000, type: "expense", categoryId: categoryId("Supermercado"), memberId, envelopeId: mercado.id },
-      { date: "2026-09-04", amountCents: 25_000, type: "expense", categoryId: categoryId("Ocio"), memberId, envelopeId: ocio.id, scope: "individual" },
-      { date: "2026-09-11", amountCents: 25_000, type: "expense", categoryId: categoryId("Ocio"), memberId, envelopeId: ocio.id, scope: "individual" },
+      { date: "2026-09-03", amountCents: 20_000, type: "expense", categoryId: categoryId("Supermercado"), memberId },
+      { date: "2026-09-08", amountCents: 20_000, type: "expense", categoryId: categoryId("Supermercado"), memberId },
+      { date: "2026-09-12", amountCents: 20_000, type: "expense", categoryId: categoryId("Supermercado"), memberId },
+      { date: "2026-09-04", amountCents: 25_000, type: "expense", categoryId: categoryId("Ocio"), memberId, scope: "individual" },
+      { date: "2026-09-11", amountCents: 25_000, type: "expense", categoryId: categoryId("Ocio"), memberId, scope: "individual" },
       { date: "2026-09-06", amountCents: 25_000, type: "expense", categoryId: categoryId("Transporte"), memberId },
       { date: "2026-09-07", amountCents: 12_000, type: "expense", categoryId: categoryId("Servicios"), memberId },
       { date: "2026-09-09", amountCents: 8_000, type: "expense", categoryId: categoryId("Salud"), memberId },
@@ -159,25 +169,24 @@ describe("insights context (integration on PGlite)", () => {
     // (Varios) never appear.
   });
 
-  it("includes envelope status from the shared monthly progress", async () => {
+  it("includes savings bolsas summary (net balances, institution and rates)", async () => {
     const ctx = await buildFinanceContext(appDb, MONTH, TODAY);
-    expect(ctx.envelopes).toEqual([
+    // Active first, savings before investments, then by name.
+    expect(ctx.bolsas).toEqual([
       expect.objectContaining({
         name: "Mercado",
-        scope: "common",
-        spentCents: 60_000,
-        plannedCents: 80_000,
-        pct: 75,
-        status: "warn",
+        institution: "Banco Nación",
+        kind: "savings",
+        netCents: 60_000,
+        annualRateBp: 3550,
+        accrualMode: "simple",
       }),
       expect.objectContaining({
         name: "Ocio",
-        scope: "individual",
-        memberName: "Andrés",
-        spentCents: 50_000,
-        plannedCents: 40_000,
-        pct: 125,
-        status: "over",
+        kind: "investment",
+        netCents: 50_000,
+        annualRateBp: null,
+        accrualMode: null,
       }),
     ]);
   });
@@ -217,9 +226,8 @@ describe("insights context (integration on PGlite)", () => {
     expect(ctx.otherCategories).toBeNull();
     expect(ctx.categoryChanges).toEqual([]);
     expect(ctx.notes).toContain("No hay movimientos registrados en este mes.");
-    // Envelopes still report their plan with zero spend.
-    expect(ctx.envelopes).toHaveLength(2);
-    expect(ctx.envelopes[0]).toMatchObject({ spentCents: 0, status: "ok" });
+    // Bolsas still report their balances in an empty month.
+    expect(ctx.bolsas).toHaveLength(2);
   });
 
   it("renders the prompt context with es-AR formatted amounts", async () => {
@@ -240,6 +248,17 @@ describe("insights context (integration on PGlite)", () => {
     expect(cambios.find((row) => row.categoria === "Salud")?.variacion).toBe(
       "gasto nuevo (sin gasto el mes anterior)",
     );
+    // Bolsas render with pre-formatted balances and the rate + its mode.
+    const bolsas = prompt.bolsas as {
+      nombre: string;
+      saldo_neto: string;
+      tasa?: string;
+    }[];
+    expect(bolsas.find((row) => row.nombre === "Mercado")).toMatchObject({
+      saldo_neto: "$ 600,00",
+      tasa: "35,5% TNA (simple)",
+    });
+    expect(bolsas.find((row) => row.nombre === "Ocio")?.tasa).toBeUndefined();
   });
 
   it("labels months in neutral Spanish", () => {

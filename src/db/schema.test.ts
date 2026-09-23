@@ -1,11 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import {
   budgets,
   categories,
-  envelopes,
   expenseGroups,
   movementReceipts,
   loanPayments,
@@ -119,21 +118,6 @@ describe("schema (migrations applied to in-memory Postgres)", () => {
       db.insert(budgets).values({ month, categoryId: category.id, amountCents: 60000 }),
       "23505",
     );
-  });
-
-  it("rejects an individual envelope without a member via CHECK", async () => {
-    await expectPgError(
-      db.insert(envelopes).values({ name: "Huerfa", scope: "individual", memberId: null }),
-      "23514",
-    );
-
-    // Sanity: an individual envelope WITH a member passes the CHECK.
-    const [user] = await db.insert(users).values({ username: "u4", passwordHash: "h", name: "U4" }).returning();
-    const [envelope] = await db
-      .insert(envelopes)
-      .values({ name: "Plata de U4", scope: "individual", memberId: user.id })
-      .returning();
-    expect(envelope.monthlyAmountCents).toBe(0); // default
   });
 
   it("rejects negative budgets via CHECK", async () => {
@@ -534,5 +518,75 @@ describe("migration 0006 (loans invariants)", () => {
 
     const remaining = await db.select().from(transactions).where(eq(transactions.id, mirror.id));
     expect(remaining).toHaveLength(0);
+  });
+});
+
+describe("migration 0008 (bolsas de ahorro invariants)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("dropped the envelopes table and the transactions.envelope_id column", async () => {
+    // The table is gone: selecting from it must fail as a SQL error.
+    await expect(
+      db.execute(sql`select * from envelopes`),
+    ).rejects.toThrow();
+    const columns = await db.execute(
+      sql`select column_name from information_schema.columns where table_name = 'transactions'`,
+    );
+    const names = columns.rows.map((row) => row.column_name);
+    expect(names).not.toContain("envelope_id");
+  });
+
+  it("round-trips accrual_mode (enum) and rate_reviewed_month on savings_goals", async () => {
+    const [simple] = await db
+      .insert(savingsGoals)
+      .values({
+        name: "Simple",
+        kind: "savings",
+        scope: "common",
+        annualRateBp: 3550,
+        accrualMode: "simple",
+        rateReviewedMonth: "2026-09-01",
+      })
+      .returning();
+    expect(simple.accrualMode).toBe("simple");
+    expect(simple.rateReviewedMonth).toBe("2026-09-01");
+
+    const [compound] = await db
+      .insert(savingsGoals)
+      .values({
+        name: "Compuesta",
+        kind: "savings",
+        scope: "common",
+        annualRateBp: 1200,
+        accrualMode: "compound",
+      })
+      .returning();
+    expect(compound.accrualMode).toBe("compound");
+
+    // No rate → both review columns nullable.
+    const [plain] = await db
+      .insert(savingsGoals)
+      .values({ name: "Sin tasa", kind: "savings", scope: "common" })
+      .returning();
+    expect(plain.accrualMode).toBeNull();
+    expect(plain.rateReviewedMonth).toBeNull();
+  });
+
+  it("rejects accrual_mode values outside the enum", async () => {
+    await expectPgError(
+      db.execute(
+        sql`insert into savings_goals (name, kind, scope, accrual_mode) values ('X', 'savings', 'common', 'weird')`,
+      ),
+      "22P02",
+    );
   });
 });

@@ -1,52 +1,75 @@
 /**
- * Lazy monthly interest accrual for rate-bearing goals (annual_rate_bp).
+ * Lazy DAILY interest accrual for rate-bearing savings goals ('bolsas').
  *
- * Called on READ paths (listGoals → getPatrimony → /ahorro, dashboard KPI) —
- * there is NO cron. Every elapsed WHOLE month since the accrual base
- * (max of creation month, value_updated_at month, last interest row month)
- * materializes ONE visible 'interest' contribution dated the month start:
- *   interest = round(balance_before × annual_rate_bp / 12 / 10000)
- * where balance_before = deposits − withdrawals + interest dated strictly
- * before that month start (monthly compounding, rate/12).
+ * Called on READ paths (listGoals → getPatrimony → /bolsas, dashboard
+ * patrimony) — there is NO cron. Every elapsed COMPLETE day (app timezone,
+ * America/Argentina/Buenos_Aires) since the accrual base — max of creation
+ * day, value_updated_at day and the last interest row day — materializes ONE
+ * visible 'interest' contribution dated that day, up to YESTERDAY:
+ *
+ * - 'compound' mode: the rate is EFFECTIVE annual (TEA). Daily factor =
+ *   (1+r)^(1/365) − 1 applied to the running balance (deposits − withdrawals
+ *   + prior interest), so interest earns interest.
+ * - 'simple' mode: the rate is NOMINAL annual (TNA). Daily = r/365 applied
+ *   to the PRINCIPAL only; interest accumulates in the balance but never
+ *   earns. A withdrawal larger than the principal eats the accumulated
+ *   interest first; the principal floors at 0.
+ *
+ * Money moves earn from the day AFTER their date (same rule the monthly
+ * engine used: rows dated strictly before the earning day form the base).
+ * Each cent amount is Math.round-ed per day (loans precedent).
  *
  * Idempotent under concurrency too: the whole catch-up runs in one
  * transaction holding the goal row FOR UPDATE, and a partial unique index
  * (goal_id, date, note WHERE kind='interest') backs the invariant at the
- * DB level — a racing request inserts nothing.
+ * DB level — a racing request inserts nothing. Pre-existing monthly rows
+ * keep their notes; the daily engine resumes from the last interest row + 1.
  */
 import { and, eq, isNotNull, max } from "drizzle-orm";
 import { savingsContributions, savingsGoals } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
-import { formatRatePercent } from "./math";
+import { todayIso } from "@/lib/date";
 
-/** Months since year 0 for a 'YYYY-MM-DD' string — comparable and add/subtract friendly. */
-function monthIndexOfIso(iso: string): number {
-  const [year, month] = iso.split("-").map(Number);
-  return year * 12 + (month - 1);
+/** One visible ledger row per goal per day; constant note keeps the
+ * (goal_id, date, note) partial unique index idempotent across rate edits. */
+const DAILY_INTEREST_NOTE = "Interés diario";
+
+const DAY_MS = 86_400_000;
+
+/** Whole days since 1970-01-01 for a 'YYYY-MM-DD' string (calendar math only). */
+function dayIndexOfIso(iso: string): number {
+  const [year, month, day] = iso.split("-").map(Number);
+  return Date.UTC(year, month - 1, day) / DAY_MS;
 }
 
-/** Same, for a Date (local timezone — same clock the forms use). */
-function monthIndexOfDate(date: Date): number {
-  return date.getFullYear() * 12 + date.getMonth();
+/** Day index of a Date instant, in the app timezone. */
+function dayIndexOfDate(date: Date): number {
+  return dayIndexOfIso(todayIso(date));
 }
 
-/** First day of the month index as 'YYYY-MM-01'. */
-function monthStartIso(monthIndex: number): string {
-  const year = Math.floor(monthIndex / 12);
-  const month = (monthIndex % 12) + 1;
-  return `${year}-${String(month).padStart(2, "0")}-01`;
+/** Day index → 'YYYY-MM-DD'. */
+function isoOfDayIndex(dayIndex: number): string {
+  return new Date(dayIndex * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Daily rate fraction for a goal: TEA-derived for compound, nominal for simple. */
+function dailyRate(rateBp: number, mode: "simple" | "compound"): number {
+  const annual = rateBp / 10_000;
+  return mode === "compound" ? Math.pow(1 + annual, 1 / 365) - 1 : annual / 365;
 }
 
 interface AccrualBase {
+  kind: "savings" | "investment";
   annualRateBp: number | null;
+  accrualMode: "simple" | "compound" | null;
   createdAt: Date;
   valueUpdatedAt: Date | null;
 }
 
 /**
- * Brings one goal's interest up to `now`. Returns the number of interest
- * rows inserted (0 when no rate / zero elapsed months / zero balances).
+ * Brings one goal's daily interest up to `now`. Returns the number of
+ * interest rows inserted (0 when not an accruing goal / no complete days).
  */
 export async function catchUpInterest(
   db: Database,
@@ -58,7 +81,9 @@ export async function catchUpInterest(
     // loser re-reads the base after the winner committed and no-ops.
     const [goal] = await tx
       .select({
+        kind: savingsGoals.kind,
         annualRateBp: savingsGoals.annualRateBp,
+        accrualMode: savingsGoals.accrualMode,
         createdAt: savingsGoals.createdAt,
         valueUpdatedAt: savingsGoals.valueUpdatedAt,
       })
@@ -72,12 +97,12 @@ export async function catchUpInterest(
   });
 }
 
-/** Rate-bearing goals only — one indexed query when there are none. */
+/** Rate-bearing savings goals only — one indexed query when there are none. */
 export async function catchUpAllInterest(db: Database, now: Date = new Date()): Promise<void> {
   const goals = await db
     .select({ id: savingsGoals.id })
     .from(savingsGoals)
-    .where(isNotNull(savingsGoals.annualRateBp));
+    .where(and(eq(savingsGoals.kind, "savings"), isNotNull(savingsGoals.annualRateBp)));
   for (const goal of goals) {
     await catchUpInterest(db, goal.id, now);
   }
@@ -93,22 +118,27 @@ async function accrueGoal(
   now: Date,
 ): Promise<number> {
   const rateBp = goal.annualRateBp;
-  if (rateBp === null) return 0;
+  // Investments ('acciones') are manual-valuation only: never accrued.
+  if (rateBp === null || goal.kind !== "savings") return 0;
+  const rate = dailyRate(rateBp, goal.accrualMode === "compound" ? "compound" : "simple");
 
   const [last] = await db
     .select({ lastInterest: max(savingsContributions.date) })
     .from(savingsContributions)
     .where(and(eq(savingsContributions.goalId, goalId), eq(savingsContributions.kind, "interest")));
 
-  const baseMonth = Math.max(
-    monthIndexOfDate(goal.createdAt),
-    goal.valueUpdatedAt ? monthIndexOfDate(goal.valueUpdatedAt) : 0,
-    last?.lastInterest ? monthIndexOfIso(last.lastInterest) : 0,
+  // First day to accrue = day AFTER the strongest base (creation, rebase,
+  // last interest row). The base day itself never accrues — same rule the
+  // monthly engine applied to the creation month.
+  const baseDay = Math.max(
+    dayIndexOfDate(goal.createdAt),
+    goal.valueUpdatedAt ? dayIndexOfDate(goal.valueUpdatedAt) : Number.NEGATIVE_INFINITY,
+    last?.lastInterest ? dayIndexOfIso(last.lastInterest) : Number.NEGATIVE_INFINITY,
   );
-  const nowMonth = monthIndexOfDate(now);
-  if (nowMonth <= baseMonth) return 0; // zero elapsed whole months → no-op
+  const yesterday = dayIndexOfIso(todayIso(now)) - 1;
+  if (yesterday <= baseDay) return 0; // no complete days to accrue
 
-  // Balances before any accrued month only need rows older than this month.
+  // Ledger rows feed the balance day by day (rows dated < earning day).
   const rows = await db
     .select({
       kind: savingsContributions.kind,
@@ -118,23 +148,37 @@ async function accrueGoal(
     .from(savingsContributions)
     .where(eq(savingsContributions.goalId, goalId))
     .orderBy(savingsContributions.date);
-  const before = rows.filter((row) => monthIndexOfIso(row.date) < nowMonth);
 
+  // Compound tracks ONE running balance; simple tracks the principal the
+  // interest actually earns on (withdrawals can push it negative before the
+  // floor is applied, consuming accumulated interest by construction).
   let balance = 0;
+  let principal = 0;
   let inserted = 0;
   let cursor = 0;
-  const note = `Interés ${formatRatePercent(rateBp)}% TNA`;
 
-  for (let month = baseMonth + 1; month <= nowMonth; month++) {
-    const start = monthStartIso(month);
-    while (cursor < before.length && before[cursor].date < start) {
-      const row = before[cursor];
-      const signed = row.kind === "withdrawal" ? -row.amountCents : row.amountCents;
-      balance += signed;
+  for (let day = baseDay + 1; day <= yesterday; day++) {
+    const dayIso = isoOfDayIndex(day);
+    while (cursor < rows.length && rows[cursor].date < dayIso) {
+      const row = rows[cursor];
+      if (row.kind === "deposit") {
+        balance += row.amountCents;
+        principal += row.amountCents;
+      } else if (row.kind === "withdrawal") {
+        balance -= row.amountCents;
+        principal -= row.amountCents;
+        // A withdrawal above the principal means the excess was interest
+        // already paid out: the earning base floors at 0 and stays there.
+        principal = Math.max(principal, 0);
+      } else {
+        // Prior interest: earns in compound mode, never in simple mode.
+        balance += row.amountCents;
+      }
       cursor++;
     }
-    // Monthly compounding: rate/12 on the balance including prior interest.
-    const interestCents = Math.round((balance * rateBp) / 12 / 10000);
+
+    const earningBase = goal.accrualMode === "compound" ? balance : principal;
+    const interestCents = Math.round(earningBase * rate);
     if (interestCents > 0) {
       // Savepoint wrapper: the unique index backs the invariant even if a
       // writer bypassed the row lock. The error must propagate so drizzle
@@ -146,12 +190,12 @@ async function accrueGoal(
             memberId: null,
             kind: "interest",
             amountCents: interestCents,
-            date: start,
-            note,
+            date: dayIso,
+            note: DAILY_INTEREST_NOTE,
           });
         });
       } catch (error) {
-        // Another writer already covered this month — keep what exists.
+        // Another writer already covered this day — keep what exists.
         if (!hasPgError(error, "23505")) throw error;
       }
       balance += interestCents;

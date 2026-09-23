@@ -13,7 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { assistantUsage } from "@/db/schema";
 import type { Database } from "@/db";
 import { getConfig } from "@/lib/config";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 
 export interface QuotaView {
   limit: number;

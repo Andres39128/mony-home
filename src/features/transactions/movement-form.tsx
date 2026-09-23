@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useActionState, useTransition, type ChangeEvent } from "react";
 import type { CategoryView } from "@/features/categories/service";
-import type { EnvelopeView } from "@/features/envelopes/service";
 import type { ExpenseGroupView } from "@/features/expense-groups/service";
 import type { TransactionView } from "@/features/transactions/service";
 import type { InlineCategoryState } from "@/features/transactions/actions";
@@ -23,7 +22,6 @@ interface MovementFormProps {
   /** Edit prefill; undefined in create mode. */
   transaction?: TransactionView;
   categories: CategoryView[];
-  envelopes: EnvelopeView[];
   members: { id: string; name: string; isActive: boolean }[];
   groups: ExpenseGroupView[];
   currentUser: { id: string; name: string; role: "admin" | "member" };
@@ -49,12 +47,6 @@ function localToday(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
     now.getDate(),
   ).padStart(2, "0")}`;
-}
-
-function envelopeLabel(envelope: Pick<EnvelopeView, "name" | "scope" | "memberName">): string {
-  return envelope.scope === "common"
-    ? `Común · ${envelope.name}`
-    : `Individual · ${envelope.name} (${envelope.memberName ?? "?"})`;
 }
 
 /** Segmented radio control (tipo / ámbito) styled as a two-option toggle. */
@@ -105,7 +97,6 @@ export default function MovementForm({
   mode,
   transaction,
   categories,
-  envelopes,
   members,
   groups,
   currentUser,
@@ -126,7 +117,6 @@ export default function MovementForm({
   const [type, setType] = useState<"income" | "expense">(transaction?.type ?? "expense");
   const [scope, setScope] = useState<"individual" | "common">(transaction?.scope ?? "common");
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? "");
-  const [envelopeId, setEnvelopeId] = useState(transaction?.envelopeId ?? "");
   const [groupId, setGroupId] = useState(transaction?.groupId ?? "");
   const [memberId, setMemberId] = useState(transaction?.memberId ?? currentUser.id);
   const [inlineOpen, setInlineOpen] = useState(false);
@@ -300,9 +290,6 @@ export default function MovementForm({
       isActive: true,
     })),
   ];
-  const envelopeOptions = envelopes.filter(
-    (envelope) => envelope.isActive || envelope.id === envelopeId,
-  );
   const groupOptions = groups.filter((group) => group.status === "active" || group.id === groupId);
 
   return (
@@ -556,24 +543,6 @@ export default function MovementForm({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-muted">Bolsa (opcional)</span>
-          <select
-            name="envelopeId"
-            value={envelopeId}
-            onChange={(event) => setEnvelopeId(event.target.value)}
-            className={inputClass}
-          >
-            <option value="">—</option>
-            {envelopeOptions.map((envelope) => (
-              <option key={envelope.id} value={envelope.id}>
-                {envelopeLabel(envelope)}
-                {envelope.isActive ? "" : " (inactiva)"}
-              </option>
-            ))}
-          </select>
-          <FieldError message={state.fieldErrors?.envelopeId} />
-        </label>
         <div className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-muted">Integrante</span>
           {isAdmin ? (
@@ -600,7 +569,8 @@ export default function MovementForm({
             </>
           )}
           <FieldError message={state.fieldErrors?.memberId} />
-        </div>      </div>
+        </div>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1">

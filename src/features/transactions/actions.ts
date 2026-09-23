@@ -31,7 +31,6 @@ function readMovementForm(formData: FormData) {
     type: formData.get("type"),
     categoryId: formData.get("categoryId") ?? "",
     memberId: formData.get("memberId") ?? "",
-    envelopeId: formData.get("envelopeId") ?? "",
     groupId: formData.get("groupId") ?? "",
     scope: formData.get("scope") ?? "common",
     note: formData.get("note") ?? "",
@@ -71,17 +70,6 @@ function mapMovementError(error: string): FormState {
     return {
       fieldErrors: { categoryId: "La categoría no corresponde al tipo de movimiento." },
     };
-  }
-  if (error === "envelope_member_mismatch") {
-    return { fieldErrors: { envelopeId: "La bolsa no pertenece al integrante del movimiento." } };
-  }
-  if (error === "envelope_scope_mismatch") {
-    return {
-      fieldErrors: { envelopeId: "El ámbito de la bolsa no coincide con el ámbito del movimiento." },
-    };
-  }
-  if (error === "envelope_inactive") {
-    return { fieldErrors: { envelopeId: "La bolsa está inactiva." } };
   }
   if (error === "member_inactive") {
     return { fieldErrors: { memberId: "El integrante seleccionado está inactivo." } };

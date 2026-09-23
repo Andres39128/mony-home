@@ -15,7 +15,7 @@
 import { getConfig } from "@/lib/config";
 import type { Database } from "@/db";
 import type { SessionUser } from "@/lib/auth";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import {
   buildFinanceContext,
   toPromptContext,

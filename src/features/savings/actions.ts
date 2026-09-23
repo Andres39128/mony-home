@@ -8,6 +8,7 @@ import {
   contributionSchema,
   createGoal,
   goalSchema,
+  markRateReviewed,
   removeGoal,
   toggleGoalActive,
   updateGoal,
@@ -15,11 +16,11 @@ import {
 } from "@/features/savings/service";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
 
-const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar metas.";
+const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar bolsas.";
 
-/** Goal and contribution mutations both change /ahorro and the dashboard KPI. */
+/** Goal and contribution mutations both change /bolsas and the dashboard KPI. */
 function revalidateSavings(): void {
-  revalidatePath("/ahorro");
+  revalidatePath("/bolsas");
   revalidatePath("/");
 }
 
@@ -42,7 +43,7 @@ function mapGoalError(error: string): FormState {
     return { fieldErrors: { memberId: "El integrante seleccionado no existe." } };
   }
   if (error === "goal_not_found") {
-    return { error: "La meta no existe." };
+    return { error: "La bolsa no existe." };
   }
   if (error === "has_contributions") {
     return {
@@ -51,7 +52,7 @@ function mapGoalError(error: string): FormState {
     };
   }
   if (error === "forbidden") return { error: ADMIN_REQUIRED_MESSAGE };
-  return { error: "No se pudo guardar la meta." };
+  return { error: "No se pudo guardar la bolsa." };
 }
 
 function readGoalForm(formData: FormData) {
@@ -65,6 +66,7 @@ function readGoalForm(formData: FormData) {
     currentValue: formData.get("currentValue") ?? "",
     institution: formData.get("institution") ?? "",
     annualRate: formData.get("annualRate") ?? "",
+    accrualMode: formData.get("accrualMode") ?? "",
   };
 }
 
@@ -93,7 +95,7 @@ export async function updateGoalAction(
   if (!guard.ok) return guard;
 
   const id = idFrom(formData);
-  if (!id) return { error: "Meta inválida." };
+  if (!id) return { error: "Bolsa inválida." };
 
   const parsed = goalSchema.safeParse(readGoalForm(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
@@ -113,7 +115,7 @@ export async function toggleGoalAction(
   if (!guard.ok) return guard;
 
   const id = idFrom(formData);
-  if (!id) return { error: "Meta inválida." };
+  if (!id) return { error: "Bolsa inválida." };
 
   const result = await toggleGoalActive(getDb(), guard.user, id);
   if (!result.ok) return mapGoalError(result.error);
@@ -130,7 +132,7 @@ export async function deleteGoalAction(
   if (!guard.ok) return guard;
 
   const id = idFrom(formData);
-  if (!id) return { error: "Meta inválida." };
+  if (!id) return { error: "Bolsa inválida." };
 
   const result = await removeGoal(getDb(), guard.user, id);
   if (!result.ok) return mapGoalError(result.error);
@@ -147,7 +149,7 @@ export async function updateGoalValueAction(
   if (!guard.ok) return guard;
 
   const id = idFrom(formData);
-  if (!id) return { error: "Meta inválida." };
+  if (!id) return { error: "Bolsa inválida." };
 
   const result = await updateGoalValue(
     getDb(),
@@ -177,7 +179,7 @@ export async function addContributionAction(
   const user = await requireUser();
 
   const goalId = idFrom(formData);
-  if (!goalId) return { error: "Meta inválida." };
+  if (!goalId) return { error: "Bolsa inválida." };
 
   const parsed = contributionSchema.safeParse({
     amount: formData.get("amount"),
@@ -194,9 +196,9 @@ export async function addContributionAction(
     if (result.error === "invalid_amount") {
       return { fieldErrors: { amount: "El monto no es válido." } };
     }
-    if (result.error === "goal_not_found") return { error: "La meta no existe." };
+    if (result.error === "goal_not_found") return { error: "La bolsa no existe." };
     if (result.error === "goal_inactive") {
-      return { error: "La meta está inactiva: activala para registrar aportes." };
+      return { error: "La bolsa está inactiva: activala para registrar aportes." };
     }
     if (result.error === "member_not_found") {
       return { fieldErrors: { memberId: "El integrante seleccionado no existe." } };
@@ -209,6 +211,26 @@ export async function addContributionAction(
     }
     return { error: "No tenés permiso para registrar ese aporte." };
   }
+
+  revalidateSavings();
+  return { ok: true };
+}
+
+/**
+ * Review banner action: stamps rate_reviewed_month = current month on every
+ * pending rate-bearing bolsa (admin-only) so the banner clears.
+ */
+export async function markRateReviewedAction(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- action takes no fields
+  _prev: FormState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- action takes no fields
+  _formData: FormData,
+): Promise<FormState> {
+  const guard = await adminGuard(ADMIN_REQUIRED_MESSAGE);
+  if (!guard.ok) return guard;
+
+  const result = await markRateReviewed(getDb(), guard.user);
+  if (!result.ok) return mapGoalError(result.error);
 
   revalidateSavings();
   return { ok: true };

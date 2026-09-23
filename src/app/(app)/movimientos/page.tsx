@@ -1,6 +1,7 @@
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
-import { todayIso, listTransactions, transactionTotals, type TransactionFilters } from "@/features/transactions/service";
+import { listTransactions, transactionTotals, type TransactionFilters } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { movementFormOptions } from "@/features/transactions/form-options";
 import { monthLabel, shiftMonth } from "@/features/transactions/month-nav";
 import {
@@ -23,12 +24,6 @@ type Params = Awaited<SearchParams>;
 function singleParam(params: Params, key: string) {
   const value = params[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function envelopeFilterLabel(envelope: { name: string; scope: string; memberName: string | null }) {
-  return envelope.scope === "common"
-    ? `Común · ${envelope.name}`
-    : `Individual · ${envelope.name} (${envelope.memberName ?? "?"})`;
 }
 
 /** URL of /movimientos with the same params, overriding/dropping some. */
@@ -66,7 +61,6 @@ export default async function MovimientosPage({
     month,
     categoryId: singleParam(params, "categoryId"),
     memberId: singleParam(params, "memberId"),
-    envelopeId: singleParam(params, "envelopeId"),
     groupId: singleParam(params, "groupId"),
     type: typeParam === "income" || typeParam === "expense" ? typeParam : undefined,
   };
@@ -93,14 +87,6 @@ export default async function MovimientosPage({
       param: "memberId",
       label: `Integrante: ${member.name}`,
       href: hrefWith(params, { memberId: null }),
-    });
-  }
-  const envelope = options.envelopes.find((item) => item.id === filters.envelopeId);
-  if (envelope) {
-    activeFilters.push({
-      param: "envelopeId",
-      label: `Bolsa: ${envelopeFilterLabel(envelope)}`,
-      href: hrefWith(params, { envelopeId: null }),
     });
   }
   const group = options.groups.find((item) => item.id === filters.groupId);
@@ -137,7 +123,6 @@ export default async function MovimientosPage({
           desktopButton
           currentUser={user}
           categories={options.categories}
-          envelopes={options.envelopes}
           members={options.members}
           groups={options.groups}
           serverToday={today}
@@ -178,17 +163,6 @@ export default async function MovimientosPage({
             {options.members.map((member) => (
               <option key={member.id} value={member.id}>
                 {member.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-muted">Bolsa</span>
-          <select name="envelopeId" defaultValue={filters.envelopeId ?? ""} className={inputClass}>
-            <option value="">—</option>
-            {options.envelopes.map((envelope) => (
-              <option key={envelope.id} value={envelope.id}>
-                {envelopeFilterLabel(envelope)}
               </option>
             ))}
           </select>
@@ -241,7 +215,6 @@ export default async function MovimientosPage({
           rows={rows}
           currentUser={user}
           categories={options.categories}
-          envelopes={options.envelopes}
           members={options.members}
           groups={options.groups}
           serverToday={today}

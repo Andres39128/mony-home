@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { monthLabel, shiftMonth } from "@/features/transactions/month-nav";
 import { getMonth } from "@/features/budgets/service";
 import { computeProgress, monthBounds } from "@/features/budgets/progress";

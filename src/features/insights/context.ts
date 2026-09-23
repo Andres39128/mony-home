@@ -4,7 +4,7 @@
  * The LLM NEVER sees raw transactions and NEVER does arithmetic: this module
  * pre-computes every figure by REUSING the existing services (budgets.getMonth,
  * transactions totals via budgets context, analytics.expensesByCategory /
- * monthlyTotals, envelopes.monthlyProgress) — no duplicated SQL. The model only
+ * monthlyTotals, savings.listGoals) — no duplicated SQL. The model only
  * narrates over the given numbers.
  *
  * Canonical values are integer cents (R2). `toPromptContext` renders the same
@@ -16,7 +16,8 @@
  */
 import { formatCents, percentage } from "@/lib/money";
 import type { Database } from "@/db";
-import { todayIso, transactionTotals } from "@/features/transactions/service";
+import { transactionTotals } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { getMonth, previousMonth } from "@/features/budgets/service";
 import { monthBounds, type ProgressStatus } from "@/features/budgets/progress";
 import {
@@ -24,7 +25,8 @@ import {
   expensesByCategory,
   monthlyTotals,
 } from "@/features/analytics/service";
-import { monthlyProgress } from "@/features/envelopes/service";
+import { listGoals } from "@/features/savings/service";
+import { formatRatePercent } from "@/features/savings/math";
 
 /** Top spender categories detailed in the context; the rest roll into "otros". */
 export const TOP_CATEGORIES_LIMIT = 5;
@@ -62,14 +64,18 @@ export interface ContextCategoryChange {
   deltaPct: number | null;
 }
 
-export interface ContextEnvelope {
+export interface ContextBolsa {
   name: string;
-  scope: "individual" | "common";
-  memberName: string | null;
-  spentCents: number;
-  plannedCents: number;
-  pct: number;
-  status: ProgressStatus;
+  /** Where the money is held; null = unset. */
+  institution: string | null;
+  /** 'ahorro' (savings bag) vs 'inversión' (acciones). */
+  kind: "savings" | "investment";
+  /** Net accumulated (deposits − withdrawals + interest), exact cents. */
+  netCents: number;
+  /** Annual rate in bp; null = no yield. */
+  annualRateBp: number | null;
+  /** Daily accrual mode; null when there is no rate. */
+  accrualMode: "simple" | "compound" | null;
 }
 
 export interface FinanceContext {
@@ -94,7 +100,8 @@ export interface FinanceContext {
   /** Rollup of everything outside the top N; null when there is nothing left. */
   otherCategories: { name: string; cents: number; pct: number } | null;
   categoryChanges: ContextCategoryChange[];
-  envelopes: ContextEnvelope[];
+  /** Savings bags (goals + investments) summary — net balances and rates. */
+  bolsas: ContextBolsa[];
   trend: {
     months: number;
     avgExpenseCents: number;
@@ -138,14 +145,13 @@ export async function buildFinanceContext(
   const bounds = monthBounds(month);
   if (!bounds) throw new Error(`buildFinanceContext: invalid month "${month}"`);
 
-  const [budgetView, currentSlices, previousSlices, trendTotals, envelopeRows] =
-    await Promise.all([
-      getMonth(db, month),
-      expensesByCategory(db, { month }),
-      expensesByCategory(db, { month: previousMonth(month) }),
-      monthlyTotals(db, month, TREND_MONTHS),
-      monthlyProgress(db, month),
-    ]);
+  const [budgetView, currentSlices, previousSlices, trendTotals, goals] = await Promise.all([
+    getMonth(db, month),
+    expensesByCategory(db, { month }),
+    expensesByCategory(db, { month: previousMonth(month) }),
+    monthlyTotals(db, month, TREND_MONTHS),
+    listGoals(db),
+  ]);
   if (!budgetView) throw new Error(`buildFinanceContext: invalid month "${month}"`);
 
   // Household totals ride along with getMonth (it already reuses
@@ -232,14 +238,13 @@ export async function buildFinanceContext(
         ? { name: "Otros", cents: restCents, pct: percentage(restCents, expenseCents) }
         : null,
     categoryChanges,
-    envelopes: envelopeRows.map((row) => ({
-      name: row.name,
-      scope: row.scope,
-      memberName: row.memberName,
-      spentCents: row.spentCents,
-      plannedCents: row.plannedCents,
-      pct: row.pct,
-      status: row.status,
+    bolsas: goals.map((goal) => ({
+      name: goal.name,
+      institution: goal.institution,
+      kind: goal.kind,
+      netCents: goal.netCents,
+      annualRateBp: goal.annualRateBp,
+      accrualMode: goal.accrualMode,
     })),
     trend: {
       months: trendTotals.length,
@@ -361,14 +366,17 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
           ? "gasto nuevo (sin gasto el mes anterior)"
           : signedPct(change.deltaPct),
     })),
-    bolsas: ctx.envelopes.map((envelope) => ({
-      nombre: envelope.name,
-      ambito: envelope.scope === "common" ? "común" : "individual",
-      integrante: envelope.memberName ?? undefined,
-      gastado: ar(envelope.spentCents),
-      planificado: ar(envelope.plannedCents),
-      porcentaje: `${String(envelope.pct).replace(".", ",")}%`,
-      estado: STATUS_LABELS[envelope.status],
+    bolsas: ctx.bolsas.map((bolsa) => ({
+      nombre: bolsa.name,
+      institucion: bolsa.institution ?? undefined,
+      tipo: bolsa.kind === "savings" ? "ahorro" : "inversión",
+      saldo_neto: ar(bolsa.netCents),
+      tasa:
+        bolsa.annualRateBp === null
+          ? undefined
+          : `${formatRatePercent(bolsa.annualRateBp)}% ${
+              bolsa.accrualMode === "compound" ? "TEA (compuesto)" : "TNA (simple)"
+            }`,
     })),
     tendencia: {
       meses_analizados: ctx.trend.months,

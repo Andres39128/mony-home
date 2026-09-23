@@ -1,37 +1,61 @@
-import { requireUser } from "@/features/auth/session";
 import { getDb } from "@/db";
-import { listEnvelopes, monthlyProgress } from "@/features/envelopes/service";
+import { requireUser } from "@/features/auth/session";
+import { getPatrimony, listContributions, listGoals, listPendingRateReviews } from "@/features/savings/service";
 import { listMembers } from "@/features/members/service";
 import {
-  createEnvelopeAction,
-  deleteEnvelopeAction,
-  toggleEnvelopeAction,
-  updateEnvelopeAction,
-} from "@/features/envelopes/actions";
-import EnvelopesPanel from "./envelopes-panel";
+  addContributionAction,
+  createGoalAction,
+  deleteGoalAction,
+  markRateReviewedAction,
+  toggleGoalAction,
+  updateGoalAction,
+  updateGoalValueAction,
+} from "@/features/savings/actions";
+import BolsasPanel from "./bolsas-panel";
 
 export default async function BolsasPage() {
   const user = await requireUser();
-  const [envelopes, members, progress] = await Promise.all([
-    listEnvelopes(getDb()),
+  // listGoals FIRST: it triggers the lazy interest catch-up, so the history
+  // query below is guaranteed to see the freshly materialized entries.
+  const goals = await listGoals(getDb());
+  const [members, patrimony, contributions, pendingReviews] = await Promise.all([
     listMembers(getDb()),
-    monthlyProgress(getDb()),
+    getPatrimony(getDb()),
+    listContributions(getDb()),
+    listPendingRateReviews(getDb()),
   ]);
+
+  // One query for every card's collapsible history, grouped here.
+  const contributionsByGoal: Record<string, typeof contributions> = {};
+  for (const entry of contributions) {
+    const list = contributionsByGoal[entry.goalId] ?? [];
+    list.push(entry);
+    contributionsByGoal[entry.goalId] = list;
+  }
 
   return (
     <section className="flex flex-col gap-6">
       <h1 className="text-2xl font-semibold tracking-tight text-ink">
         Bolsas
       </h1>
-      <EnvelopesPanel
-        envelopes={envelopes}
-        progress={progress}
+      <BolsasPanel
+        goals={goals}
         members={members.map((m) => ({ id: m.id, name: m.name }))}
         isAdmin={user.role === "admin"}
-        createAction={createEnvelopeAction}
-        updateAction={updateEnvelopeAction}
-        toggleAction={toggleEnvelopeAction}
-        deleteAction={deleteEnvelopeAction}
+        patrimony={{
+          savingsCents: patrimony.savingsCents,
+          investmentsCents: patrimony.investmentsCents,
+          totalCents: patrimony.totalCents,
+        }}
+        contributionsByGoal={contributionsByGoal}
+        pendingReviews={pendingReviews}
+        createAction={createGoalAction}
+        updateAction={updateGoalAction}
+        toggleAction={toggleGoalAction}
+        deleteAction={deleteGoalAction}
+        valueAction={updateGoalValueAction}
+        contributionAction={addContributionAction}
+        markReviewedAction={markRateReviewedAction}
       />
     </section>
   );

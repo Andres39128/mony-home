@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { loadConfig } from "@/lib/config";
 import { seedDatabase } from "@/db/seed";
-import { budgets, categories, envelopes, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
+import { budgets, categories, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import { createTestDb } from "@/db/test-utils";
 
 /**
@@ -25,11 +25,10 @@ describe("seedDatabase", () => {
   });
 
   const tableCounts = async () => {
-    const [userRows, categoryRows, envelopeRows, groupRows, transactionRows, budgetRows, goalRows, contributionRows, loanRows, loanPaymentRows] =
+    const [userRows, categoryRows, groupRows, transactionRows, budgetRows, goalRows, contributionRows, loanRows, loanPaymentRows] =
       await Promise.all([
         db.select().from(users),
         db.select().from(categories),
-        db.select().from(envelopes),
         db.select().from(expenseGroups),
         db.select().from(transactions),
         db.select().from(budgets),
@@ -41,7 +40,6 @@ describe("seedDatabase", () => {
     return {
       users: userRows,
       categories: categoryRows,
-      envelopes: envelopeRows,
       groups: groupRows,
       transactions: transactionRows,
       budgets: budgetRows,
@@ -58,7 +56,6 @@ describe("seedDatabase", () => {
     const counts = await tableCounts();
     expect(counts.users.map((u) => u.username).sort()).toEqual(["admin", "andres", "maria"]);
     expect(counts.categories).toHaveLength(16);
-    expect(counts.envelopes).toHaveLength(2);
     expect(counts.groups).toHaveLength(1);
     expect(counts.transactions).toHaveLength(10);
     expect(counts.budgets).toHaveLength(2);
@@ -66,6 +63,12 @@ describe("seedDatabase", () => {
     expect(counts.contributions).toHaveLength(4);
     expect(counts.loans).toHaveLength(2);
     expect(counts.loanPayments).toHaveLength(2);
+
+    // Both daily accrual modes are exercised by the demo bolsas.
+    const fondo = counts.goals.find((g) => g.name === "Fondo de emergencia");
+    expect(fondo).toMatchObject({ kind: "savings", annualRateBp: 3650, accrualMode: "simple" });
+    const plazo = counts.goals.find((g) => g.name === "Plazo fijo");
+    expect(plazo).toMatchObject({ kind: "investment", annualRateBp: 7000, accrualMode: "compound" });
   });
 
   it("is idempotent in demo mode (re-run does not duplicate rows)", async () => {
@@ -75,7 +78,6 @@ describe("seedDatabase", () => {
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(3);
     expect(counts.categories).toHaveLength(16);
-    expect(counts.envelopes).toHaveLength(2);
     expect(counts.groups).toHaveLength(1);
     expect(counts.transactions).toHaveLength(10);
     expect(counts.budgets).toHaveLength(2);
@@ -93,7 +95,6 @@ describe("seedDatabase", () => {
     expect(counts.users[0]?.username).toBe("admin");
     expect(counts.users[0]?.role).toBe("admin");
     expect(counts.categories).toHaveLength(16);
-    expect(counts.envelopes).toHaveLength(0);
     expect(counts.groups).toHaveLength(0);
     expect(counts.transactions).toHaveLength(0);
     expect(counts.budgets).toHaveLength(0);

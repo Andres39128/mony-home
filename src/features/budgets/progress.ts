@@ -1,6 +1,6 @@
 /**
- * Shared progress math for budgets and envelopes — the single source of
- * truth for "how much of the plan is spent". Pure functions only (no DB,
+ * Shared progress math for budgets and savings goals — the single source of
+ * truth for "how much of the plan is reached". Pure functions only (no DB,
  * no Next.js) so client components can import the status constants without
  * pulling server code into the bundle.
  *

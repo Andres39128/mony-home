@@ -3,9 +3,10 @@
  * this directly, same contract as budgets/progress.ts).
  *
  * Money is ALWAYS integer cents (R2). Contributions accumulate across ALL
- * months — a savings pool is cumulative, unlike bolsas monthly progress.
+ * months — a savings pool is cumulative, unlike budget monthly progress.
  */
 import { percentage } from "@/lib/money";
+import { todayIso } from "@/lib/date";
 import { computeProgress, type Progress } from "@/features/budgets/progress";
 
 /** Net accumulation: deposits minus withdrawals (exact cents). */
@@ -68,12 +69,4 @@ export function monthsUntilDeadline(
   const [todayYear, todayMonth] = today.split("-").map(Number);
   const [goalYear, goalMonth] = deadline.split("-").map(Number);
   return (goalYear - todayYear) * 12 + (goalMonth - todayMonth);
-}
-
-/** Local-timezone ISO date ('YYYY-MM-DD'); duplicated from the transactions
- * service to keep this module free of server imports. */
-function todayIso(now = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate(),
-  ).padStart(2, "0")}`;
 }

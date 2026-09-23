@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/features/auth/session";
-import { todayIso } from "@/features/transactions/service";
+import { todayIso } from "@/lib/date";
 import { movementFormOptions } from "@/features/transactions/form-options";
 import {
   createCategoryInlineAction,
@@ -27,7 +27,6 @@ export default async function NuevoMovimientoPage() {
         <MovementForm
           mode="create"
           categories={options.categories}
-          envelopes={options.envelopes}
           members={options.members}
           groups={options.groups}
           currentUser={user}
