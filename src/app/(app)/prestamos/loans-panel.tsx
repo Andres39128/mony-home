@@ -6,6 +6,7 @@ import { formatCents } from "@/lib/money";
 import type { FormState } from "@/lib/form-state";
 import { formatRatePercent } from "@/features/savings/math";
 import { ProgressBar } from "@/components/progress";
+import { RateBadge, ScopeBadge } from "@/components/badges";
 import {
   ActiveBadge,
   EditDetails,
@@ -39,32 +40,10 @@ const KIND_LABELS = {
   other: "Otro",
 } as const;
 
-/** "Común" / "Individual · {member}" badge, same pattern as the bolsas panel. */
-function ScopeBadge({ loan }: { loan: LoanView }) {
-  return loan.scope === "common" ? (
-    <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
-      Común
-    </span>
-  ) : (
-    <span className="rounded-full bg-honey px-2 py-0.5 text-xs font-medium text-ink">
-      Individual · {loan.memberName ?? "?"}
-    </span>
-  );
-}
-
 function KindBadge({ loan }: { loan: LoanView }) {
   return (
     <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
       {KIND_LABELS[loan.kind]}
-    </span>
-  );
-}
-
-function RateBadge({ loan }: { loan: LoanView }) {
-  if (loan.annualRateBp === null) return null;
-  return (
-    <span className="rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-ink">
-      TNA {formatRatePercent(loan.annualRateBp)}%
     </span>
   );
 }
@@ -244,8 +223,8 @@ function LoanCard({
         <span className="font-medium text-ink">{loan.name}</span>
         <div className="flex flex-wrap items-center gap-2">
           <KindBadge loan={loan} />
-          <ScopeBadge loan={loan} />
-          <RateBadge loan={loan} />
+          <ScopeBadge scope={loan.scope} memberName={loan.memberName} />
+          <RateBadge annualRateBp={loan.annualRateBp} mode="TNA" />
         </div>
       </div>
       <div data-tour={tourIds?.interest}>
@@ -423,7 +402,7 @@ function EditLoanForm({
           <span className={loan.isActive ? "" : "text-muted"}>
             {loan.name}
           </span>
-          <ScopeBadge loan={loan} />
+          <ScopeBadge scope={loan.scope} memberName={loan.memberName} />
           <span className="text-sm font-normal text-muted">
             {formatCents(Math.max(loan.outstandingCents, 0))}
           </span>

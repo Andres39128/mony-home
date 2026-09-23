@@ -20,6 +20,7 @@ import { categories, loanPayments, loans, transactions, users } from "@/db/schem
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
+import { parseAmountCents } from "@/lib/money-errors";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/lib/date";
 import { catchUpAllLoanInterest, catchUpInterest } from "./accrual";
@@ -170,7 +171,7 @@ export async function listLoans(db: Database): Promise<LoanView[]> {
 }
 
 /** AR-tolerant free-text amount → cents, or null when unparseable. */
-function parseAmountCents(amount: string): number | null {
+function parseLenientCents(amount: string): number | null {
   try {
     return parseAmountToCents(amount);
   } catch {
@@ -227,7 +228,7 @@ export async function createLoan(
   input: LoanInput,
 ): Promise<LoanResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
-  const principal = parseAmountCents(input.principal);
+  const principal = parseLenientCents(input.principal);
   if (principal === null || principal <= 0) return { ok: false, error: "invalid_principal" };
   const rate = parseOptionalRate(input.annualRate);
   if ("error" in rate) return { ok: false, error: "invalid_rate" };
@@ -249,7 +250,7 @@ export async function updateLoan(
   input: LoanInput,
 ): Promise<LoanResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
-  const principal = parseAmountCents(input.principal);
+  const principal = parseLenientCents(input.principal);
   if (principal === null || principal <= 0) return { ok: false, error: "invalid_principal" };
   const rate = parseOptionalRate(input.annualRate);
   if ("error" in rate) return { ok: false, error: "invalid_rate" };
@@ -313,6 +314,7 @@ export type PaymentResult =
       ok: false;
       error:
         | "invalid_amount"
+        | "ambiguous_amount"
         | "loan_not_found"
         | "loan_inactive"
         | "member_not_found"
@@ -349,8 +351,11 @@ export async function addLoanPayment(
   loanId: string,
   input: LoanPaymentInput,
 ): Promise<PaymentResult> {
+  // Discriminated like movements: '1.234' asks for guidance instead of a
+  // generic rejection (shared lib/money-errors surface).
   const cents = parseAmountCents(input.amount);
-  if (cents === null || cents <= 0) return { ok: false, error: "invalid_amount" };
+  if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
+  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
 
   return db.transaction(async (tx) => {
     const [loan] = await tx
@@ -448,7 +453,7 @@ export async function updateOutstanding(
 ): Promise<OutstandingResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
 
-  const cents = parseAmountCents(newOutstanding);
+  const cents = parseLenientCents(newOutstanding);
   if (cents === null || cents < 0) return { ok: false, error: "invalid_outstanding" };
 
   // Pre-check for typed errors; the mutations below re-check via the tx

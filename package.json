@@ -15,6 +15,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "node --env-file-if-exists=.env.local src/db/seed.ts",
     "db:studio": "drizzle-kit studio",
+    "backup:verify": "node scripts/verify-backup.mjs",
     "prepare": "husky"
   },
   "lint-staged": {

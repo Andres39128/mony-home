@@ -24,8 +24,8 @@ import {
 } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
-import { AmbiguousAmountError, parseAmountToCents } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth";
+import { parseAmountCents } from "@/lib/money-errors";
 import { todayIso } from "@/lib/date";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -284,15 +284,17 @@ export async function transactionTotals(
 /**
  * Parses the free-text amount into cents, or returns the typed error code:
  * 'ambiguous_amount' means the input needs disambiguation (e.g. '1.234'),
- * 'invalid_amount' anything else unparseable/non-positive.
+ * 'invalid_amount' anything else unparseable/non-positive. Parsing and the
+ * ambiguity discrimination live in lib/money-errors (shared with savings,
+ * loans and budgets); movements additionally require a POSITIVE amount.
  */
-function parseAmountCents(amount: string): number | "invalid_amount" | "ambiguous_amount" {
-  try {
-    const cents = parseAmountToCents(amount);
-    return cents > 0 ? cents : "invalid_amount";
-  } catch (error) {
-    return error instanceof AmbiguousAmountError ? "ambiguous_amount" : "invalid_amount";
-  }
+function parsePositiveAmountCents(
+  amount: string,
+): number | "invalid_amount" | "ambiguous_amount" {
+  const cents = parseAmountCents(amount);
+  if (cents === "ambiguous_amount") return cents;
+  if (cents === "invalid_amount" || cents <= 0) return "invalid_amount";
+  return cents;
 }
 
 /** Member attribution: empty = the acting user; non-admins cannot target others. */
@@ -413,7 +415,7 @@ export async function createTransaction(
   user: SessionUser,
   input: MovementInput,
 ): Promise<MovementResult> {
-  const cents = parseAmountCents(input.amount);
+  const cents = parsePositiveAmountCents(input.amount);
   if (typeof cents === "string") return { ok: false, error: cents };
 
   const member = resolveMemberId(user, input);
@@ -500,7 +502,7 @@ export async function updateTransaction(
   id: string,
   input: MovementInput,
 ): Promise<MovementResult> {
-  const cents = parseAmountCents(input.amount);
+  const cents = parsePositiveAmountCents(input.amount);
   if (typeof cents === "string") return { ok: false, error: cents };
 
   const member = resolveMemberId(user, input);

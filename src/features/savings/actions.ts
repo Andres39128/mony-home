@@ -15,6 +15,7 @@ import {
   updateGoalValue,
 } from "@/features/savings/service";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar bolsas.";
 
@@ -193,8 +194,8 @@ export async function addContributionAction(
 
   const result = await addContribution(getDb(), user, goalId, parsed.data);
   if (!result.ok) {
-    if (result.error === "invalid_amount") {
-      return { fieldErrors: { amount: "El monto no es válido." } };
+    if (result.error === "invalid_amount" || result.error === "ambiguous_amount") {
+      return amountFieldError(result.error);
     }
     if (result.error === "goal_not_found") return { error: "La bolsa no existe." };
     if (result.error === "goal_inactive") {

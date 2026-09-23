@@ -114,6 +114,10 @@ export const transactions = pgTable(
     loanPaymentId: uuid("loan_payment_id").references(() => loanPayments.id, {
       onDelete: "cascade",
     }),
+    /** Set on auto-generated rows: the recurring movement that created this one. */
+    recurringId: uuid("recurring_id").references(() => recurringMovements.id, {
+      onDelete: "set null",
+    }),
     scope: scopeKindEnum("scope").notNull().default("common"),
     note: text("note"),
     /** Quick-capture placeholder ("momento de afán"): details pending. */
@@ -138,6 +142,12 @@ export const transactions = pgTable(
     index("transactions_group_id_idx").on(table.groupId),
     index("transactions_savings_contribution_id_idx").on(table.savingsContributionId),
     index("transactions_loan_payment_id_idx").on(table.loanPaymentId),
+    index("transactions_recurring_id_idx").on(table.recurringId),
+    // Idempotent materialization: at most ONE auto-generated transaction per
+    // recurring per day — a racing lazy catch-up inserts nothing extra.
+    uniqueIndex("transactions_recurring_id_date_unique")
+      .on(table.recurringId, table.date)
+      .where(sql`${table.recurringId} IS NOT NULL`),
   ],
 );
 
@@ -390,5 +400,46 @@ export const loanPayments = pgTable(
       .on(table.loanId, table.date, table.note)
       .where(sql`${table.kind} = 'interest'`),
     index("loan_payments_loan_date_idx").on(table.loanId, table.date),
+  ],
+);
+
+/**
+ * Recurring movements: monthly transactions the app materializes by itself
+ * (rent, subscriptions, salary). The lazy catch-up engine
+ * (src/features/recurring/catch-up.ts) inserts one `transactions` row per
+ * elapsed month on read paths; deleting a recurring keeps the already
+ * generated movements (FK is SET NULL). dayOfMonth caps at 28 because
+ * February is the shortest month — every month is guaranteed to have that
+ * day, so no date clamping ever happens.
+ */
+export const recurringMovements = pgTable(
+  "recurring_movements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    type: transactionTypeEnum("type").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "restrict" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    scope: scopeKindEnum("scope").notNull().default("common"),
+    /** Calendar day the movement lands on each month (1..28). */
+    dayOfMonth: integer("day_of_month").notNull(),
+    note: text("note"),
+    /** Paused recurrings stop materializing but keep their history. */
+    isActive: boolean("is_active").notNull().default(true),
+    /** 'YYYY-MM-01' — newest month already materialized; null = never. */
+    lastMaterializedMonth: date("last_materialized_month", { mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("recurring_movements_amount_positive", sql`${table.amountCents} > 0`),
+    check(
+      "recurring_movements_day_of_month_bounds",
+      sql`${table.dayOfMonth} >= 1 AND ${table.dayOfMonth} <= 28`,
+    ),
   ],
 );

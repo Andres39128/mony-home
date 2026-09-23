@@ -15,6 +15,7 @@ import {
   updateOutstanding,
 } from "@/features/loans/service";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar préstamos.";
 
@@ -181,8 +182,8 @@ export async function addLoanPaymentAction(
 
   const result = await addLoanPayment(getDb(), user, loanId, parsed.data);
   if (!result.ok) {
-    if (result.error === "invalid_amount") {
-      return { fieldErrors: { amount: "El monto no es válido." } };
+    if (result.error === "invalid_amount" || result.error === "ambiguous_amount") {
+      return amountFieldError(result.error);
     }
     if (result.error === "loan_not_found") return { error: "El préstamo no existe." };
     if (result.error === "loan_inactive") {

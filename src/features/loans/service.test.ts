@@ -287,6 +287,11 @@ describe("loans CRUD (integration on PGlite)", () => {
       ok: false,
       error: "invalid_amount",
     });
+    // Shared guided path: '1.234' asks for disambiguation, not a guess.
+    expect(await addLoanPayment(appDb, member, row.id, payment("1.234"))).toEqual({
+      ok: false,
+      error: "ambiguous_amount",
+    });
   });
 
   it("lists payments newest first with member attribution", async () => {

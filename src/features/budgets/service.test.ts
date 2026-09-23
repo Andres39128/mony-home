@@ -207,6 +207,26 @@ describe("budgets service (integration on PGlite)", () => {
     expect(await getMonth(appDb, "2026-13")).toBeNull();
   });
 
+  it("exposes overCount: categories whose spend exceeded their plan", async () => {
+    // A month with no overs counts zero.
+    const untouched = await getMonth(appDb, "2026-12");
+    expect(untouched?.overCount).toBe(0);
+
+    await db.insert(transactions).values({
+      date: "2026-11-05",
+      amountCents: 50_000,
+      type: "expense",
+      categoryId: superId,
+      memberId,
+    });
+    await setForMonth(appDb, admin, "2026-11", [
+      { categoryId: superId, amount: "100" }, // spent 50.000 > 100 → over
+      { categoryId: ocioId, amount: "100.000,00" }, // spent 0 → ok
+    ]);
+    const view = await getMonth(appDb, "2026-11");
+    expect(view?.overCount).toBe(1);
+  });
+
   it("computes the previous month across the year boundary", () => {
     expect(previousMonth("2026-09")).toBe("2026-08");
     expect(previousMonth("2026-01")).toBe("2025-12");

@@ -35,6 +35,8 @@ export interface BudgetMonthView {
   rows: BudgetRowView[];
   totals: { plannedCents: number; spentCents: number; pct: number };
   context: { incomeCents: number; expenseCents: number };
+  /** Categories whose spend already exceeded their plan (status 'over'). */
+  overCount: number;
 }
 
 export interface BudgetEntryInput {
@@ -117,6 +119,7 @@ export async function getMonth(
       pct: percentage(totalsSpentCents, totalsPlannedCents),
     },
     context: { incomeCents: context.incomeCents, expenseCents: context.expenseCents },
+    overCount: rows.filter((row) => row.status === "over").length,
   };
 }
 

@@ -10,6 +10,7 @@ import {
   movementReceipts,
   loanPayments,
   loans,
+  recurringMovements,
   savingsContributions,
   savingsGoals,
   transactions,
@@ -676,5 +677,100 @@ describe("migration 0008 (bolsas de ahorro invariants)", () => {
       ),
       "22P02",
     );
+  });
+});
+
+describe("migration 0010 (recurring movements invariants)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  async function fixture(suffix: string) {
+    const [user] = await db
+      .insert(users)
+      .values({ username: `rec-u-${suffix}`, passwordHash: "h", name: "Rec U" })
+      .returning();
+    const [category] = await db
+      .insert(categories)
+      .values({ name: `Recurrente ${suffix}`, kind: "expense" })
+      .returning();
+    return { user, category };
+  }
+
+  it("bounds day_of_month to 1..28 via CHECK (February defines the cap)", async () => {
+    const { user, category } = await fixture("bounds");
+    const base = {
+      name: "Alquiler",
+      type: "expense" as const,
+      amountCents: 100_000,
+      categoryId: category.id,
+      memberId: user.id,
+    };
+    await expectPgError(
+      db.insert(recurringMovements).values({ ...base, dayOfMonth: 0 }),
+      "23514",
+    );
+    await expectPgError(
+      db.insert(recurringMovements).values({ ...base, dayOfMonth: 29 }),
+      "23514",
+    );
+    const [row] = await db
+      .insert(recurringMovements)
+      .values({ ...base, dayOfMonth: 28 })
+      .returning();
+    expect(row.dayOfMonth).toBe(28);
+  });
+
+  it("rejects non-positive amounts via CHECK", async () => {
+    const { user, category } = await fixture("amount");
+    await expectPgError(
+      db.insert(recurringMovements).values({
+        name: "Gratis",
+        type: "expense",
+        amountCents: 0,
+        categoryId: category.id,
+        memberId: user.id,
+        dayOfMonth: 5,
+      }),
+      "23514",
+    );
+  });
+
+  it("allows one materialized movement per recurring per day; NULL rows are exempt", async () => {
+    const { user, category } = await fixture("unique");
+    const [recurring] = await db
+      .insert(recurringMovements)
+      .values({
+        name: "Único",
+        type: "expense",
+        amountCents: 100,
+        categoryId: category.id,
+        memberId: user.id,
+        dayOfMonth: 5,
+      })
+      .returning();
+    const base = {
+      date: "2026-09-05",
+      amountCents: 100,
+      type: "expense" as const,
+      categoryId: category.id,
+      memberId: user.id,
+    };
+    await db.insert(transactions).values({ ...base, recurringId: recurring.id });
+    // Same recurring + same day → the idempotency index rejects it.
+    await expectPgError(
+      db.insert(transactions).values({ ...base, recurringId: recurring.id }),
+      "23505",
+    );
+    // Plain movements (recurring_id NULL) are untouched by the partial index.
+    await db.insert(transactions).values(base);
+    await db.insert(transactions).values(base);
   });
 });

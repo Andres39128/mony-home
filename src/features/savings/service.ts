@@ -17,6 +17,7 @@ import { categories, savingsContributions, savingsGoals, transactions, users } f
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
+import { parseAmountCents } from "@/lib/money-errors";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/lib/date";
 import { getDebtCents } from "@/features/loans/service";
@@ -24,7 +25,6 @@ import { catchUpAllInterest } from "./accrual";
 // Pure math lives in a client-safe module; re-exported here so the service
 // stays the single import surface for server-side callers and tests.
 export {
-  computeNetCents,
   computeGoalProgress,
   computeInvestmentReturn,
   investmentValueCents,
@@ -204,7 +204,7 @@ export async function listGoals(db: Database): Promise<GoalView[]> {
 }
 
 /** Returns null when the free-text amount cannot be parsed. */
-function parseAmountCents(amount: string): number | null {
+function parseLenientCents(amount: string): number | null {
   try {
     return parseAmountToCents(amount);
   } catch {
@@ -218,7 +218,7 @@ function parseOptionalCents(
   errorKey: "invalid_target" | "invalid_current_value",
 ): { cents: number | null } | { error: "invalid_target" | "invalid_current_value" } {
   if (amount === "") return { cents: null };
-  const cents = parseAmountCents(amount);
+  const cents = parseLenientCents(amount);
   if (cents === null || cents < 0) return { error: errorKey };
   return { cents };
 }
@@ -465,6 +465,7 @@ export type ContributionResult =
       ok: false;
       error:
         | "invalid_amount"
+        | "ambiguous_amount"
         | "goal_not_found"
         | "goal_inactive"
         | "member_not_found"
@@ -497,8 +498,11 @@ export async function addContribution(
   goalId: string,
   input: ContributionInput,
 ): Promise<ContributionResult> {
+  // Discriminated like movements: '1.234' asks for guidance instead of a
+  // generic rejection (shared lib/money-errors surface).
   const cents = parseAmountCents(input.amount);
-  if (cents === null || cents <= 0) return { ok: false, error: "invalid_amount" };
+  if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
+  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
 
   // Contribution + mirror commit together (R1): stats never diverge from
   // the savings ledger. Interest rows never pass through here.
@@ -617,7 +621,7 @@ export async function updateGoalValue(
     return { ok: false, error: "not_investment" };
   }
 
-  const cents = parseAmountCents(currentValue);
+  const cents = parseLenientCents(currentValue);
   if (cents === null || cents < 0) return { ok: false, error: "invalid_current_value" };
 
   await db.transaction(async (tx) => {

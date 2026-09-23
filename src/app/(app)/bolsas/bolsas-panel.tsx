@@ -12,6 +12,7 @@ import {
 import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
+import { RateBadge, ScopeBadge } from "@/components/badges";
 import {
   ActiveBadge,
   EditDetails,
@@ -38,29 +39,6 @@ interface Props {
   valueAction: BolsaAction;
   contributionAction: BolsaAction;
   markReviewedAction: BolsaAction;
-}
-
-/** "Común" / "Individual · {member}" badge, same pattern as the other panels. */
-function ScopeBadge({ goal }: { goal: GoalView }) {
-  return goal.scope === "common" ? (
-    <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
-      Común
-    </span>
-  ) : (
-    <span className="rounded-full bg-honey px-2 py-0.5 text-xs font-medium text-ink">
-      Individual · {goal.memberName ?? "?"}
-    </span>
-  );
-}
-
-/** Yield badge: annual rate with its mode — TNA (simple) / TEA (compound). */
-function RateBadge({ goal }: { goal: GoalView }) {
-  if (goal.annualRateBp === null || goal.kind !== "savings") return null;
-  return (
-    <span className="rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-ink">
-      {goal.accrualMode === "compound" ? "TEA" : "TNA"} {formatRatePercent(goal.annualRateBp)}%
-    </span>
-  );
 }
 
 /** Where the money is held + how much yield it generated so far. */
@@ -292,10 +270,10 @@ function BolsaCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium text-ink">{goal.name}</span>
-        <ScopeBadge goal={goal} />
+        <ScopeBadge scope={goal.scope} memberName={goal.memberName} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <RateBadge goal={goal} />
+        <RateBadge annualRateBp={goal.annualRateBp} mode={goal.accrualMode === "compound" ? "TEA" : "TNA"} />
       </div>
       {progress ? (
         <div className="flex flex-col gap-1.5">
@@ -371,7 +349,7 @@ function InvestmentCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium text-ink">{goal.name}</span>
-        <ScopeBadge goal={goal} />
+        <ScopeBadge scope={goal.scope} memberName={goal.memberName} />
       </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
@@ -625,7 +603,7 @@ function EditBolsaForm({
           <span className={goal.isActive ? "" : "text-muted"}>
             {goal.name}
           </span>
-          <ScopeBadge goal={goal} />
+          <ScopeBadge scope={goal.scope} memberName={goal.memberName} />
           <span className="text-sm font-normal text-muted">
             {formatCents(goal.netCents)}
           </span>

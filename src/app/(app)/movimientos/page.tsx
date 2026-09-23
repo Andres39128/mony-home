@@ -14,6 +14,7 @@ import {
   deleteMovementAction,
   updateMovementAction,
 } from "@/features/transactions/actions";
+import { catchUpRecurringMovements } from "@/features/recurring/catch-up";
 import MovementsTable from "@/features/transactions/movements-table";
 import NewMovementFab from "@/features/transactions/new-movement-fab";
 import FiltersSheet, { type ActiveFilter } from "@/components/filters-sheet";
@@ -60,6 +61,9 @@ export default async function MovimientosPage({
     listTransactionsPage(getDb(), filters, page, PAGE_SIZE),
     transactionTotals(getDb(), filters),
     movementFormOptions(),
+    // Lazy recurring materialization (cold-gated): new rows may join the
+    // list on the NEXT render, same as the savings/loans accrual reads.
+    catchUpRecurringMovements(getDb()),
   ]);
   const { rows, total, page: safePage } = result;
 

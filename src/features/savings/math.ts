@@ -9,11 +9,6 @@ import { percentage } from "@/lib/money";
 import { todayIso } from "@/lib/date";
 import { computeProgress, type Progress } from "@/features/budgets/progress";
 
-/** Net accumulation: deposits minus withdrawals (exact cents). */
-export function computeNetCents(depositsCents: number, withdrawalsCents: number): number {
-  return depositsCents - withdrawalsCents;
-}
-
 /**
  * Progress toward the target using the SHARED budgets math (one source of
  * truth for thresholds and divide-by-zero). No target → no bar (null).

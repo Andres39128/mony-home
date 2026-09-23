@@ -27,6 +27,7 @@ import BudgetLines from "@/features/analytics/charts/budget-lines";
 import { monthBounds, computeProgress } from "@/features/budgets/progress";
 import { getMonth } from "@/features/budgets/service";
 import { getPatrimony } from "@/features/savings/service";
+import { catchUpRecurringMovements } from "@/features/recurring/catch-up";
 import NewMovementFab, {
   QUICK_TILE_CLASS,
 } from "@/features/transactions/new-movement-fab";
@@ -185,6 +186,9 @@ export default async function DashboardPage({
       getMonth(getDb(), month),
       cumulativeBudgetVsActual(getDb(), Number(month.slice(0, 4)), filters),
       getPatrimony(getDb()),
+      // Lazy recurring materialization: cold-gated, so steady state pays one
+      // cheap SELECT (same read-path discipline as the accrual engines).
+      catchUpRecurringMovements(getDb()),
     ]);
 
   const donutData = buildDonutData(slices);
@@ -333,6 +337,18 @@ export default async function DashboardPage({
             <p className="mt-1 text-xs text-muted">
               de {formatCents(budgetTotals.plannedCents)} planificados
             </p>
+            {/* Alert affordance: any category over its plan gets a warn chip
+                linking to the budget screen (same palette as the bars). */}
+            {budgetMonth !== null && budgetMonth.overCount > 0 && (
+              <Link
+                href="/presupuesto"
+                className="mt-2 w-fit rounded-lg bg-danger-fill px-2 py-1 text-xs font-medium text-on-accent transition-colors hover:bg-danger-fill/80"
+              >
+                {budgetMonth.overCount === 1
+                  ? "1 categoría sobre presupuesto"
+                  : `${budgetMonth.overCount} categorías sobre presupuesto`}
+              </Link>
+            )}
           </KpiCard>
         </div>
 

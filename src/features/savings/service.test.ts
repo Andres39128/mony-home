@@ -9,7 +9,6 @@ import {
   addContribution,
   computeGoalProgress,
   computeInvestmentReturn,
-  computeNetCents,
   contributionSchema,
   createGoal,
   getPatrimony,
@@ -74,8 +73,7 @@ const deposit = (amount: string, date = "", memberId = ""): ContributionInput =>
 });
 
 describe("savings helpers (pure)", () => {
-  it("computes net, goal progress and deadline months", () => {
-    expect(computeNetCents(150000, 50000)).toBe(100000);
+  it("computes goal progress and deadline months", () => {
     expect(computeGoalProgress(100000, null)).toBeNull();
     expect(computeGoalProgress(750000, 1000000)).toMatchObject({
       pct: 75,
@@ -327,6 +325,11 @@ describe("savings goals CRUD (integration on PGlite)", () => {
     expect(await addContribution(appDb, member, row.id, deposit("abc"))).toEqual({
       ok: false,
       error: "invalid_amount",
+    });
+    // Shared guided path: '1.234' asks for disambiguation, not a guess.
+    expect(await addContribution(appDb, member, row.id, deposit("1.234"))).toEqual({
+      ok: false,
+      error: "ambiguous_amount",
     });
   });
 

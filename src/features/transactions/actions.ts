@@ -17,6 +17,10 @@ import {
   updateTransaction,
 } from "@/features/transactions/service";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import {
+  AMBIGUOUS_AMOUNT_MESSAGE,
+  INVALID_AMOUNT_MESSAGE,
+} from "@/lib/money-errors";
 
 /** FormState plus the category created inline from the movement form. */
 export interface InlineCategoryState extends FormState {
@@ -56,15 +60,10 @@ function idFrom(formData: FormData): string | null {
 
 function mapMovementError(error: string): FormState {
   if (error === "invalid_amount") {
-    return { fieldErrors: { amount: "El monto no es válido." } };
+    return { fieldErrors: { amount: INVALID_AMOUNT_MESSAGE } };
   }
   if (error === "ambiguous_amount") {
-    return {
-      fieldErrors: {
-        amount:
-          "Monto ambiguo: para miles escribe 1234 o 1.234,00; para centavos usa la coma (1,23).",
-      },
-    };
+    return { fieldErrors: { amount: AMBIGUOUS_AMOUNT_MESSAGE } };
   }
   if (error === "category_kind_mismatch") {
     return {

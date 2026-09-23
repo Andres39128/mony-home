@@ -8,7 +8,11 @@ import {
   setForMonth,
   type BudgetEntryInput,
 } from "@/features/budgets/service";
-import { parseAmountToCents } from "@/lib/money";
+import {
+  AMBIGUOUS_AMOUNT_MESSAGE,
+  INVALID_AMOUNT_MESSAGE,
+  parseAmountCents,
+} from "@/lib/money-errors";
 import { z } from "zod";
 import type { FormState } from "@/lib/form-state";
 
@@ -58,11 +62,9 @@ export async function setBudgetsAction(_prev: FormState, formData: FormData): Pr
     const raw = String(value).trim();
     // An untouched input means "no budget" (0), not a parse error.
     if (raw !== "") {
-      try {
-        parseAmountToCents(raw);
-      } catch {
-        fieldErrors[key] = "El monto no es válido.";
-      }
+      const cents = parseAmountCents(raw);
+      if (cents === "ambiguous_amount") fieldErrors[key] = AMBIGUOUS_AMOUNT_MESSAGE;
+      else if (cents === "invalid_amount") fieldErrors[key] = INVALID_AMOUNT_MESSAGE;
     }
     entries.push({ categoryId: key.slice(AMOUNT_PREFIX.length), amount: raw === "" ? "0" : raw });
   }

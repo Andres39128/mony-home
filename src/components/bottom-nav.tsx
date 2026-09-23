@@ -15,6 +15,7 @@ import {
   LayersIcon,
   LogoutIcon,
   PouchIcon,
+  RepeatIcon,
   SparklesIcon,
   TagIcon,
   UserIcon,
@@ -34,6 +35,7 @@ const TABS = [
 const MENU_LINKS = [
   { href: "/perfil", label: "Perfil", Icon: UserIcon },
   { href: "/prestamos", label: "Préstamos", Icon: CreditCardIcon },
+  { href: "/recurrentes", label: "Recurrentes", Icon: RepeatIcon },
   { href: "/asistente", label: "Asistente", Icon: SparklesIcon },
   { href: "/integrantes", label: "Integrantes", Icon: UsersIcon },
   { href: "/categorias", label: "Categorías", Icon: TagIcon },
