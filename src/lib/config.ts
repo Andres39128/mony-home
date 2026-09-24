@@ -24,8 +24,20 @@ const envSchema = z.object({
   ASSISTANT_DAILY_LIMIT: z.coerce.number().int().positive().default(8),
   /** Human-readable app name; later sent to OpenRouter as the X-Title attribution header. */
   APP_NAME: z.string().min(1).default("mony-home"),
-  /** Password (pre-hash) assigned to the seeded admin user by `npm run db:seed`. */
-  SEED_ADMIN_PASSWORD: z.string().min(1).default("changeme-on-first-login"),
+  /**
+   * Password (pre-hash) assigned to the seeded admin user by `npm run db:seed`.
+   * Optional (seeding is a manual step), but there is NO default: the old
+   * "changeme-on-first-login" placeholder is rejected explicitly so a
+   * forgotten variable can never ship a guessable credential.
+   */
+  SEED_ADMIN_PASSWORD: z
+    .string()
+    .min(8)
+    .optional()
+    .refine((value) => value !== "changeme-on-first-login", {
+      message:
+        'Refusing the placeholder password "changeme-on-first-login". Set a real SEED_ADMIN_PASSWORD (min 8 chars) before seeding.',
+    }),
   /**
    * Seed scope for `npm run db:seed`. `false` = production bootstrap: only
    * categories + the admin user. Anything else keeps full demo seeding.

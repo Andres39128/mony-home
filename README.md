@@ -49,8 +49,11 @@ the config with an invalid state throws an error naming the offending variable.
    - **Transaction pooler** URL (port `6543`) → `DATABASE_URL` (app + Vercel).
    - **Session/direct** URL (port `5432`) → `DIRECT_URL` (migrations).
 2. Apply the schema: `npm run db:migrate` (uses `DIRECT_URL` from `.env.local`).
-3. Bootstrap production data: `SEED_DEMO_DATA=false npm run db:seed` —
-   inserts the 13 categories and the single `admin` user only. Idempotent;
+3. Bootstrap production data: `SEED_DEMO_DATA=false SEED_ALLOW_PROD=yes
+   SEED_ADMIN_PASSWORD=<real-password> npm run db:seed` — inserts the 13
+   categories and the single `admin` user only. Seeding refuses to run in
+   production without `SEED_ALLOW_PROD=yes`, and `SEED_ADMIN_PASSWORD` has no
+   default anymore (the old changeme placeholder is rejected). Idempotent;
    re-running is safe.
 
 ### Backups

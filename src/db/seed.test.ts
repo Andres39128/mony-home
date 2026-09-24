@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { loadConfig } from "@/lib/config";
@@ -11,6 +11,10 @@ import { createTestDb } from "@/db/test-utils";
  * applied, proving both modes build a consistent, idempotent dataset.
  */
 
+/** Any ≥8-char password satisfies the schema (which no longer has a default). */
+const SEED_PASSWORD = "test-password-123";
+const seedConfig = () => loadConfig({ SEED_ADMIN_PASSWORD: SEED_PASSWORD });
+
 describe("seedDatabase", () => {
   let db: PgliteDatabase;
   let client: PGlite;
@@ -20,6 +24,7 @@ describe("seedDatabase", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     // PGlite holds a wasm instance; close it so vitest exits cleanly.
     await client.close();
   });
@@ -51,7 +56,7 @@ describe("seedDatabase", () => {
   };
 
   it("seeds full demo data when SEED_DEMO_DATA is unset (default)", async () => {
-    await seedDatabase(db, loadConfig({}));
+    await seedDatabase(db, seedConfig());
 
     const counts = await tableCounts();
     expect(counts.users.map((u) => u.username).sort()).toEqual(["admin", "andres", "maria"]);
@@ -72,8 +77,8 @@ describe("seedDatabase", () => {
   });
 
   it("is idempotent in demo mode (re-run does not duplicate rows)", async () => {
-    await seedDatabase(db, loadConfig({}));
-    await seedDatabase(db, loadConfig({}));
+    await seedDatabase(db, seedConfig());
+    await seedDatabase(db, seedConfig());
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(3);
@@ -88,7 +93,7 @@ describe("seedDatabase", () => {
   });
 
   it("seeds only categories + admin in production mode (SEED_DEMO_DATA=false)", async () => {
-    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false" }));
+    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false", SEED_ADMIN_PASSWORD: SEED_PASSWORD }));
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(1);
@@ -105,12 +110,35 @@ describe("seedDatabase", () => {
   });
 
   it("is idempotent in production mode (re-run does not duplicate rows)", async () => {
-    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false" }));
-    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false" }));
+    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false", SEED_ADMIN_PASSWORD: SEED_PASSWORD }));
+    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false", SEED_ADMIN_PASSWORD: SEED_PASSWORD }));
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(1);
     expect(counts.categories).toHaveLength(16);
     expect(counts.loans).toHaveLength(0);
+  });
+
+  it("refuses to seed in production without SEED_ALLOW_PROD=yes", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SEED_ALLOW_PROD", "");
+
+    await expect(seedDatabase(db, seedConfig())).rejects.toThrow(
+      "Refusing to seed in production without SEED_ALLOW_PROD=yes",
+    );
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("seeds in production when SEED_ALLOW_PROD=yes is set explicitly", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SEED_ALLOW_PROD", "yes");
+
+    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false", SEED_ADMIN_PASSWORD: SEED_PASSWORD }));
+    expect(await db.select().from(users)).toHaveLength(1);
+  });
+
+  it("refuses to seed without SEED_ADMIN_PASSWORD (no default anymore)", async () => {
+    await expect(seedDatabase(db, loadConfig({}))).rejects.toThrow(/SEED_ADMIN_PASSWORD/);
+    expect(await db.select().from(users)).toHaveLength(0);
   });
 });

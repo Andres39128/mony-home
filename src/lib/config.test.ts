@@ -10,6 +10,8 @@ describe("loadConfig", () => {
     expect(config.APP_NAME).toBe("mony-home");
     expect(config.DATABASE_URL).toBeUndefined();
     expect(config.LLM_API_KEY).toBeUndefined();
+    // Seeding is a manual step: no default admin password anymore.
+    expect(config.SEED_ADMIN_PASSWORD).toBeUndefined();
   });
 
   it("treats blank .env placeholders as unset (optional vars, defaults apply)", () => {
@@ -55,6 +57,19 @@ describe("loadConfig", () => {
     // "yes"/"1" fail loudly instead of coercing to a surprising boolean.
     expect(() => loadConfig({ SEED_DEMO_DATA: "yes" })).toThrowError(/SEED_DEMO_DATA/);
     expect(() => loadConfig({ SEED_DEMO_DATA: "1" })).toThrowError(/SEED_DEMO_DATA/);
+  });
+
+  it("accepts a real SEED_ADMIN_PASSWORD and rejects too-short values", () => {
+    expect(loadConfig({ SEED_ADMIN_PASSWORD: "real-password-9" }).SEED_ADMIN_PASSWORD).toBe(
+      "real-password-9",
+    );
+    expect(() => loadConfig({ SEED_ADMIN_PASSWORD: "short" })).toThrowError(/SEED_ADMIN_PASSWORD/);
+  });
+
+  it("rejects the old changeme placeholder for SEED_ADMIN_PASSWORD", () => {
+    expect(() => loadConfig({ SEED_ADMIN_PASSWORD: "changeme-on-first-login" })).toThrowError(
+      /SEED_ADMIN_PASSWORD[\s\S]*placeholder/,
+    );
   });
 });
 

@@ -30,6 +30,19 @@ function isoDay(year: number, month: number, day: number, lastDay: number): stri
 }
 
 export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void> {
+  // Guard: seeding is destructive-ish (writes users/categories); require an
+  // explicit escape hatch before it runs against a production database.
+  if (process.env.NODE_ENV === "production" && process.env.SEED_ALLOW_PROD !== "yes") {
+    throw new Error("Refusing to seed in production without SEED_ALLOW_PROD=yes");
+  }
+  // Guard: the admin password has NO default anymore — never seed a
+  // guessable credential just because the variable was forgotten.
+  if (config.SEED_ADMIN_PASSWORD === undefined) {
+    throw new Error(
+      "SEED_ADMIN_PASSWORD is required to seed (it has no default anymore). Set it to a real password (min 8 chars) and re-run.",
+    );
+  }
+
   // --- Admin user (always; username is unique; conflicts skipped) ---
   const passwordHash = await hash(config.SEED_ADMIN_PASSWORD);
   await db
