@@ -21,10 +21,14 @@ const HEADER = [
 
 /**
  * Quote a field only when needed (separator, quote or newline) and double
- * embedded quotes, per RFC 4180.
+ * embedded quotes, per RFC 4180. Before quoting, a leading formula trigger
+ * (= + - @ TAB CR — Excel/LibreOffice evaluate them as formulas) is
+ * neutralized with a single apostrophe prefix, so user-settable columns
+ * (nota, integrante) cannot inject spreadsheet formulas.
  */
 function csvField(value: string): string {
-  return /[",;\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  const neutralized = value.replace(/^([=+\-@\t\r])/, "'$1");
+  return /[",;\n\r]/.test(neutralized) ? `"${neutralized.replace(/"/g, '""')}"` : neutralized;
 }
 
 /** Cents → '1234,56' (es-AR decimal comma, no currency symbol). */

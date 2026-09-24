@@ -62,6 +62,24 @@ describe("movementsToCsv", () => {
     expect(csv).toContain('"Línea\nnueva"');
   });
 
+  it("neutralizes spreadsheet formula injection with an apostrophe prefix", () => {
+    const csv = movementsToCsv([
+      row({ note: '=WEBSERVICE("x")', memberName: "-2+3" }),
+      row({ memberName: "@SUM(A1)", note: "\ttexto" }),
+      row({ note: "\rcomando" }),
+    ]);
+
+    // Leading = + - @ TAB CR are formula triggers for Excel/LibreOffice.
+    // The quote-bearing value is ALSO RFC 4180-quoted on top of the prefix.
+    expect(csv).toContain("\"'=WEBSERVICE(\"\"x\"\")\"");
+    expect(csv).toContain("'-2+3");
+    expect(csv).toContain("'@SUM(A1)");
+    expect(csv).toContain("'\ttexto");
+    expect(csv).toContain("'\rcomando");
+    // The decimal-comma amount path is unchanged: still quoted, never prefixed.
+    expect(csv).toContain('"1234,56"');
+  });
+
   it("preserves the caller's row order (list order, no re-sorting)", () => {
     const lines = movementsToCsv([row({ date: "2026-09-20" }), row({ date: "2026-09-05" })])
       .slice(1)

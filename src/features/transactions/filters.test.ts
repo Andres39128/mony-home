@@ -51,6 +51,16 @@ describe("parseTransactionFilters", () => {
     expect(page).toBe(1);
   });
 
+  it("falls back to the default month on any non-YYYY-MM value", () => {
+    // Content-Disposition filename safety: CRLF / junk never reaches the
+    // export route — only a strict YYYY-MM passes through.
+    const bad = ['x"·', "x\r", "x\n", "2026-9", "09-2026", "2026-09-01", "septiembre"];
+    for (const month of bad) {
+      expect(parseTransactionFilters({ month }).filters.month).toBe(todayIso().slice(0, 7));
+    }
+    expect(parseTransactionFilters({ month: "2026-09" }).filters.month).toBe("2026-09");
+  });
+
   it("uses the fixed page size of 100", () => {
     expect(PAGE_SIZE).toBe(100);
   });

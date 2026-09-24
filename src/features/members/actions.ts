@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { getDb } from "@/db";
-import { ForbiddenError, requireAdmin } from "@/lib/auth";
+import { ForbiddenError, hashToken, requireAdmin } from "@/lib/auth";
+import { SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 import { requireUser } from "@/features/auth/session";
 import {
   changeOwnPassword,
@@ -140,15 +142,24 @@ export async function changeOwnPasswordAction(
     return { fieldErrors: { repeatPassword: "Las contraseñas no coinciden." } };
   }
 
+  // Revoke every OTHER session on rotation: the current cookie stays valid
+  // (its SHA-256 is the exception), any stolen token dies with the hash.
+  const currentToken = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   const result = await changeOwnPassword(
     getDb(),
     user.id,
     parsed.data.currentPassword,
     parsed.data.newPassword,
+    currentToken ? hashToken(currentToken) : undefined,
   );
   if (!result.ok) {
     if (result.error === "wrong_current_password") {
       return { fieldErrors: { currentPassword: "La contraseña actual no es correcta." } };
+    }
+    if (result.error === "locked") {
+      return {
+        error: "Cuenta bloqueada temporalmente. Esperá unos minutos y volvé a intentar.",
+      };
     }
     if (result.error === "invalid_password") {
       return {

@@ -20,7 +20,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
-import { and, count, eq, gt, lt } from "drizzle-orm";
+import { and, count, eq, gt, lt, ne } from "drizzle-orm";
 import { loginIpAttempts, sessions, users, type roleEnum } from "@/db/schema";
 import type { Database } from "@/db";
 
@@ -261,6 +261,27 @@ export async function destroySession(
   token: string,
 ): Promise<void> {
   await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
+}
+
+/**
+ * Revoke every session of a user — run after credential rotation so a stolen
+ * session cannot outlive a password change/reset (sessions carry no password
+ * binding). `exceptTokenHash` keeps the caller's current session alive on the
+ * self-service path; the admin reset path omits it to kill them all.
+ */
+export async function revokeUserSessions(
+  // Accepts the pooled client or a transaction handle (structural, no cast).
+  db: Pick<Database, "delete">,
+  userId: string,
+  exceptTokenHash?: string,
+): Promise<void> {
+  await db
+    .delete(sessions)
+    .where(
+      exceptTokenHash
+        ? and(eq(sessions.userId, userId), ne(sessions.tokenHash, exceptTokenHash))
+        : eq(sessions.userId, userId),
+    );
 }
 
 /** Thrown by requireAdmin when the current user lacks the admin role. */

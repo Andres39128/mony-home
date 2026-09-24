@@ -9,7 +9,7 @@ import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { users } from "@/db/schema";
 import type { Database } from "@/db";
-import { hashPassword, verifyPassword } from "@/lib/auth";
+import { hashPassword, verifyPassword, revokeUserSessions, MAX_FAILED_ATTEMPTS, LOCKOUT_MS } from "@/lib/auth";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 
 export interface MemberView {
@@ -114,6 +114,9 @@ export async function updateMember(
     .where(eq(users.id, id))
     .returning({ id: users.id });
   if (updated.length === 0) return { ok: false, error: "member_not_found" };
+  // A password reset kills ALL of the member's sessions: none is "current"
+  // from the admin's perspective, so every stolen token dies with the hash.
+  if (input.newPassword) await revokeUserSessions(db, id);
   return { ok: true };
 }
 
@@ -152,38 +155,78 @@ export const ownNameSchema = updateMemberSchema.pick({ name: true });
 
 export type OwnPasswordError =
   | "wrong_current_password"
+  | "locked"
   | "invalid_password"
   | "member_not_found";
 
 /**
  * Change the caller's own password: the current one is verified with the
  * same argon2 path as login, then the new one is hashed via hashPassword.
+ *
+ * The current-password check shares the login lockout machinery (users
+ * table): wrong guesses count toward failed_attempts and lock the account
+ * at MAX_FAILED_ATTEMPTS, so a stolen session cannot brute-force the old
+ * password outside login's protections. On success the password update and
+ * the revocation of every OTHER session commit in one transaction — the
+ * caller's own session survives via `exceptTokenHash` (SHA-256 of the raw
+ * cookie token).
  */
 export async function changeOwnPassword(
   db: Database,
   userId: string,
   currentPassword: string,
   newPassword: string,
+  exceptTokenHash?: string,
 ): Promise<{ ok: true } | { ok: false; error: OwnPasswordError }> {
   if (!ownPasswordSchema.shape.newPassword.safeParse(newPassword).success) {
     return { ok: false, error: "invalid_password" };
   }
 
-  const [user] = await db
-    .select({ passwordHash: users.passwordHash })
+  let [user] = await db
+    .select({
+      passwordHash: users.passwordHash,
+      failedAttempts: users.failedAttempts,
+      lockedUntil: users.lockedUntil,
+    })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
   if (!user) return { ok: false, error: "member_not_found" };
+
+  const nowDate = new Date();
+  if (user.lockedUntil) {
+    // Same rule as login: while locked, credentials are never verified —
+    // not even the correct one.
+    if (user.lockedUntil > nowDate) return { ok: false, error: "locked" };
+    // Lock expired: grant a fresh set of attempts before verifying again.
+    await db
+      .update(users)
+      .set({ failedAttempts: 0, lockedUntil: null })
+      .where(eq(users.id, userId));
+    user = { ...user, failedAttempts: 0, lockedUntil: null };
+  }
+
   if (!(await verifyPassword(user.passwordHash, currentPassword))) {
+    // Same lock rule as login: at MAX_FAILED_ATTEMPTS, lock the account.
+    const failedAttempts = user.failedAttempts + 1;
+    const lockedUntil =
+      failedAttempts >= MAX_FAILED_ATTEMPTS
+        ? new Date(nowDate.getTime() + LOCKOUT_MS)
+        : null;
+    await db.update(users).set({ failedAttempts, lockedUntil }).where(eq(users.id, userId));
     return { ok: false, error: "wrong_current_password" };
   }
 
-  // A password change also clears any lockout state (same as admin reset).
-  await db
-    .update(users)
-    .set({ passwordHash: await hashPassword(newPassword), failedAttempts: 0, lockedUntil: null })
-    .where(eq(users.id, userId));
+  // A password change clears any lockout state (same as admin reset) and
+  // revokes every OTHER session so a stolen one cannot survive the rotation.
+  const passwordHash = await hashPassword(newPassword);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({ passwordHash, failedAttempts: 0, lockedUntil: null })
+      .where(eq(users.id, userId));
+    await revokeUserSessions(tx, userId, exceptTokenHash);
+  });
   return { ok: true };
 }
 

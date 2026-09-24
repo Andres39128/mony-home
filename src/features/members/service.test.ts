@@ -17,7 +17,8 @@ import {
   updateMemberSchema,
   updateOwnName,
 } from "@/features/members/service";
-import { login } from "@/lib/auth";
+import { login, createSession, getSessionUser, hashToken, MAX_FAILED_ATTEMPTS } from "@/lib/auth";
+import { sessions } from "@/db/schema";
 
 /**
  * Members service suite: create/edit/deactivate/delete policies against
@@ -262,6 +263,96 @@ describe("members service (integration on PGlite)", () => {
       expect(await updateOwnName(appDb, created.member.id, "Nombre Nuevo")).toEqual({ ok: true });
       const members = await listMembers(appDb);
       expect(members.find((m) => m.id === created.member.id)?.name).toBe("Nombre Nuevo");
+    });
+  });
+
+  describe("session revocation on credential rotation", () => {
+    it("changeOwnPassword keeps only the caller's current session alive", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "rotapw" });
+      if (!created.ok) throw new Error("setup failed");
+      const current = await createSession(appDb, created.member.id);
+      const stolen = await createSession(appDb, created.member.id);
+
+      const result = await changeOwnPassword(
+        appDb,
+        created.member.id,
+        validInput.password,
+        "nueva-clave-77",
+        hashToken(current.token),
+      );
+
+      expect(result).toEqual({ ok: true });
+      // The current session row survives; every other one is gone.
+      const rows = await db.select().from(sessions);
+      expect(rows.map((r) => r.tokenHash)).toEqual([hashToken(current.token)]);
+      expect(await getSessionUser(appDb, current.token)).not.toBeNull();
+      expect(await getSessionUser(appDb, stolen.token)).toBeNull();
+      // Old password fails, new one works via the login path.
+      expect((await login(appDb, "rotapw", validInput.password)).ok).toBe(false);
+      expect((await login(appDb, "rotapw", "nueva-clave-77")).ok).toBe(true);
+    });
+
+    it("admin password reset revokes ALL sessions of the member", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "resetall" });
+      if (!created.ok) throw new Error("setup failed");
+      const first = await createSession(appDb, created.member.id);
+      const second = await createSession(appDb, created.member.id);
+
+      const result = await updateMember(appDb, created.member.id, {
+        name: created.member.name,
+        role: "member",
+        isActive: true,
+        newPassword: "otra-clave-11",
+      });
+
+      expect(result).toEqual({ ok: true });
+      const rows = await db.select().from(sessions).where(eq(sessions.userId, created.member.id));
+      expect(rows).toHaveLength(0);
+      expect(await getSessionUser(appDb, first.token)).toBeNull();
+      expect(await getSessionUser(appDb, second.token)).toBeNull();
+      expect((await login(appDb, "resetall", "otra-clave-11")).ok).toBe(true);
+    });
+  });
+
+  describe("current-password oracle throttle (shared login lockout)", () => {
+    it("locks the account after MAX wrong guesses and rejects even the correct password", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "oraculo" });
+      if (!created.ok) throw new Error("setup failed");
+
+      for (let i = 0; i < MAX_FAILED_ATTEMPTS; i++) {
+        expect(
+          await changeOwnPassword(appDb, created.member.id, "mala-clave", "nueva-clave-11"),
+        ).toEqual({ ok: false, error: "wrong_current_password" });
+      }
+      // Locked BEFORE verification: the correct current password is rejected.
+      expect(
+        await changeOwnPassword(appDb, created.member.id, validInput.password, "nueva-clave-11"),
+      ).toEqual({ ok: false, error: "locked" });
+
+      const [row] = await db.select().from(users).where(eq(users.id, created.member.id));
+      expect(row.lockedUntil).not.toBeNull();
+      // Shared mechanism: login with the CORRECT password is locked too.
+      expect(await login(appDb, "oraculo", validInput.password)).toEqual({
+        ok: false,
+        error: "locked",
+      });
+    });
+
+    it("success resets the failure counter and lock state", async () => {
+      const created = await createMember(appDb, { ...validInput, username: "resetea" });
+      if (!created.ok) throw new Error("setup failed");
+      await db
+        .update(users)
+        .set({ failedAttempts: MAX_FAILED_ATTEMPTS - 1, lockedUntil: null })
+        .where(eq(users.id, created.member.id));
+
+      expect(
+        await changeOwnPassword(appDb, created.member.id, validInput.password, "nueva-clave-22"),
+      ).toEqual({ ok: true });
+
+      const [row] = await db.select().from(users).where(eq(users.id, created.member.id));
+      expect(row.failedAttempts).toBe(0);
+      expect(row.lockedUntil).toBeNull();
     });
   });
 });

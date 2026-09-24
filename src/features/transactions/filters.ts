@@ -26,7 +26,12 @@ function single(params: RawParams, key: string): string | undefined {
 }
 
 export function parseTransactionFilters(params: RawParams): ListParams {
-  const month = single(params, "month") ?? todayIso().slice(0, 7);
+  const rawMonth = single(params, "month");
+  // Trust boundary: `month` reaches the DB query AND the CSV export's
+  // Content-Disposition filename. Anything but YYYY-MM (e.g. CRLF smuggled
+  // into the filename) falls back to the default — one shared point fixes
+  // the list page and the export route together.
+  const month = rawMonth && /^\d{4}-\d{2}$/.test(rawMonth) ? rawMonth : todayIso().slice(0, 7);
   const type = single(params, "type");
   const scope = single(params, "scope");
 
