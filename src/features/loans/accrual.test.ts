@@ -89,6 +89,27 @@ describe("catchUpInterest (integration on PGlite)", () => {
     expect(rows[0].note).toBe("Interés 12% TNA");
   });
 
+  it("treats 21:30 ART on the last day of a month as the OLD app-TZ month", async () => {
+    const loanId = await seedDecliningFixture(db, payerId, "Borde de mes");
+
+    // 2026-09-30 21:30 ART == 2026-10-01T00:30:00Z. On a UTC server the old
+    // server-local getMonth() already saw October and rolled the loan month
+    // early; the app-TZ helper must still count this instant as September.
+    const boundaryUtc = new Date("2026-10-01T00:30:00Z");
+    expect(await catchUpInterest(appDb, loanId, boundaryUtc)).toBe(1);
+    const rows = (await ledgerRows(db, loanId)).filter((r) => r.kind === "interest");
+    expect(rows.map((r) => [r.date, r.amountCents])).toEqual([["2026-09-01", 500]]);
+
+    // Crossing midnight ART (00:30 Oct 1) is what actually opens October.
+    const afterBoundary = new Date("2026-10-01T03:30:00Z");
+    expect(await catchUpInterest(appDb, loanId, afterBoundary)).toBe(1);
+    const all = (await ledgerRows(db, loanId)).filter((r) => r.kind === "interest");
+    expect(all.map((r) => [r.date, r.amountCents])).toEqual([
+      ["2026-09-01", 500],
+      ["2026-10-01", 505], // 50500 × 1% — October charge includes September's interest
+    ]);
+  });
+
   it("is idempotent: re-running with the same now inserts nothing", async () => {
     const loanId = await seedDecliningFixture(db, payerId, "Idempotente");
     const now = new Date("2026-11-05T10:00:00Z");

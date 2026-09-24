@@ -28,6 +28,13 @@ import { PGlite } from "@electric-sql/pglite";
 
 const CORE_TABLES = ["users", "transactions", "savings_goals"];
 
+/**
+ * BACKUP_VERIFY_STRICT=1 (CI): gh missing/unauthenticated exits 1 instead of
+ * 0 — a drill that never ran protects nothing. Default stays 0: locally, no
+ * gh is an environment limit, not a backup failure (manual steps printed).
+ */
+const STRICT = process.env.BACKUP_VERIFY_STRICT === "1";
+
 /** Manual steps printed when gh is unavailable (the drill exits 0 then). */
 const MANUAL_STEPS = `
 Manual restore check (README "Backups"):
@@ -223,7 +230,9 @@ async function main() {
   if (unavailable) {
     console.log("gh CLI is unavailable or not authenticated — cannot download the artifact.");
     console.log(MANUAL_STEPS);
-    process.exitCode = 0; // best-effort drill: no gh is an environment limit, not a backup failure
+    // best-effort drill by default; strict mode (CI) fails so a silently
+    // skipped drill can't pass the pipeline.
+    process.exitCode = STRICT ? 1 : 0;
     return;
   }
   if (!run) {

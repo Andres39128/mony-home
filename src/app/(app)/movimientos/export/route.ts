@@ -15,8 +15,9 @@ import { movementsToCsv } from "@/features/transactions/csv";
 export async function GET(request: Request) {
   await requireUser();
 
-  const url = new URL(request.url);
-  const { filters } = parseTransactionFilters(Object.fromEntries(url.searchParams));
+  // Same parsing as the page (URLSearchParams accepted directly): repeated
+  // params are treated as absent, never as "the last value wins".
+  const { filters } = parseTransactionFilters(new URL(request.url).searchParams);
   const rows = await listTransactions(getDb(), filters);
 
   return new Response(movementsToCsv(rows), {

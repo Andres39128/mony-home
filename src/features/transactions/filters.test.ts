@@ -61,6 +61,20 @@ describe("parseTransactionFilters", () => {
     expect(parseTransactionFilters({ month: "2026-09" }).filters.month).toBe("2026-09");
   });
 
+  it("reads URLSearchParams with page-identical repeat semantics", () => {
+    // The export route passes searchParams straight through. Object.fromEntries
+    // used to keep the LAST value of a repeated param while the page's single()
+    // treated repeats as absent — same URL, divergent list vs export.
+    const repeated = new URLSearchParams("month=2026-09&month=x");
+    expect(parseTransactionFilters(repeated).filters.month).toBe(todayIso().slice(0, 7));
+    expect(parseTransactionFilters(repeated)).toEqual(parseTransactionFilters({}));
+
+    const single = new URLSearchParams("month=2026-09&q=super&page=2");
+    expect(parseTransactionFilters(single).filters.month).toBe("2026-09");
+    expect(parseTransactionFilters(single).filters.q).toBe("super");
+    expect(parseTransactionFilters(single).page).toBe(2);
+  });
+
   it("uses the fixed page size of 100", () => {
     expect(PAGE_SIZE).toBe(100);
   });

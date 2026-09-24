@@ -25,26 +25,42 @@ function single(params: RawParams, key: string): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export function parseTransactionFilters(params: RawParams): ListParams {
-  const rawMonth = single(params, "month");
+/**
+ * Route-handler shape (URLSearchParams) → page shape. A repeated param keeps
+ * ALL its values as an array so `single()` discards it exactly like it does
+ * for a page — Object.fromEntries would instead take the LAST value, letting
+ * one URL list unfiltered but export filtered.
+ */
+function fromSearchParams(params: URLSearchParams): RawParams {
+  const out: RawParams = {};
+  for (const key of new Set(params.keys())) {
+    const values = params.getAll(key);
+    out[key] = values.length > 1 ? values : values[0];
+  }
+  return out;
+}
+
+export function parseTransactionFilters(params: RawParams | URLSearchParams): ListParams {
+  const raw = params instanceof URLSearchParams ? fromSearchParams(params) : params;
+  const rawMonth = single(raw, "month");
   // Trust boundary: `month` reaches the DB query AND the CSV export's
   // Content-Disposition filename. Anything but YYYY-MM (e.g. CRLF smuggled
   // into the filename) falls back to the default — one shared point fixes
   // the list page and the export route together.
   const month = rawMonth && /^\d{4}-\d{2}$/.test(rawMonth) ? rawMonth : todayIso().slice(0, 7);
-  const type = single(params, "type");
-  const scope = single(params, "scope");
+  const type = single(raw, "type");
+  const scope = single(raw, "scope");
 
   return {
     filters: {
       month,
-      categoryId: single(params, "categoryId"),
-      memberId: single(params, "memberId"),
-      groupId: single(params, "groupId"),
+      categoryId: single(raw, "categoryId"),
+      memberId: single(raw, "memberId"),
+      groupId: single(raw, "groupId"),
       type: type === "income" || type === "expense" ? type : undefined,
       scope: scope === "individual" || scope === "common" ? scope : undefined,
-      q: single(params, "q")?.trim() || undefined,
+      q: single(raw, "q")?.trim() || undefined,
     },
-    page: Math.max(1, Number.parseInt(single(params, "page") ?? "1", 10) || 1),
+    page: Math.max(1, Number.parseInt(single(raw, "page") ?? "1", 10) || 1),
   };
 }

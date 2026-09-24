@@ -20,16 +20,12 @@ import { loanPayments, loans } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import { formatRatePercent } from "@/features/savings/math";
+import { monthIndexOfDate } from "@/lib/date";
 
 /** Months since year 0 for a 'YYYY-MM-DD' string — comparable and add/subtract friendly. */
 function monthIndexOfIso(iso: string): number {
   const [year, month] = iso.split("-").map(Number);
   return year * 12 + (month - 1);
-}
-
-/** Same, for a Date (local timezone — same clock the forms use). */
-function monthIndexOfDate(date: Date): number {
-  return date.getFullYear() * 12 + date.getMonth();
 }
 
 /** First day of the month index as 'YYYY-MM-01'. */

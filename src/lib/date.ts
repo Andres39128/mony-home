@@ -17,3 +17,10 @@ export function todayIso(now = new Date()): string {
     day: "2-digit",
   }).format(now);
 }
+
+/** Months since year 0 of a Date instant, in the APP timezone — accrual
+ * engines compare months on the household's calendar, never the server's. */
+export function monthIndexOfDate(date: Date): number {
+  const [year, month] = todayIso(date).split("-").map(Number);
+  return year * 12 + (month - 1);
+}

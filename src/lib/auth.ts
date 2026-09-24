@@ -133,9 +133,17 @@ export async function login(
  */
 export const UNKNOWN_IP = "unknown";
 
-/** Extract the client IP from a headers map (as `next/headers` provides it). */
+/**
+ * Extract the client IP from a headers map (as `next/headers` provides it).
+ *
+ * Deployment assumption: Vercel OVERWRITES x-forwarded-for, so the FIRST
+ * entry is platform-set and trustworthy — anything the client spoofed is
+ * discarded before it reaches the app. Self-hosting behind an APPENDING
+ * proxy instead? Take the LAST hop (or make it a TRUSTED_PROXY_HOPS = 1
+ * configurable index): rightmost entries are the ones your own proxy
+ * appended, while client-supplied values sit at the front of the list.
+ */
 export function ipFromHeaders(headers: Headers): string {
-  // Vercel (and standard proxies) put the client first in x-forwarded-for.
   const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || UNKNOWN_IP;
 }
@@ -156,6 +164,10 @@ export async function loginWithIpGuard(
   password: string,
   now: Clock = defaultClock,
 ): Promise<LoginResult> {
+  // Accepted race: concurrent logins can all pass the count below the cap
+  // before any of their inserts commit, so MAX_IP_ATTEMPTS can overshoot
+  // slightly under concurrency. Bounded damage (argon2 cost + per-account
+  // lockout still apply) — not worth a transaction around every login.
   const windowStart = new Date(now().getTime() - IP_WINDOW_MS);
   const [attempts] = await db
     .select({ attempts: count() })
