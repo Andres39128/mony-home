@@ -33,6 +33,10 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
  * - Money is ALWAYS integer cents (never floats, never numeric columns),
  *   stored as bigint: int4 caps at ~$21M ARS in cents, which real
  *   household savings targets already exceed.
+ *   Runtime contract: `bigint({ mode: "number" })` is safe — 2^53 cents
+ *   ceiling, guarded per-value by `Number.isSafeInteger` in `src/lib/money.ts`;
+ *   SQL SUM aggregates are assumed below that ceiling (they de-stringify via
+ *   `Number(...)`).
  * - "común" scope is stored as 'common'.
  */
 

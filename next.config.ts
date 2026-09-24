@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
           },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           // camera=(self): receipt capture scans codes/takes photos in-app.
           { key: "Permissions-Policy", value: "camera=(self)" },
