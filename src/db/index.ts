@@ -1,3 +1,4 @@
+import "server-only";
 /**
  * Application database client (postgres.js) — request-time singleton.
  *
@@ -29,10 +30,15 @@ function createDb(): { db: Database; client: postgres.Sql } {
   // Pooled Supabase (Supavisor) caps clients hard (session pool_size: 15), and
   // serverless lambdas freeze while holding sockets, so the pool must stay
   // small and release idle connections instead of using the default max: 10.
+  // ponytail: ceiling — max:3 per lambda × N concurrent lambdas bounds the
+  // total pooler clients (Supabase/Supavisor caps clients). If exhaustion ever
+  // appears, lower max or serialize reads per request — do not raise blindly.
   const client = postgres(config.DATABASE_URL, {
     max: 3,
     idle_timeout: 20,
     connect_timeout: 10,
+    // Supavisor transaction-mode pooler (port 6543) breaks named prepared statements.
+    prepare: false,
   });
   return { db: drizzle(client, { schema }), client };
 }
