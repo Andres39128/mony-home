@@ -14,7 +14,7 @@ export default async function RecurrentesPage() {
   const user = await requireUser();
   const [recurring, options] = await Promise.all([
     listRecurring(getDb()),
-    movementFormOptions(),
+    movementFormOptions(getDb()),
   ]);
 
   return (

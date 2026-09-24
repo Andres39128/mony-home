@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import { todayIso } from "@/lib/date";
 import { movementFormOptions } from "@/features/transactions/form-options";
@@ -16,7 +17,7 @@ import MovementForm from "@/features/transactions/movement-form";
  */
 export default async function NuevoMovimientoPage() {
   const user = await requireUser();
-  const options = await movementFormOptions();
+  const options = await movementFormOptions(getDb());
 
   return (
     <section className="flex flex-col gap-6">

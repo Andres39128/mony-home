@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import type { Database } from "@/db";
 import { listCategories, type CategoryView } from "@/features/categories/service";
 import { listExpenseGroups, type ExpenseGroupView } from "@/features/expense-groups/service";
 import { listMembers } from "@/features/members/service";
@@ -10,11 +10,11 @@ export interface MovementFormOptions {
   groups: ExpenseGroupView[];
 }
 
-export async function movementFormOptions(): Promise<MovementFormOptions> {
+export async function movementFormOptions(db: Database): Promise<MovementFormOptions> {
   const [categories, members, groups] = await Promise.all([
-    listCategories(getDb()),
-    listMembers(getDb()),
-    listExpenseGroups(getDb()),
+    listCategories(db),
+    listMembers(db),
+    listExpenseGroups(db),
   ]);
   return {
     categories,

@@ -18,6 +18,7 @@ import {
   listTransactionsPage,
   movementSchema,
   createTransaction,
+  getReceiptFile,
   getTransaction,
   listTransactions,
   quickMovementSchema,
@@ -586,6 +587,29 @@ describe("transactions service (integration on PGlite)", () => {
       const totalsCompleted = await transactionTotals(appDb, { month: MONTH });
       expect(totalsCompleted.expenseCents).toBe(totalsPending.expenseCents + 500_000);
       expect(totalsCompleted.incomeCents).toBe(totalsPending.incomeCents);
+    });
+
+    it("getReceiptFile returns it to the owner, hides it from other members, admins override", async () => {
+      // Ana's quick-capture receipt from the first test of this block.
+      const [row] = await db
+        .select({ id: movementReceipts.id })
+        .from(movementReceipts)
+        .innerJoin(transactions, eq(movementReceipts.transactionId, transactions.id))
+        .where(eq(transactions.memberId, anaId))
+        .limit(1);
+
+      const own = await getReceiptFile(appDb, ana, row.id);
+      expect(own).not.toBeNull();
+      expect(own?.mimeType).toBe("image/jpeg");
+      expect(Array.from(own?.bytes ?? [])).toEqual(JPEG_HEAD);
+
+      // Foreign member: same answer as a missing receipt (existence never leaks).
+      expect(await getReceiptFile(appDb, mate, row.id)).toBeNull();
+
+      // Admin override + unknown id.
+      const adminCopy = await getReceiptFile(appDb, admin, row.id);
+      expect(adminCopy?.mimeType).toBe("image/jpeg");
+      expect(await getReceiptFile(appDb, admin, GHOST)).toBeNull();
     });
 
     it("rejects oversized, wrong-typed and fake-byte receipts with typed errors", async () => {

@@ -65,7 +65,7 @@ export default async function MovimientosPage({
   const [result, totals, options] = await Promise.all([
     listTransactionsPage(getDb(), filters, page, PAGE_SIZE),
     transactionTotals(getDb(), filters),
-    movementFormOptions(),
+    movementFormOptions(getDb()),
   ]);
   const { rows, total, page: safePage } = result;
 

@@ -259,6 +259,31 @@ export async function getTransaction(
   return rows[0] ?? null;
 }
 
+/**
+ * Receipt bytes for the API route: returns the stored image and its declared
+ * MIME type, or null when the receipt is missing OR not owned — a member may
+ * only read their own movement's receipt, an admin any (same rule 6 as
+ * edit/delete). Null for both cases so existence never leaks.
+ */
+export async function getReceiptFile(
+  db: Database,
+  user: SessionUser,
+  id: string,
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; mimeType: string } | null> {
+  const [row] = await db
+    .select({
+      bytes: movementReceipts.bytes,
+      mimeType: movementReceipts.mimeType,
+      memberId: transactions.memberId,
+    })
+    .from(movementReceipts)
+    .innerJoin(transactions, eq(movementReceipts.transactionId, transactions.id))
+    .where(eq(movementReceipts.id, id))
+    .limit(1);
+  if (!row || (user.role !== "admin" && row.memberId !== user.id)) return null;
+  return { bytes: new Uint8Array(row.bytes), mimeType: row.mimeType };
+}
+
 export interface TransactionTotals {
   incomeCents: number;
   expenseCents: number;

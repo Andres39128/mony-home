@@ -186,7 +186,7 @@ export default async function DashboardPage({
 
   const [options, totals, slices, monthlyRows, budgetMonth, cumulativeRows, patrimony] =
     await Promise.all([
-      movementFormOptions(),
+      movementFormOptions(getDb()),
       transactionTotals(getDb(), filters),
       expensesByCategory(getDb(), filters),
       monthlyTotals(getDb(), month, DEFAULT_MONTHS_BACK, filters),
