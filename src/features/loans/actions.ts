@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
 import {
@@ -18,12 +17,6 @@ import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar préstamos.";
-
-/** Loan and payment mutations both change /prestamos and the dashboard KPI. */
-function revalidateLoans(): void {
-  revalidatePath("/prestamos");
-  revalidatePath("/");
-}
 
 function idFrom(formData: FormData): string | null {
   const id = formData.get("id");
@@ -80,8 +73,6 @@ export async function createLoanAction(
 
   const result = await createLoan(getDb(), guard.user, parsed.data);
   if (!result.ok) return mapLoanError(result.error);
-
-  revalidateLoans();
   return { ok: true };
 }
 
@@ -100,8 +91,6 @@ export async function updateLoanAction(
 
   const result = await updateLoan(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapLoanError(result.error);
-
-  revalidateLoans();
   return { ok: true };
 }
 
@@ -117,8 +106,6 @@ export async function toggleLoanAction(
 
   const result = await toggleLoanActive(getDb(), guard.user, id);
   if (!result.ok) return mapLoanError(result.error);
-
-  revalidateLoans();
   return { ok: true };
 }
 
@@ -134,8 +121,6 @@ export async function deleteLoanAction(
 
   const result = await removeLoan(getDb(), guard.user, id);
   if (!result.ok) return mapLoanError(result.error);
-
-  revalidateLoans();
   return { ok: true };
 }
 
@@ -156,8 +141,6 @@ export async function updateOutstandingAction(
 
   const result = await updateOutstanding(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapLoanError(result.error);
-
-  revalidateLoans();
   return { ok: true };
 }
 
@@ -200,7 +183,5 @@ export async function addLoanPaymentAction(
     }
     return { error: "No tenés permiso para registrar ese pago." };
   }
-
-  revalidateLoans();
   return { ok: true };
 }

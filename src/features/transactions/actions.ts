@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
@@ -93,11 +92,10 @@ function mapMovementError(error: string): FormState {
   return { error: "No se pudo guardar el movimiento." };
 }
 
-/** Revalidate every surface that shows movements (list, filters, dashboard). */
-function revalidateMovements(): void {
-  revalidatePath("/movimientos");
-  revalidatePath("/");
-}
+// NOTE: pages render dynamically (auth reads cookies() on every request), so
+// every mutation is already reflected on the next render — revalidatePath was
+// a no-op and all such calls were removed app-wide. If caching (use cache /
+// PPR) lands, reintroduce a centralized revalidation surface map then.
 
 export async function createMovementAction(
   _prev: FormState,
@@ -114,7 +112,6 @@ export async function createMovementAction(
     const result = await createQuickTransaction(getDb(), user, parsed.data);
     if (!result.ok) return mapMovementError(result.error);
 
-    revalidateMovements();
     return { ok: true };
   }
 
@@ -123,8 +120,6 @@ export async function createMovementAction(
 
   const result = await createTransaction(getDb(), user, parsed.data);
   if (!result.ok) return mapMovementError(result.error);
-
-  revalidateMovements();
   return { ok: true };
 }
 
@@ -142,8 +137,6 @@ export async function updateMovementAction(
 
   const result = await updateTransaction(getDb(), user, id, parsed.data);
   if (!result.ok) return mapMovementError(result.error);
-
-  revalidateMovements();
   return { ok: true };
 }
 
@@ -175,8 +168,6 @@ export async function deleteMovementAction(
       ? { error: "El movimiento ya no existe." }
       : mapMovementError(result.error);
   }
-
-  revalidateMovements();
   return { ok: true };
 }
 
@@ -206,6 +197,5 @@ export async function createCategoryInlineAction(
       : { error: "No se pudo crear la categoría." };
   }
 
-  revalidateMovements();
   return { ok: true, categoryId: result.id, categoryName: parsed.data.name };
 }

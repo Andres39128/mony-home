@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
 import {
@@ -18,12 +17,6 @@ import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar bolsas.";
-
-/** Goal and contribution mutations both change /bolsas and the dashboard KPI. */
-function revalidateSavings(): void {
-  revalidatePath("/bolsas");
-  revalidatePath("/");
-}
 
 function idFrom(formData: FormData): string | null {
   const id = formData.get("id");
@@ -83,8 +76,6 @@ export async function createGoalAction(
 
   const result = await createGoal(getDb(), guard.user, parsed.data);
   if (!result.ok) return mapGoalError(result.error);
-
-  revalidateSavings();
   return { ok: true };
 }
 
@@ -103,8 +94,6 @@ export async function updateGoalAction(
 
   const result = await updateGoal(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapGoalError(result.error);
-
-  revalidateSavings();
   return { ok: true };
 }
 
@@ -120,8 +109,6 @@ export async function toggleGoalAction(
 
   const result = await toggleGoalActive(getDb(), guard.user, id);
   if (!result.ok) return mapGoalError(result.error);
-
-  revalidateSavings();
   return { ok: true };
 }
 
@@ -137,8 +124,6 @@ export async function deleteGoalAction(
 
   const result = await removeGoal(getDb(), guard.user, id);
   if (!result.ok) return mapGoalError(result.error);
-
-  revalidateSavings();
   return { ok: true };
 }
 
@@ -167,8 +152,6 @@ export async function updateGoalValueAction(
     }
     return mapGoalError(result.error);
   }
-
-  revalidateSavings();
   return { ok: true };
 }
 
@@ -212,8 +195,6 @@ export async function addContributionAction(
     }
     return { error: "No tenés permiso para registrar ese aporte." };
   }
-
-  revalidateSavings();
   return { ok: true };
 }
 
@@ -232,7 +213,5 @@ export async function markRateReviewedAction(
 
   const result = await markRateReviewed(getDb(), guard.user);
   if (!result.ok) return mapGoalError(result.error);
-
-  revalidateSavings();
   return { ok: true };
 }

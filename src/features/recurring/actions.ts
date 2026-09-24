@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { adminGuard } from "@/features/auth/session";
 import {
@@ -14,13 +13,6 @@ import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar los recurrentes.";
-
-/** Materialized rows land on /movimientos and move the dashboard totals. */
-function revalidateRecurring(): void {
-  revalidatePath("/recurrentes");
-  revalidatePath("/movimientos");
-  revalidatePath("/");
-}
 
 function idFrom(formData: FormData): string | null {
   const id = formData.get("id");
@@ -71,8 +63,6 @@ export async function createRecurringAction(
 
   const result = await createRecurring(getDb(), guard.user, parsed.data);
   if (!result.ok) return mapRecurringError(result.error);
-
-  revalidateRecurring();
   return { ok: true };
 }
 
@@ -91,8 +81,6 @@ export async function updateRecurringAction(
 
   const result = await updateRecurring(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapRecurringError(result.error);
-
-  revalidateRecurring();
   return { ok: true };
 }
 
@@ -108,8 +96,6 @@ export async function toggleRecurringAction(
 
   const result = await toggleRecurringActive(getDb(), guard.user, id);
   if (!result.ok) return mapRecurringError(result.error);
-
-  revalidateRecurring();
   return { ok: true };
 }
 
@@ -125,7 +111,5 @@ export async function deleteRecurringAction(
 
   const result = await removeRecurring(getDb(), guard.user, id);
   if (!result.ok) return mapRecurringError(result.error);
-
-  revalidateRecurring();
   return { ok: true };
 }
