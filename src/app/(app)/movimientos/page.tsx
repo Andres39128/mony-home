@@ -57,13 +57,15 @@ export default async function MovimientosPage({
 
   const { filters, page } = parseTransactionFilters(params);
 
+  // Lazy recurring materialization BEFORE the parallel reads so the rows it
+  // creates join THIS render's list and totals (no torn first render).
+  // Cold-gated: steady state pays one cheap SELECT.
+  await catchUpRecurringMovements(getDb());
+
   const [result, totals, options] = await Promise.all([
     listTransactionsPage(getDb(), filters, page, PAGE_SIZE),
     transactionTotals(getDb(), filters),
     movementFormOptions(),
-    // Lazy recurring materialization (cold-gated): new rows may join the
-    // list on the NEXT render, same as the savings/loans accrual reads.
-    catchUpRecurringMovements(getDb()),
   ]);
   const { rows, total, page: safePage } = result;
 

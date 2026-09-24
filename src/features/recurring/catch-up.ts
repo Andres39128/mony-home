@@ -29,7 +29,7 @@
  * opened — steady-state reads pay exactly one cheap query.
  */
 import { eq } from "drizzle-orm";
-import { recurringMovements, transactions } from "@/db/schema";
+import { categories, recurringMovements, transactions, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { todayIso } from "@/lib/date";
 
@@ -113,17 +113,39 @@ async function materializeOne(db: Database, id: string, today: string): Promise<
   return db.transaction(async (tx) => {
     // Lock the row: concurrent view requests serialize here, so the loser
     // re-reads last_materialized_month after the winner committed and no-ops.
-    const [row] = await tx
-      .select()
+    // The joins only read isActive flags; the lock stays on THIS row.
+    const [found] = await tx
+      .select({
+        recurring: recurringMovements,
+        categoryActive: categories.isActive,
+        memberActive: users.isActive,
+      })
       .from(recurringMovements)
+      .innerJoin(categories, eq(categories.id, recurringMovements.categoryId))
+      .innerJoin(users, eq(users.id, recurringMovements.memberId))
       .where(eq(recurringMovements.id, id))
       .limit(1)
-      .for("update");
-    if (!row || !row.isActive) return 0;
+      .for("update", { of: recurringMovements });
+    if (!found || !found.recurring.isActive) return 0;
+    const row = found.recurring;
     if (!isPending(row, today)) return 0;
 
-    const baseMonth = baseMonthFor(row);
     const target = targetMonthFor(row, today);
+
+    // FK RESTRICT blocks DELETING a referenced category/member, but not
+    // DEACTIVATING them — and budgets only count active categories, so
+    // materializing would create spend invisible to the budget. Skip the
+    // inserts but advance the pointer anyway: no silent backfill if the
+    // category/member is reactivated later.
+    if (!found.categoryActive || !found.memberActive) {
+      await tx
+        .update(recurringMovements)
+        .set({ lastMaterializedMonth: monthStartIso(target) })
+        .where(eq(recurringMovements.id, id));
+      return 0;
+    }
+
+    const baseMonth = baseMonthFor(row);
     const values = [];
     for (let month = baseMonth + 1; month <= target; month++) {
       values.push({

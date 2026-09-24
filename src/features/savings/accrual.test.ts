@@ -314,4 +314,76 @@ describe("catchUpInterest — daily engine (integration on PGlite)", () => {
     expect(patrimonyGoal.valueCents).toBe(listed.netCents);
     expect(patrimonyGoal.valueCents).toBeGreaterThan(100_000);
   });
+
+  it("recovers from a 23505 on the bulk insert: savepoint rollback + day-by-day replay", async () => {
+    const goal = await insertGoal(db, {
+      name: "Carrera",
+      annualRateBp: 1200,
+      accrualMode: "simple",
+      createdAt: new Date("2026-08-15T12:00:00Z"),
+    });
+    await db.insert(savingsContributions).values({
+      goalId: goal.id,
+      memberId: depositorId,
+      kind: "deposit",
+      amountCents: 100_000,
+      date: "2026-08-20",
+    });
+
+    // A pre-inserted duplicate can't exist in the pending window (any interest
+    // row advances the accrual base past itself), so the racing writer is
+    // simulated where it actually races: INSIDE the engine's transaction, its
+    // duplicate lands right before the multi-row insert executes — the exact
+    // bypassed-lock window the recovery path exists for.
+    const realTransaction = client.transaction.bind(client);
+    (client as unknown as Record<string, unknown>).transaction = (
+      cb: (tx: unknown) => unknown,
+    ) =>
+      realTransaction(async (pgTx) => {
+        const rawQuery = (pgTx as { query: (...args: unknown[]) => Promise<unknown> }).query.bind(
+          pgTx,
+        );
+        let raced = false;
+        (pgTx as unknown as Record<string, unknown>).query = async (
+          sql: unknown,
+          ...rest: unknown[]
+        ) => {
+          const text = typeof sql === "string" ? sql : "";
+          if (
+            !raced &&
+            text.includes('insert into "savings_contributions"') &&
+            text.includes("), (")
+          ) {
+            raced = true;
+            // The bypassing writer covers 08-22 while the engine is mid-flight.
+            await rawQuery(
+              'insert into "savings_contributions" ("goal_id", "member_id", "kind", "amount_cents", "date", "note") values ($1, $2, $3, $4, $5, $6)',
+              [goal.id, null, "interest", Math.round(100_000 * SIMPLE_DAILY), "2026-08-22", DAILY_NOTE],
+            );
+          }
+          return rawQuery(sql, ...rest);
+        };
+        return cb(pgTx);
+      });
+
+    try {
+      // No 25P02 explosion: the savepoint keeps the outer transaction usable
+      // and the day-by-day replay lands 08-21 and 08-23 while keeping the
+      // racer's 08-22 row.
+      await catchUpInterest(appDb, goal.id, new Date("2026-08-24T12:00:00Z"));
+    } finally {
+      (client as unknown as Record<string, unknown>).transaction = realTransaction;
+    }
+
+    const rows = (await interestRows(db, goal.id)).filter((r) => r.kind === "interest");
+    expect(rows.map((r) => [r.date, r.amountCents])).toEqual([
+      ["2026-08-21", Math.round(100_000 * SIMPLE_DAILY)],
+      ["2026-08-22", Math.round(100_000 * SIMPLE_DAILY)],
+      ["2026-08-23", Math.round(100_000 * SIMPLE_DAILY)],
+    ]);
+
+    // Idempotent: a re-run with the same now inserts nothing more.
+    expect(await catchUpInterest(appDb, goal.id, new Date("2026-08-24T12:00:00Z"))).toBe(0);
+    expect((await interestRows(db, goal.id)).filter((r) => r.kind === "interest")).toHaveLength(3);
+  });
 });

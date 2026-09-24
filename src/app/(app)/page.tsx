@@ -177,6 +177,13 @@ export default async function DashboardPage({
   if (filters.categoryId) baseParams.set("categoryId", filters.categoryId);
   if (filters.groupId) baseParams.set("groupId", filters.groupId);
 
+  // Lazy recurring materialization BEFORE the parallel reads: movements it
+  // creates must be visible to THIS render's totals and charts, or one render
+  // could disagree with itself (torn first render of a month). Cold-gated, so
+  // steady state pays one cheap SELECT (same read-path discipline as the
+  // accrual engines).
+  await catchUpRecurringMovements(getDb());
+
   const [options, totals, slices, monthlyRows, budgetMonth, cumulativeRows, patrimony] =
     await Promise.all([
       movementFormOptions(),
@@ -186,9 +193,6 @@ export default async function DashboardPage({
       getMonth(getDb(), month),
       cumulativeBudgetVsActual(getDb(), Number(month.slice(0, 4)), filters),
       getPatrimony(getDb()),
-      // Lazy recurring materialization: cold-gated, so steady state pays one
-      // cheap SELECT (same read-path discipline as the accrual engines).
-      catchUpRecurringMovements(getDb()),
     ]);
 
   const donutData = buildDonutData(slices);

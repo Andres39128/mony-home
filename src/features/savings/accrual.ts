@@ -233,12 +233,18 @@ async function accrueGoal(
 
   if (pending.length === 0) return 0;
 
+  // Savepoint wrapper: the unique index backs the invariant even if a writer
+  // bypassed the row lock. The savepoint is created BEFORE the statement, so
+  // a 23505 rolls back to it and the outer transaction stays usable (loans
+  // accrual precedent — a bare insert here would abort the tx and the
+  // recovery below could never run).
   try {
-    await db.insert(savingsContributions).values(pending);
+    await db.transaction(async (nested) => {
+      await nested.insert(savingsContributions).values(pending);
+    });
   } catch (error) {
     // A writer that bypassed the row lock covered (part of) this window:
     // replay day by day so the unique index keeps exactly one row per day.
-    // The savepoint wrapper keeps the transaction usable after the conflict.
     if (!hasPgError(error, "23505")) throw error;
     for (const row of pending) {
       try {

@@ -213,4 +213,69 @@ describe("catchUpRecurringMovements (integration on PGlite)", () => {
     expect(inserted).toBe(0);
     expect(count()).toBe(0);
   });
+
+  it("deactivated category: skips materialization, advances the pointer, no backfill on reactivation", async () => {
+    const [inactiveCategory] = await db
+      .insert(categories)
+      .values({ name: "Categoría baja", kind: "expense" })
+      .returning();
+    const recurring = await insertRecurring({
+      name: "Con categoría baja",
+      categoryId: inactiveCategory.id,
+      createdAt: new Date("2026-06-10T12:00:00Z"),
+    });
+    await db
+      .update(categories)
+      .set({ isActive: false })
+      .where(eq(categories.id, inactiveCategory.id));
+    const rowsFor = async () =>
+      db.select().from(transactions).where(eq(transactions.recurringId, recurring.id));
+
+    // Pending months exist, but nothing materializes while the category is off.
+    await catchUpRecurringMovements(appDb, new Date("2026-09-10T12:00:00Z"));
+    expect(await rowsFor()).toHaveLength(0);
+    const [pointer] = await db
+      .select({ last: recurringMovements.lastMaterializedMonth })
+      .from(recurringMovements)
+      .where(eq(recurringMovements.id, recurring.id));
+    expect(pointer.last).toBe("2026-09-01"); // advanced anyway
+
+    // Reactivating covers only FUTURE months: Sep stays skipped (decision:
+    // no silent backfill), Oct materializes.
+    await db
+      .update(categories)
+      .set({ isActive: true })
+      .where(eq(categories.id, inactiveCategory.id));
+    await catchUpRecurringMovements(appDb, new Date("2026-10-10T12:00:00Z"));
+    const resumedRows = await rowsFor();
+    expect(resumedRows.map((row) => row.date)).toEqual(["2026-10-05"]);
+  });
+
+  it("deactivated member: skips materialization and advances the pointer", async () => {
+    const [ghost] = await db
+      .insert(users)
+      .values({ username: "ghost", passwordHash: "x", name: "Ghost" })
+      .returning();
+    const recurring = await insertRecurring({
+      name: "De fantasma",
+      memberId: ghost.id,
+      createdAt: new Date("2026-06-10T12:00:00Z"),
+    });
+    await db.update(users).set({ isActive: false }).where(eq(users.id, ghost.id));
+
+    await catchUpRecurringMovements(appDb, new Date("2026-09-10T12:00:00Z"));
+    const rows = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.recurringId, recurring.id));
+    expect(rows).toHaveLength(0);
+    const [pointer] = await db
+      .select({ last: recurringMovements.lastMaterializedMonth })
+      .from(recurringMovements)
+      .where(eq(recurringMovements.id, recurring.id));
+    expect(pointer.last).toBe("2026-09-01"); // advanced anyway
+
+    // Restore so later runs behave (state hygiene for the shared DB).
+    await db.update(users).set({ isActive: true }).where(eq(users.id, ghost.id));
+  });
 });
