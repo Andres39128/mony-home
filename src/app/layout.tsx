@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import { themeInitScript } from "@/lib/theme-init";
 import "./globals.css";
@@ -29,7 +30,15 @@ export const viewport: Viewport = {
   colorScheme: "light dark",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  // Per-request nonce issued by src/proxy.ts (docs:
+  // content-security-policy#reading-the-nonce). Reading headers() opts every
+  // route into dynamic rendering — which nonce-based CSP requires anyway.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     // suppressHydrationWarning: the inline script mutates <html> classes pre-paint.
     <html
@@ -38,7 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col font-sans">
         {children}

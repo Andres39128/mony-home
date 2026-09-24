@@ -8,10 +8,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "3mb",
     },
   },
-  // Global security headers on every route. CSP for HTML routes is
-  // deliberately skipped: the inline theme-init script + Next bootstrap would
-  // need nonce middleware (docs: content-security-policy); /sw.js keeps its
-  // own strict CSP below.
+  // Global security headers on every route. CSP for HTML routes is issued
+  // per-request (nonce + 'strict-dynamic') by src/proxy.ts (docs:
+  // content-security-policy); /sw.js keeps its own strict CSP below.
   async headers() {
     return [
       {
