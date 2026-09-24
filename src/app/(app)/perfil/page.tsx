@@ -1,7 +1,6 @@
-import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { sessions } from "@/db/schema";
 import { requireUser } from "@/features/auth/session";
+import { listActiveSessions } from "@/lib/auth";
 import { changeOwnPasswordAction, updateOwnNameAction } from "@/features/members/actions";
 import PerfilPanel from "./perfil-panel";
 
@@ -14,12 +13,7 @@ const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 export default async function PerfilPage() {
   const user = await requireUser();
 
-  const [session] = await getDb()
-    .select({ expiresAt: sessions.expiresAt })
-    .from(sessions)
-    .where(eq(sessions.userId, user.id))
-    .orderBy(desc(sessions.expiresAt))
-    .limit(1);
+  const [session] = await listActiveSessions(getDb(), user.id, 1);
 
   const expiryLabel = session
     ? new Intl.DateTimeFormat("es-AR", { dateStyle: "long" }).format(session.expiresAt)

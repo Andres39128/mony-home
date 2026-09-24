@@ -314,6 +314,22 @@ describe("auth (integration on PGlite)", () => {
       expect(await getSessionUser(appDb, token, clock)).toBeNull();
     });
 
+    it("revokes the user's prior sessions on a successful login", async () => {
+      const user = await createTestUser();
+      const prior = await createSession(appDb, user.id, clock);
+      expect((await getSessionUser(appDb, prior.token, clock))?.user.username).toBe("andres");
+
+      const result = await login(appDb, "andres", "correct-horse-1", clock);
+      expect(result.ok).toBe(true);
+
+      // Pre-login token is dead after re-authenticating...
+      expect(await getSessionUser(appDb, prior.token, clock)).toBeNull();
+
+      // ...while the session issued after login keeps working.
+      const fresh = await createSession(appDb, user.id, clock);
+      expect((await getSessionUser(appDb, fresh.token, clock))?.user.id).toBe(user.id);
+    });
+
     it("destroySession invalidates the token", async () => {
       const user = await createTestUser();
       const { token } = await createSession(appDb, user.id, clock);

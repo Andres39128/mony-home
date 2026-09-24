@@ -20,7 +20,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
-import { and, count, eq, gt, lt, ne } from "drizzle-orm";
+import { and, count, desc, eq, gt, lt, ne } from "drizzle-orm";
 import { loginIpAttempts, sessions, users, type roleEnum } from "@/db/schema";
 import type { Database } from "@/db";
 
@@ -121,6 +121,8 @@ export async function login(
     .update(users)
     .set({ failedAttempts: 0, lockedUntil: null })
     .where(eq(users.id, user.id));
+  // Re-login closes that user's other sessions (stolen pre-login tokens die).
+  await revokeUserSessions(db, user.id);
   return {
     ok: true,
     user: { id: user.id, username: user.username, name: user.name, role: user.role },
@@ -294,6 +296,24 @@ export async function revokeUserSessions(
         ? and(eq(sessions.userId, userId), ne(sessions.tokenHash, exceptTokenHash))
         : eq(sessions.userId, userId),
     );
+}
+
+/**
+ * The user's not-yet-expired sessions, newest expiry first (e.g. the profile
+ * page's expiry hint with limit 1). Only active sessions count: an expired
+ * row is dead state, not a session worth showing.
+ */
+export async function listActiveSessions(
+  db: Pick<Database, "select">,
+  userId: string,
+  limit: number,
+): Promise<{ expiresAt: Date }[]> {
+  return db
+    .select({ expiresAt: sessions.expiresAt })
+    .from(sessions)
+    .where(and(eq(sessions.userId, userId), gt(sessions.expiresAt, new Date())))
+    .orderBy(desc(sessions.expiresAt))
+    .limit(limit);
 }
 
 /** Thrown by requireAdmin when the current user lacks the admin role. */
