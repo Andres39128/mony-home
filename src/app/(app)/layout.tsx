@@ -10,16 +10,15 @@ import { TopNavLinks } from "@/components/top-nav";
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
-/** Honey coin mark + wordmark. Mobile header and desktop bar share it. */
+/** Brand logo + wordmark. Mobile header and desktop bar share it. */
 function AppMark() {
   return (
     <Link href="/" className="flex items-center gap-2" aria-label="mony-home — Ir al inicio">
-      <span
-        aria-hidden
-        className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-honey text-lg font-bold text-on-accent"
-      >
-        M
-      </span>
+      <img
+        src="/logo-mh.svg"
+        alt="Mony Home logo"
+        className="size-9 shrink-0 object-contain"
+      />
       <span className="font-semibold text-ink">mony-home</span>
     </Link>
   );

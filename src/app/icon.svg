@@ -1,6 +1,116 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Standalone version of the AppMark in src/app/(app)/layout.tsx: honey
-       rounded square (rounded-xl ratio) with the bold on-accent "M". -->
-  <rect width="512" height="512" rx="170" fill="#ffe5a3"/>
-  <path d="M148 352V160l108 128 108-128v192" fill="none" stroke="#1a2530" stroke-width="56" stroke-linecap="square" stroke-linejoin="miter"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 450" width="100%" height="100%">
+  <defs>
+    <style>
+      :root {
+        --base: #faf7f0;
+        --surface: #fffdf8;
+        --ink: #1a2530;
+        --muted: #4a5a68;
+        --line: #e5dfd2;
+
+        --mint: #a8dadc;
+        --honey: #ffe5a3;
+        --sage: #c7e9c0;
+        --danger-fill: #f6cfc9;
+        --on-accent: #1a2530;
+
+        --mint-soft: #e3f1f2;
+        --honey-soft: #fbf0d4;
+        --sage-soft: #e8f4e7;
+        --danger-soft: #f9e6e2;
+        --danger-text: #8c3b34;
+      }
+    </style>
+
+    <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1a2530" flood-opacity="0.06"/>
+    </filter>
+
+    <filter id="glow-honey" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#soft-shadow)">
+    <path d="M 165,220 L 165,285 C 165,293 172,300 180,300 L 320,300 C 328,300 335,293 335,285 L 335,220"
+          fill="var(--surface)"
+          stroke="var(--line)"
+          stroke-width="8"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <g filter="url(#glow-honey)">
+      <circle cx="250" cy="195" r="32" fill="var(--honey-soft)"/>
+      <circle cx="250" cy="195" r="22" fill="var(--honey)" stroke="var(--ink)" stroke-width="3"/>
+      <text x="250" y="202"
+            font-family="system-ui, -apple-system, sans-serif"
+            font-size="20"
+            font-weight="800"
+            fill="var(--on-accent)"
+            text-anchor="middle">$</text>
+    </g>
+
+    <path d="M 130,190 L 250,95 L 370,190"
+          fill="none"
+          stroke="var(--mint)"
+          stroke-width="16"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <path d="M 130,190 L 250,95 L 370,190"
+          fill="none"
+          stroke="var(--ink)"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          opacity="0.3"/>
+
+    <path d="M 150,265 L 205,220 L 250,240 L 340,145"
+          fill="none"
+          stroke="var(--sage)"
+          stroke-width="14"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <path d="M 150,265 L 205,220 L 250,240 L 340,145"
+          fill="none"
+          stroke="var(--ink)"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <path d="M 310,145 L 340,145 L 340,175"
+          fill="none"
+          stroke="var(--sage)"
+          stroke-width="14"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <path d="M 310,145 L 340,145 L 340,175"
+          fill="none"
+          stroke="var(--ink)"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+  </g>
+
+  <text x="250" y="370"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="36"
+        font-weight="800"
+        letter-spacing="1"
+        text-anchor="middle">
+    <tspan fill="var(--ink)">MONY</tspan><tspan fill="var(--muted)" font-weight="400">HOME</tspan>
+  </text>
+
+  <text x="250" y="398"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="12"
+        font-weight="600"
+        letter-spacing="4"
+        fill="var(--muted)"
+        text-anchor="middle">
+    FINANZAS DEL HOGAR
+  </text>
 </svg>
