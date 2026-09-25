@@ -83,6 +83,6 @@ export const config = {
   // extension) are the Next file-convention routes for src/app/icon.svg and
   // src/app/apple-icon.png.
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.webmanifest|offline\\.html|icon\\.svg|icon-[\\w-]+\\.png|icon$|apple-icon).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.webmanifest|offline\\.html|icon\\.svg|icon-[\\w-]+\\.png|logo-mh\\.svg|icon$|apple-icon).*)",
   ],
 };
