@@ -10,16 +10,15 @@ import { TopNavLinks } from "@/components/top-nav";
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
-/** Brand logo + wordmark. Mobile header and desktop bar share it. */
+/** Brand logo. Mobile header and desktop bar share it. */
 function AppMark() {
   return (
-    <Link href="/" className="flex items-center gap-2" aria-label="mony-home — Ir al inicio">
+    <Link href="/" aria-label="mony-home — Ir al inicio">
       <img
         src="/logo-mh.svg"
         alt="Mony Home logo"
-        className="size-9 shrink-0 object-contain"
+        className="size-11 shrink-0 object-contain"
       />
-      <span className="font-semibold text-ink">mony-home</span>
     </Link>
   );
 }
