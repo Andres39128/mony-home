@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 450" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="118 83 264 319" width="100%" height="100%">
   <defs>
+    <!-- Variables CSS integradas para fácil personalización -->
     <style>
       :root {
         --base: #faf7f0;
@@ -7,13 +8,13 @@
         --ink: #1a2530;
         --muted: #4a5a68;
         --line: #e5dfd2;
-
+        
         --mint: #a8dadc;
         --honey: #ffe5a3;
         --sage: #c7e9c0;
         --danger-fill: #f6cfc9;
         --on-accent: #1a2530;
-
+        
         --mint-soft: #e3f1f2;
         --honey-soft: #fbf0d4;
         --sage-soft: #e8f4e7;
@@ -22,6 +23,7 @@
       }
     </style>
 
+    <!-- Sombras suaves coordinadas con la paleta -->
     <filter id="soft-shadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1a2530" flood-opacity="0.06"/>
     </filter>
@@ -32,84 +34,97 @@
     </filter>
   </defs>
 
+  <!-- Isotipo del Logo -->
   <g filter="url(#soft-shadow)">
-    <path d="M 165,220 L 165,285 C 165,293 172,300 180,300 L 320,300 C 328,300 335,293 335,285 L 335,220"
-          fill="var(--surface)"
-          stroke="var(--line)"
-          stroke-width="8"
-          stroke-linecap="round"
+    <!-- Base y paredes de la casa (Superficie + Borde de Línea) -->
+    <path d="M 165,220 L 165,285 C 165,293 172,300 180,300 L 320,300 C 328,300 335,293 335,285 L 335,220" 
+          fill="var(--surface)" 
+          stroke="var(--line)" 
+          stroke-width="8" 
+          stroke-linecap="round" 
           stroke-linejoin="round"/>
 
+    <!-- Resplandor/Moneda central de valor ($ / Honey) -->
     <g filter="url(#glow-honey)">
+      <!-- Halo exterior suave -->
       <circle cx="250" cy="195" r="32" fill="var(--honey-soft)"/>
+      <!-- Moneda principal -->
       <circle cx="250" cy="195" r="22" fill="var(--honey)" stroke="var(--ink)" stroke-width="3"/>
-      <text x="250" y="202"
-            font-family="system-ui, -apple-system, sans-serif"
-            font-size="20"
-            font-weight="800"
-            fill="var(--on-accent)"
+      <!-- Símbolo de moneda -->
+      <text x="250" y="202" 
+            font-family="system-ui, -apple-system, sans-serif" 
+            font-size="20" 
+            font-weight="800" 
+            fill="var(--on-accent)" 
             text-anchor="middle">$</text>
     </g>
 
-    <path d="M 130,190 L 250,95 L 370,190"
-          fill="none"
-          stroke="var(--mint)"
-          stroke-width="16"
-          stroke-linecap="round"
+    <!-- Techo de la casa (Mint Accent) -->
+    <path d="M 130,190 L 250,95 L 370,190" 
+          fill="none" 
+          stroke="var(--mint)" 
+          stroke-width="16" 
+          stroke-linecap="round" 
           stroke-linejoin="round"/>
 
-    <path d="M 130,190 L 250,95 L 370,190"
-          fill="none"
-          stroke="var(--ink)"
-          stroke-width="3"
-          stroke-linecap="round"
+    <!-- Línea de trazado interno del techo para definición -->
+    <path d="M 130,190 L 250,95 L 370,190" 
+          fill="none" 
+          stroke="var(--ink)" 
+          stroke-width="3" 
+          stroke-linecap="round" 
           stroke-linejoin="round"
           opacity="0.3"/>
 
-    <path d="M 150,265 L 205,220 L 250,240 L 340,145"
-          fill="none"
-          stroke="var(--sage)"
-          stroke-width="14"
-          stroke-linecap="round"
+    <!-- Gráfica de crecimiento / Flecha ascendente (Sage Accent) -->
+    <path d="M 150,265 L 205,220 L 250,240 L 340,145" 
+          fill="none" 
+          stroke="var(--sage)" 
+          stroke-width="14" 
+          stroke-linecap="round" 
           stroke-linejoin="round"/>
 
-    <path d="M 150,265 L 205,220 L 250,240 L 340,145"
-          fill="none"
-          stroke="var(--ink)"
-          stroke-width="3"
-          stroke-linecap="round"
+    <!-- Borde de contraste para la gráfica (Ink) -->
+    <path d="M 150,265 L 205,220 L 250,240 L 340,145" 
+          fill="none" 
+          stroke="var(--ink)" 
+          stroke-width="3" 
+          stroke-linecap="round" 
           stroke-linejoin="round"/>
 
-    <path d="M 310,145 L 340,145 L 340,175"
-          fill="none"
-          stroke="var(--sage)"
-          stroke-width="14"
-          stroke-linecap="round"
+    <!-- Punta de la flecha -->
+    <path d="M 310,145 L 340,145 L 340,175" 
+          fill="none" 
+          stroke="var(--sage)" 
+          stroke-width="14" 
+          stroke-linecap="round" 
           stroke-linejoin="round"/>
 
-    <path d="M 310,145 L 340,145 L 340,175"
-          fill="none"
-          stroke="var(--ink)"
-          stroke-width="3"
-          stroke-linecap="round"
+    <path d="M 310,145 L 340,145 L 340,175" 
+          fill="none" 
+          stroke="var(--ink)" 
+          stroke-width="3" 
+          stroke-linecap="round" 
           stroke-linejoin="round"/>
   </g>
 
-  <text x="250" y="370"
-        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        font-size="36"
-        font-weight="800"
-        letter-spacing="1"
+  <!-- Tipografía: Nombre de la Marca -->
+  <text x="250" y="370" 
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" 
+        font-size="36" 
+        font-weight="800" 
+        letter-spacing="1" 
         text-anchor="middle">
     <tspan fill="var(--ink)">MONY</tspan><tspan fill="var(--muted)" font-weight="400">HOME</tspan>
   </text>
 
-  <text x="250" y="398"
-        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        font-size="12"
-        font-weight="600"
-        letter-spacing="4"
-        fill="var(--muted)"
+  <!-- Tipografía: Subtítulo -->
+  <text x="250" y="398" 
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" 
+        font-size="12" 
+        font-weight="600" 
+        letter-spacing="4" 
+        fill="var(--muted)" 
         text-anchor="middle">
     FINANZAS DEL HOGAR
   </text>
