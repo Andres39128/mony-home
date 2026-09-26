@@ -3,16 +3,20 @@
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
 import {
+  addCardPayment,
   addLoanPayment,
+  cardPaymentSchema,
   createLoan,
   loanPaymentSchema,
   loanSchema,
   outstandingSchema,
+  removeLedgerEntry,
   removeLoan,
   toggleLoanActive,
   updateLoan,
   updateOutstanding,
   type BankConfigField,
+  type RevolvingConfigField,
 } from "@/features/loans/service";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
@@ -34,13 +38,23 @@ const BANK_FIELD_ERRORS: Record<BankConfigField, string> = {
   otherCharges: "Otros cargos no es un monto válido.",
 };
 
+/** Spanish field errors for revolving config parse failures. */
+const REVOLVING_FIELD_ERRORS: Record<RevolvingConfigField, string> = {
+  creditLimit: "El cupo no es válido.",
+  managementFee: "La cuota de manejo no es válida.",
+  statementDay: "El día de cierre debe ser un número entre 1 y 28.",
+};
+
 function idFrom(formData: FormData): string | null {
   const id = formData.get("id");
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
-/** Maps any loan-service failure to a form state (bank errors carry a field). */
-function mapLoanError(result: { error: string; field?: BankConfigField }): FormState {
+/** Maps any loan-service failure to a form state (typed errors carry a field). */
+function mapLoanError(result: {
+  error: string;
+  field?: BankConfigField | RevolvingConfigField;
+}): FormState {
   const { error, field } = result;
   if (error === "invalid_principal") {
     return { fieldErrors: { principal: "El capital no es válido." } };
@@ -50,7 +64,11 @@ function mapLoanError(result: { error: string; field?: BankConfigField }): FormS
   }
   if (error === "invalid_bank_config") {
     const key = field ?? "chargedRate";
-    return { fieldErrors: { [key]: BANK_FIELD_ERRORS[key] } };
+    return { fieldErrors: { [key]: BANK_FIELD_ERRORS[key as BankConfigField] } };
+  }
+  if (error === "invalid_revolving_config") {
+    const key = field ?? "creditLimit";
+    return { fieldErrors: { [key]: REVOLVING_FIELD_ERRORS[key as RevolvingConfigField] } };
   }
   if (error === "invalid_outstanding") {
     return { fieldErrors: { outstanding: "El saldo no es válido." } };
@@ -93,6 +111,10 @@ function readLoanForm(formData: FormData) {
     fireRatePerMillon: formData.get("fireRatePerMillon") ?? "",
     moraRate: formData.get("moraRate") ?? "",
     otherCharges: formData.get("otherCharges") ?? "",
+    // Revolving block — always sent; empty strings mean "off".
+    creditLimit: formData.get("creditLimit") ?? "",
+    managementFee: formData.get("managementFee") ?? "",
+    statementDay: formData.get("statementDay") ?? "",
   };
 }
 
@@ -217,6 +239,76 @@ export async function addLoanPaymentAction(
       };
     }
     return { error: "No tenés permiso para registrar ese pago." };
+  }
+  return { ok: true };
+}
+
+export async function addCardPaymentAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  // Any authenticated member may pay; the service pins attribution.
+  const user = await requireUser();
+
+  const loanId = idFrom(formData);
+  if (!loanId) return { error: "Tarjeta inválida." };
+
+  const parsed = cardPaymentSchema.safeParse({
+    amount: formData.get("amount"),
+    interest: formData.get("interest") ?? "",
+    includeFee: formData.get("includeFee") ?? "",
+    date: formData.get("date") ?? "",
+    note: formData.get("note") ?? "",
+    memberId: formData.get("memberId") ?? "",
+  });
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
+
+  const result = await addCardPayment(getDb(), user, loanId, parsed.data);
+  if (!result.ok) {
+    if (result.error === "invalid_amount" || result.error === "ambiguous_amount") {
+      return amountFieldError(result.error);
+    }
+    if (result.error === "invalid_interest") {
+      return { fieldErrors: { interest: "El interés no es válido." } };
+    }
+    if (result.error === "loan_not_found") return { error: "La tarjeta no existe." };
+    if (result.error === "loan_inactive") {
+      return { error: "La tarjeta está inactiva: activala para registrar pagos." };
+    }
+    if (result.error === "loan_not_revolving") {
+      return { error: "Los pagos con interés solo aplican a tarjetas de crédito rotativo." };
+    }
+    if (result.error === "fee_not_available") {
+      return { fieldErrors: { includeFee: "Esta tarjeta no tiene cuota de manejo configurada." } };
+    }
+    if (result.error === "member_not_found") {
+      return { fieldErrors: { memberId: "El integrante seleccionado no existe." } };
+    }
+    if (result.error === "system_category_missing") {
+      return {
+        error:
+          "Falta una categoría de sistema de tarjetas: ejecutá la carga inicial (db:seed) para crearla.",
+      };
+    }
+    return { error: "No tenés permiso para registrar ese pago." };
+  }
+  return { ok: true };
+}
+
+export async function removeLedgerEntryAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const guard = await adminGuard(ADMIN_REQUIRED_MESSAGE);
+  if (!guard.ok) return guard;
+
+  const id = idFrom(formData);
+  if (!id) return { error: "Registro inválido." };
+
+  const result = await removeLedgerEntry(getDb(), guard.user, id);
+  if (!result.ok) {
+    if (result.error === "entry_not_found") return { error: "El registro no existe." };
+    return { error: ADMIN_REQUIRED_MESSAGE };
   }
   return { ok: true };
 }
