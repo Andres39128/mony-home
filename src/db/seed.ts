@@ -85,41 +85,6 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     ])
     .onConflictDoNothing();
 
-  // --- Real data: Davivienda mortgage (bank mode, D7) ---
-  // The user's ACTUAL loan — like users/categories, this rides in BOTH seed
-  // modes and never depends on SEED_DEMO_DATA. One-time statement snapshot:
-  // liquidación of 2026-08-31 (saldo $204.619.634,14). Whole-history
-  // reconstruction is explicitly NOT attempted: the loan is created AT the
-  // last liquidation instant with ZERO ledger rows, so the lazy engine can
-  // only accrue forward (its base day = max(created day, last ledger day)).
-  // Calibration: EA cobrada 12,95%, pactada 17,47% (display-only), plazo 228
-  // months, cuota $2.628.000,00 closing day 25, property $339.802.600,00;
-  // per-millón rates BACK-COMPUTED so the first full period at the golden
-  // saldo reproduces the statement exactly (vida $96.617,00 / incendio
-  // $74.136,00 — see the golden reconciliation test in loans/service.test.ts).
-  const allLoans = await db.select().from(loans);
-  if (!allLoans.some((l) => l.name === "Hipoteca Davivienda")) {
-    await db.insert(loans).values({
-      name: "Hipoteca Davivienda",
-      kind: "mortgage",
-      entity: "Davivienda",
-      scope: "common",
-      principalCents: 20_461_963_414, // $204.619.634,14 — saldo at last liquidación
-      amortizationMode: "bank",
-      chargedRateBp: 1295, // 12,95% EA — THE accrual driver
-      contractualRateBp: 1747, // 17,47% pactada — display-only, never drives math
-      termMonths: 228,
-      fixedCuotaCents: 262_800_000, // $2.628.000,00
-      cuotaDay: 25,
-      propertyValueCents: 33_980_260_000, // $339.802.600,00
-      lifeInsuranceRatePerMillonX100k: 47_131_758, // ≈ 471,31758 / millón
-      fireInsuranceRatePerMillonX100k: 21_817_373, // ≈ 218,17373 / millón
-      // Mora, otros cargos y base asegurada: not on the statement's recurring
-      // composition — left off until the user calibrates them.
-      createdAt: new Date("2026-08-31T12:00:00Z"), // the last liquidation instant
-    });
-  }
-
   if (!config.SEED_DEMO_DATA) return;
 
   const categoryRows = await db.select().from(categories);
