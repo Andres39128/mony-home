@@ -774,3 +774,171 @@ describe("migration 0010 (recurring movements invariants)", () => {
     await db.insert(transactions).values(base);
   });
 });
+
+describe("migration 0011 (bank-style loans invariants)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+  let payerId: string;
+  let loanId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u11", passwordHash: "h", name: "U11" })
+      .returning();
+    payerId = user.id;
+    const [loan] = await db
+      .insert(loans)
+      .values({ name: "Tracker", kind: "mortgage", entity: "Banco", scope: "common", principalCents: 100_000 })
+      .returning();
+    loanId = loan.id;
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  /** Full bank configuration echoing the Davivienda seed constants (design D7). */
+  function bankConfig() {
+    return {
+      amortizationMode: "bank" as const,
+      chargedRateBp: 1295,
+      contractualRateBp: 1747,
+      termMonths: 228,
+      fixedCuotaCents: 262_800_000,
+      cuotaDay: 5,
+      propertyValueCents: 33_980_260_000,
+      insuredBaseCents: 20_499_341_480,
+      lifeInsuranceRatePerMillonX100k: 46_790_000,
+      fireInsuranceRatePerMillonX100k: 18_330_000,
+      otherChargesCents: 12_345,
+      moraRateBp: 500,
+    };
+  }
+
+  /** Fresh tracker-loan base; bank fields layered per test. */
+  function loanBase() {
+    return { name: "Banco", kind: "mortgage" as const, entity: "Banco", scope: "common" as const, principalCents: 100_000 };
+  }
+
+  it("round-trips a fully configured bank loan", async () => {
+    const [loan] = await db.insert(loans).values({ ...loanBase(), ...bankConfig() }).returning();
+    const [readBack] = await db.select().from(loans).where(eq(loans.id, loan.id));
+    expect(readBack.amortizationMode).toBe("bank");
+    expect(readBack.chargedRateBp).toBe(1295);
+    expect(readBack.contractualRateBp).toBe(1747);
+    expect(readBack.termMonths).toBe(228);
+    expect(readBack.fixedCuotaCents).toBe(262_800_000);
+    expect(readBack.cuotaDay).toBe(5);
+    expect(readBack.propertyValueCents).toBe(33_980_260_000);
+    expect(readBack.insuredBaseCents).toBe(20_499_341_480);
+    expect(readBack.lifeInsuranceRatePerMillonX100k).toBe(46_790_000);
+    expect(readBack.fireInsuranceRatePerMillonX100k).toBe(18_330_000);
+    expect(readBack.extraInsuranceRatePerMillonX100k).toBeNull();
+    expect(readBack.otherChargesCents).toBe(12_345);
+    expect(readBack.moraRateBp).toBe(500);
+  });
+
+  it("accepts a minimal bank loan carrying only the four required fields", async () => {
+    const [loan] = await db
+      .insert(loans)
+      .values({ ...loanBase(), amortizationMode: "bank", chargedRateBp: 1295, fixedCuotaCents: 262_800_000, termMonths: 228, cuotaDay: 5 })
+      .returning();
+    const [readBack] = await db.select().from(loans).where(eq(loans.id, loan.id));
+    expect(readBack.amortizationMode).toBe("bank");
+    expect(readBack.propertyValueCents).toBeNull();
+  });
+
+  it("rejects bank mode missing any required config field (gate CHECK)", async () => {
+    await expectPgError(
+      db.insert(loans).values({ ...loanBase(), ...bankConfig(), fixedCuotaCents: null }),
+      "23514",
+    );
+  });
+
+  it("rejects tracker mode (null) carrying any bank column (gate CHECK)", async () => {
+    await expectPgError(
+      db.insert(loans).values({ ...loanBase(), amortizationMode: null, contractualRateBp: 1747 }),
+      "23514",
+    );
+  });
+
+  it("enforces cuota_day bounds 1..28", async () => {
+    for (const cuotaDay of [0, 29]) {
+      await expectPgError(db.insert(loans).values({ ...loanBase(), ...bankConfig(), cuotaDay }), "23514");
+    }
+  });
+
+  it("enforces charged/contractual/mora rate bp bounds 0..100000", async () => {
+    for (const field of ["chargedRateBp", "contractualRateBp", "moraRateBp"] as const) {
+      await expectPgError(
+        db.insert(loans).values({ ...loanBase(), ...bankConfig(), [field]: 100_001 }),
+        "23514",
+      );
+    }
+  });
+
+  it("enforces per-millón insurance rate bounds 0..999999999", async () => {
+    for (const field of [
+      "lifeInsuranceRatePerMillonX100k",
+      "fireInsuranceRatePerMillonX100k",
+      "extraInsuranceRatePerMillonX100k",
+    ] as const) {
+      await expectPgError(
+        db.insert(loans).values({ ...loanBase(), ...bankConfig(), [field]: 1_000_000_000 }),
+        "23514",
+      );
+    }
+  });
+
+  it("enforces positive term/cuota and non-negative property/insured/other amounts", async () => {
+    await expectPgError(db.insert(loans).values({ ...loanBase(), ...bankConfig(), termMonths: 0 }), "23514");
+    await expectPgError(db.insert(loans).values({ ...loanBase(), ...bankConfig(), fixedCuotaCents: 0 }), "23514");
+    await expectPgError(db.insert(loans).values({ ...loanBase(), ...bankConfig(), propertyValueCents: -1 }), "23514");
+    await expectPgError(db.insert(loans).values({ ...loanBase(), ...bankConfig(), insuredBaseCents: -1 }), "23514");
+    await expectPgError(db.insert(loans).values({ ...loanBase(), ...bankConfig(), otherChargesCents: -1 }), "23514");
+  });
+
+  it("accepts a positive member-less charge row and reads it back", async () => {
+    const [row] = await db
+      .insert(loanPayments)
+      .values({ loanId, kind: "charge", amountCents: 9_661_700, date: "2026-09-05", note: "Seguro de vida" })
+      .returning();
+    expect(row.kind).toBe("charge");
+    expect(row.memberId).toBeNull();
+  });
+
+  it("rejects a charge row naming a member (engine rows are member-less)", async () => {
+    await expectPgError(
+      db.insert(loanPayments).values({
+        loanId, memberId: payerId, kind: "charge", amountCents: 100, date: "2026-09-06", note: "Seguro de incendio",
+      }),
+      "23514",
+    );
+  });
+
+  it("rejects a non-positive charge amount", async () => {
+    await expectPgError(
+      db.insert(loanPayments).values({ loanId, kind: "charge", amountCents: 0, date: "2026-09-07", note: "Otros cargos" }),
+      "23514",
+    );
+  });
+
+  it("rejects duplicate charge per (loan, date, note) — idempotent catch-up", async () => {
+    const values = {
+      loanId, kind: "charge" as const, amountCents: 7_413_600, date: "2026-09-08", note: "Seguro de incendio",
+    };
+    await db.insert(loanPayments).values(values);
+    await expectPgError(db.insert(loanPayments).values(values), "23505");
+  });
+
+  it("collides interest and charge rows sharing (loan, date, note) — swapped partial unique", async () => {
+    const shared = { loanId, date: "2026-09-09", note: "Componente" };
+    await db.insert(loanPayments).values({ ...shared, kind: "interest", amountCents: 500 });
+    await expectPgError(
+      db.insert(loanPayments).values({ ...shared, kind: "charge", amountCents: 700 }),
+      "23505",
+    );
+  });
+});

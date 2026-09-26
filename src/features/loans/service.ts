@@ -112,7 +112,8 @@ export interface PaymentView {
   id: string;
   /** Owning loan — lets one query feed every card's collapsible history. */
   loanId: string;
-  kind: "payment" | "interest";
+  /** 'charge' rows are bank-style cuota components (seguros, otros cargos, mora). */
+  kind: "payment" | "interest" | "charge";
   amountCents: number;
   date: string;
   note: string | null;
