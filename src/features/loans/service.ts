@@ -167,8 +167,8 @@ export interface LoanView {
   /** Share of the principal already paid (0..100+, 2 decimals). */
   paidPct: number;
   paymentCount: number;
-  /** Bank calibration block (D1) — null on simple tracker loans. */
-  amortizationMode: "bank" | null;
+  /** Engine mode block — null = simple tracker, 'bank'/'revolving' = engine config. */
+  amortizationMode: "bank" | "revolving" | null;
   chargedRateBp: number | null;
   contractualRateBp: number | null;
   termMonths: number | null;

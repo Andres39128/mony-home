@@ -50,7 +50,8 @@ export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "wit
 export const accrualModeEnum = pgEnum("accrual_mode", ["simple", "compound"]);
 export const loanKindEnum = pgEnum("loan_kind", ["credit_card", "investment_line", "mortgage", "other"]);
 export const loanPaymentKindEnum = pgEnum("loan_payment_kind", ["payment", "interest", "charge"]);
-export const loanAmortizationModeEnum = pgEnum("loan_amortization_mode", ["bank"]);
+export const loanAmortizationModeEnum = pgEnum("loan_amortization_mode", ["bank", "revolving"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["cash", "card"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -123,6 +124,15 @@ export const transactions = pgTable(
     recurringId: uuid("recurring_id").references(() => recurringMovements.id, {
       onDelete: "set null",
     }),
+    /** How the movement was paid: cash or a revolving credit card. */
+    paymentMethod: paymentMethodEnum("payment_method").notNull().default("cash"),
+    /**
+     * The revolving-card loan that funded this purchase; null ⇔
+     * payment_method 'cash'. RESTRICT: deleting a card with purchases
+     * would silently falsify payment history (a card purchase was never
+     * cash) — deactivate the card instead, same rule as loan_payments.
+     */
+    cardLoanId: uuid("card_loan_id").references(() => loans.id, { onDelete: "restrict" }),
     scope: scopeKindEnum("scope").notNull().default("common"),
     note: text("note"),
     /** Quick-capture placeholder ("momento de afán"): details pending. */
@@ -141,6 +151,17 @@ export const transactions = pgTable(
       "transactions_completed_category_present",
       sql`${table.needsDetails} OR ${table.categoryId} IS NOT NULL`,
     ),
+    // Card ⇔ loan: a card movement always names its card, a cash movement
+    // never does (the pair is one atomic fact, not two loose columns).
+    check(
+      "transactions_card_matches_loan",
+      sql`(${table.paymentMethod} = 'card') = (${table.cardLoanId} IS NOT NULL)`,
+    ),
+    // Refunds to the card are out of scope V1: only expenses may ride a card.
+    check(
+      "transactions_card_expense_only",
+      sql`${table.paymentMethod} = 'cash' OR ${table.type} = 'expense'`,
+    ),
     index("transactions_date_idx").on(table.date),
     index("transactions_category_id_idx").on(table.categoryId),
     index("transactions_member_id_idx").on(table.memberId),
@@ -148,6 +169,7 @@ export const transactions = pgTable(
     index("transactions_savings_contribution_id_idx").on(table.savingsContributionId),
     index("transactions_loan_payment_id_idx").on(table.loanPaymentId),
     index("transactions_recurring_id_idx").on(table.recurringId),
+    index("transactions_card_loan_id_idx").on(table.cardLoanId),
     // Idempotent materialization: at most ONE auto-generated transaction per
     // recurring per day — a racing lazy catch-up inserts nothing extra.
     uniqueIndex("transactions_recurring_id_date_unique")
@@ -338,6 +360,15 @@ export const savingsContributions = pgTable(
  * Bank-style loans (amortizationMode 'bank') layer a nullable config block
  * on top: the same ledger stores daily interest plus note-keyed 'charge'
  * component rows (seguros, otros cargos, mora) at each cuota close.
+ *
+ * Revolving credit cards (amortizationMode 'revolving') are the opposite of
+ * a fixed loan: the borrowed amount GROWS with use. Purchases live in
+ * `transactions` linked via card_loan_id (never in this ledger), interest is
+ * VARIABLE and entered manually at payment time, and the fixed "cuota de
+ * manejo" is charged when the user includes it in a payment. Outstanding =
+ * principal (initial balance, may be 0) + purchases + interest + charges −
+ * payments; available credit = credit_limit − outstanding (capped at the
+ * limit; a negative outstanding is "saldo a favor").
  */
 export const loans = pgTable(
   "loans",
@@ -393,6 +424,12 @@ export const loans = pgTable(
     otherChargesCents: bigint("other_charges_cents", { mode: "number" }),
     /** Mora (late-payment) annual rate in bp over unpaid overdue cuota components; null = no mora. */
     moraRateBp: integer("mora_rate_bp"),
+    /** Revolving only: total credit limit (cupo) in cents; required when mode is 'revolving'. */
+    creditLimitCents: bigint("credit_limit_cents", { mode: "number" }),
+    /** Revolving only: fixed "cuota de manejo" in cents — 0 or a constant amount per cycle. */
+    managementFeeCents: bigint("management_fee_cents", { mode: "number" }),
+    /** Revolving only: calendar day the billing cycle closes (1..28, February-safe). */
+    statementDay: integer("statement_day"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -401,7 +438,13 @@ export const loans = pgTable(
       "loans_individual_requires_member",
       sql`${table.scope} <> 'individual' OR ${table.memberId} IS NOT NULL`,
     ),
-    check("loans_principal_positive", sql`${table.principalCents} > 0`),
+    // Revolving cards may start with zero borrowed money — the cupo IS the
+    // commitment; every other kind keeps a strictly positive principal.
+    // IS NOT DISTINCT FROM avoids the NULL trap: `0 > 0 OR NULL` would pass.
+    check(
+      "loans_principal_positive",
+      sql`${table.principalCents} > 0 OR (${table.amortizationMode} IS NOT DISTINCT FROM 'revolving' AND ${table.principalCents} >= 0)`,
+    ),
     check(
       "loans_annual_rate_bp_bounds",
       sql`${table.annualRateBp} IS NULL OR (${table.annualRateBp} >= 0 AND ${table.annualRateBp} <= 100000)`,
@@ -440,6 +483,18 @@ export const loans = pgTable(
       sql`${table.otherChargesCents} IS NULL OR ${table.otherChargesCents} >= 0`,
     ),
     check(
+      "loans_credit_limit_positive",
+      sql`${table.creditLimitCents} IS NULL OR ${table.creditLimitCents} > 0`,
+    ),
+    check(
+      "loans_management_fee_non_negative",
+      sql`${table.managementFeeCents} IS NULL OR ${table.managementFeeCents} >= 0`,
+    ),
+    check(
+      "loans_statement_day_bounds",
+      sql`${table.statementDay} IS NULL OR (${table.statementDay} >= 1 AND ${table.statementDay} <= 28)`,
+    ),
+    check(
       "loans_life_insurance_rate_bounds",
       sql`${table.lifeInsuranceRatePerMillonX100k} IS NULL OR (${table.lifeInsuranceRatePerMillonX100k} >= 0 AND ${table.lifeInsuranceRatePerMillonX100k} <= 999999999)`,
     ),
@@ -454,12 +509,28 @@ export const loans = pgTable(
     // Amortization-mode gate: 'bank' must carry the four core config fields…
     check(
       "loans_bank_mode_requires_config",
-      sql`${table.amortizationMode} IS NULL OR (${table.chargedRateBp} IS NOT NULL AND ${table.fixedCuotaCents} IS NOT NULL AND ${table.termMonths} IS NOT NULL AND ${table.cuotaDay} IS NOT NULL)`,
+      sql`${table.amortizationMode} IS DISTINCT FROM 'bank' OR (${table.chargedRateBp} IS NOT NULL AND ${table.fixedCuotaCents} IS NOT NULL AND ${table.termMonths} IS NOT NULL AND ${table.cuotaDay} IS NOT NULL)`,
     ),
-    // …and a simple tracker (null) must carry NO bank config at all.
+    // …and no mode may carry another mode's config: bank excludes revolving
+    // fields…
     check(
-      "loans_simple_mode_excludes_bank_config",
-      sql`${table.amortizationMode} IS NOT NULL OR (${table.chargedRateBp} IS NULL AND ${table.contractualRateBp} IS NULL AND ${table.termMonths} IS NULL AND ${table.fixedCuotaCents} IS NULL AND ${table.cuotaDay} IS NULL AND ${table.propertyValueCents} IS NULL AND ${table.insuredBaseCents} IS NULL AND ${table.lifeInsuranceRatePerMillonX100k} IS NULL AND ${table.fireInsuranceRatePerMillonX100k} IS NULL AND ${table.extraInsuranceRatePerMillonX100k} IS NULL AND ${table.otherChargesCents} IS NULL AND ${table.moraRateBp} IS NULL)`,
+      "loans_bank_mode_excludes_revolving_config",
+      sql`${table.amortizationMode} IS DISTINCT FROM 'bank' OR (${table.creditLimitCents} IS NULL AND ${table.managementFeeCents} IS NULL AND ${table.statementDay} IS NULL)`,
+    ),
+    // …revolving requires its cupo and excludes every engine-driven field
+    // (interest is manual at payment time)…
+    check(
+      "loans_revolving_requires_limit",
+      sql`${table.amortizationMode} IS DISTINCT FROM 'revolving' OR (${table.creditLimitCents} IS NOT NULL AND ${table.creditLimitCents} > 0)`,
+    ),
+    check(
+      "loans_revolving_excludes_bank_config",
+      sql`${table.amortizationMode} IS DISTINCT FROM 'revolving' OR (${table.annualRateBp} IS NULL AND ${table.chargedRateBp} IS NULL AND ${table.contractualRateBp} IS NULL AND ${table.termMonths} IS NULL AND ${table.fixedCuotaCents} IS NULL AND ${table.cuotaDay} IS NULL AND ${table.propertyValueCents} IS NULL AND ${table.insuredBaseCents} IS NULL AND ${table.lifeInsuranceRatePerMillonX100k} IS NULL AND ${table.fireInsuranceRatePerMillonX100k} IS NULL AND ${table.extraInsuranceRatePerMillonX100k} IS NULL AND ${table.otherChargesCents} IS NULL AND ${table.moraRateBp} IS NULL)`,
+    ),
+    // …and a simple tracker (null) must carry NO engine config at all.
+    check(
+      "loans_simple_mode_excludes_engine_config",
+      sql`${table.amortizationMode} IS NOT NULL OR (${table.chargedRateBp} IS NULL AND ${table.contractualRateBp} IS NULL AND ${table.termMonths} IS NULL AND ${table.fixedCuotaCents} IS NULL AND ${table.cuotaDay} IS NULL AND ${table.propertyValueCents} IS NULL AND ${table.insuredBaseCents} IS NULL AND ${table.lifeInsuranceRatePerMillonX100k} IS NULL AND ${table.fireInsuranceRatePerMillonX100k} IS NULL AND ${table.extraInsuranceRatePerMillonX100k} IS NULL AND ${table.otherChargesCents} IS NULL AND ${table.moraRateBp} IS NULL AND ${table.creditLimitCents} IS NULL AND ${table.managementFeeCents} IS NULL AND ${table.statementDay} IS NULL)`,
     ),
   ],
 );
