@@ -71,6 +71,9 @@ function DebtLine({ loan }: { loan: LoanView }) {
 const KIND_LABELS_HISTORY = {
   payment: "Pago",
   interest: "Interés",
+  // Bank-style cuota component (seguros, otros cargos, mora); the row's
+  // note carries the specific component name.
+  charge: "Cargo",
 } as const;
 
 /**

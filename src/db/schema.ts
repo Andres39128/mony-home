@@ -49,7 +49,8 @@ export const savingsKindEnum = pgEnum("savings_kind", ["savings", "investment"])
 export const contributionKindEnum = pgEnum("contribution_kind", ["deposit", "withdrawal", "interest"]);
 export const accrualModeEnum = pgEnum("accrual_mode", ["simple", "compound"]);
 export const loanKindEnum = pgEnum("loan_kind", ["credit_card", "investment_line", "mortgage", "other"]);
-export const loanPaymentKindEnum = pgEnum("loan_payment_kind", ["payment", "interest"]);
+export const loanPaymentKindEnum = pgEnum("loan_payment_kind", ["payment", "interest", "charge"]);
+export const loanAmortizationModeEnum = pgEnum("loan_amortization_mode", ["bank"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -333,6 +334,10 @@ export const savingsContributions = pgTable(
  * OUTSTANDING balance is never stored: outstanding = principal + interest −
  * payments, computed from the loan_payments ledger. Loan proceeds create NO
  * transaction — borrowed money is not income; payments mirror an expense.
+ *
+ * Bank-style loans (amortizationMode 'bank') layer a nullable config block
+ * on top: the same ledger stores daily interest plus note-keyed 'charge'
+ * component rows (seguros, otros cargos, mora) at each cuota close.
  */
 export const loans = pgTable(
   "loans",
@@ -349,6 +354,45 @@ export const loans = pgTable(
     principalCents: bigint("principal_cents", { mode: "number" }).notNull(),
     /** Annual nominal rate (TNA) in basis points; null = no interest. 0..100000 = 0..1000%. */
     annualRateBp: integer("annual_rate_bp"),
+    /**
+     * Amortization mode: null = simple tracker (monthly TNA engine,
+     * unchanged); 'bank' = bank-style engine (daily EA accrual + cuota
+     * components). Bank mode requires the four core config fields below
+     * (gate CHECKs at the bottom of this table).
+     */
+    amortizationMode: loanAmortizationModeEnum("amortization_mode"),
+    /** Effective annual rate actually charged (EA cobrada) in bp — THE accrual driver. 0..100000 = 0..1000%. */
+    chargedRateBp: integer("charged_rate_bp"),
+    /** Contractual rate (pactada) in bp — display badge ONLY, never drives math. */
+    contractualRateBp: integer("contractual_rate_bp"),
+    /** Loan term in months; positive. */
+    termMonths: integer("term_months"),
+    /** Bank-published fixed cuota in cents — authoritative (any French-derived cuota is display-only). */
+    fixedCuotaCents: bigint("fixed_cuota_cents", { mode: "number" }),
+    /** Calendar day the cuota closes each month (1..28, February-safe like recurring_movements). */
+    cuotaDay: integer("cuota_day"),
+    /** Property valuation backing the fire insurance, in cents. */
+    propertyValueCents: bigint("property_value_cents", { mode: "number" }),
+    /**
+     * User-entered reference valor asegurado from the statement — display
+     * and calibration reference ONLY. The engine never uses it for vida
+     * math: vida tracks the running saldo at each period close.
+     */
+    insuredBaseCents: bigint("insured_base_cents", { mode: "number" }),
+    /**
+     * Insurance rates in PESOS PER MILLÓN × 100,000 (5 decimals):
+     * 467.90 pesos-per-millón stores as 46,790,000. Basis points cannot
+     * express per-millón granularity (same rationale as the money-cents
+     * ceiling above). Null = component off. Charge = round(base/1e6 × rate).
+     */
+    lifeInsuranceRatePerMillonX100k: integer("life_insurance_rate_per_millon_x100k"),
+    fireInsuranceRatePerMillonX100k: integer("fire_insurance_rate_per_millon_x100k"),
+    /** Deferred slot for a future add-on insurance component; null = off. */
+    extraInsuranceRatePerMillonX100k: integer("extra_insurance_rate_per_millon_x100k"),
+    /** Fixed "Otros cargos" amount charged once per period, in cents. */
+    otherChargesCents: bigint("other_charges_cents", { mode: "number" }),
+    /** Mora (late-payment) annual rate in bp over unpaid overdue cuota components; null = no mora. */
+    moraRateBp: integer("mora_rate_bp"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -362,6 +406,61 @@ export const loans = pgTable(
       "loans_annual_rate_bp_bounds",
       sql`${table.annualRateBp} IS NULL OR (${table.annualRateBp} >= 0 AND ${table.annualRateBp} <= 100000)`,
     ),
+    check(
+      "loans_charged_rate_bp_bounds",
+      sql`${table.chargedRateBp} IS NULL OR (${table.chargedRateBp} >= 0 AND ${table.chargedRateBp} <= 100000)`,
+    ),
+    check(
+      "loans_contractual_rate_bp_bounds",
+      sql`${table.contractualRateBp} IS NULL OR (${table.contractualRateBp} >= 0 AND ${table.contractualRateBp} <= 100000)`,
+    ),
+    check(
+      "loans_mora_rate_bp_bounds",
+      sql`${table.moraRateBp} IS NULL OR (${table.moraRateBp} >= 0 AND ${table.moraRateBp} <= 100000)`,
+    ),
+    check("loans_term_months_positive", sql`${table.termMonths} IS NULL OR ${table.termMonths} > 0`),
+    check(
+      "loans_fixed_cuota_positive",
+      sql`${table.fixedCuotaCents} IS NULL OR ${table.fixedCuotaCents} > 0`,
+    ),
+    check(
+      "loans_cuota_day_bounds",
+      sql`${table.cuotaDay} IS NULL OR (${table.cuotaDay} >= 1 AND ${table.cuotaDay} <= 28)`,
+    ),
+    check(
+      "loans_property_value_non_negative",
+      sql`${table.propertyValueCents} IS NULL OR ${table.propertyValueCents} >= 0`,
+    ),
+    check(
+      "loans_insured_base_non_negative",
+      sql`${table.insuredBaseCents} IS NULL OR ${table.insuredBaseCents} >= 0`,
+    ),
+    check(
+      "loans_other_charges_non_negative",
+      sql`${table.otherChargesCents} IS NULL OR ${table.otherChargesCents} >= 0`,
+    ),
+    check(
+      "loans_life_insurance_rate_bounds",
+      sql`${table.lifeInsuranceRatePerMillonX100k} IS NULL OR (${table.lifeInsuranceRatePerMillonX100k} >= 0 AND ${table.lifeInsuranceRatePerMillonX100k} <= 999999999)`,
+    ),
+    check(
+      "loans_fire_insurance_rate_bounds",
+      sql`${table.fireInsuranceRatePerMillonX100k} IS NULL OR (${table.fireInsuranceRatePerMillonX100k} >= 0 AND ${table.fireInsuranceRatePerMillonX100k} <= 999999999)`,
+    ),
+    check(
+      "loans_extra_insurance_rate_bounds",
+      sql`${table.extraInsuranceRatePerMillonX100k} IS NULL OR (${table.extraInsuranceRatePerMillonX100k} >= 0 AND ${table.extraInsuranceRatePerMillonX100k} <= 999999999)`,
+    ),
+    // Amortization-mode gate: 'bank' must carry the four core config fields…
+    check(
+      "loans_bank_mode_requires_config",
+      sql`${table.amortizationMode} IS NULL OR (${table.chargedRateBp} IS NOT NULL AND ${table.fixedCuotaCents} IS NOT NULL AND ${table.termMonths} IS NOT NULL AND ${table.cuotaDay} IS NOT NULL)`,
+    ),
+    // …and a simple tracker (null) must carry NO bank config at all.
+    check(
+      "loans_simple_mode_excludes_bank_config",
+      sql`${table.amortizationMode} IS NOT NULL OR (${table.chargedRateBp} IS NULL AND ${table.contractualRateBp} IS NULL AND ${table.termMonths} IS NULL AND ${table.fixedCuotaCents} IS NULL AND ${table.cuotaDay} IS NULL AND ${table.propertyValueCents} IS NULL AND ${table.insuredBaseCents} IS NULL AND ${table.lifeInsuranceRatePerMillonX100k} IS NULL AND ${table.fireInsuranceRatePerMillonX100k} IS NULL AND ${table.extraInsuranceRatePerMillonX100k} IS NULL AND ${table.otherChargesCents} IS NULL AND ${table.moraRateBp} IS NULL)`,
+    ),
   ],
 );
 
@@ -369,7 +468,9 @@ export const loans = pgTable(
  * Loan payments ledger: 'payment' rows reduce the debt and MIRROR an expense
  * in `transactions` (paying a loan is real money leaving the household);
  * 'interest' rows are written by the lazy monthly accrual (or by admin
- * balance true-ups) and never mirror. Member-less exactly for 'interest'.
+ * balance true-ups) and never mirror; 'charge' rows are the bank-style cuota
+ * components (seguros, otros cargos, mora) written at each cuota close.
+ * Engine rows ('interest'/'charge') are member-less and note-keyed.
  */
 export const loanPayments = pgTable(
   "loan_payments",
@@ -378,7 +479,7 @@ export const loanPayments = pgTable(
     loanId: uuid("loan_id")
       .notNull()
       .references(() => loans.id, { onDelete: "restrict" }),
-    /** null exactly for 'interest' rows — a charge belongs to the loan, not a member. */
+    /** null exactly for 'interest'/'charge' rows — engine entries belong to the loan, not a member. */
     memberId: uuid("member_id").references(() => users.id, { onDelete: "restrict" }),
     kind: loanPaymentKindEnum("kind").notNull(),
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
@@ -387,22 +488,23 @@ export const loanPayments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Payments are positive; interest is signed (a balance true-up that
-    // REDUCES the debt records a negative interest entry).
+    // Payments and charges are positive; interest is signed (a balance
+    // true-up that REDUCES the debt records a negative interest entry).
     check(
       "loan_payments_amount_positive",
       sql`(${table.kind} = 'interest' AND ${table.amountCents} <> 0) OR ${table.amountCents} > 0`,
     ),
-    // 'interest' ⇔ member IS NULL: payments always name a member.
+    // Engine rows ⇔ member IS NULL: payments always name a member.
     check(
-      "loan_payments_interest_member_exclusive",
-      sql`(${table.kind} = 'interest') = (${table.memberId} IS NULL)`,
+      "loan_payments_engine_member_exclusive",
+      sql`(${table.kind} IN ('interest', 'charge')) = (${table.memberId} IS NULL)`,
     ),
-    // One interest entry per loan/month/cause — makes lazy concurrent
-    // catch-ups idempotent even when two requests race on the same view.
-    uniqueIndex("loan_payments_interest_unique")
+    // One engine entry per loan/day/cause (note-keyed) — makes lazy
+    // concurrent catch-ups idempotent even when two requests race on the
+    // same view, for daily interest AND cuota component charges alike.
+    uniqueIndex("loan_payments_charge_unique")
       .on(table.loanId, table.date, table.note)
-      .where(sql`${table.kind} = 'interest'`),
+      .where(sql`${table.kind} IN ('interest', 'charge')`),
     index("loan_payments_loan_date_idx").on(table.loanId, table.date),
   ],
 );
