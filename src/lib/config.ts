@@ -26,18 +26,12 @@ const envSchema = z.object({
   APP_NAME: z.string().min(1).default("mony-home"),
   /**
    * Password (pre-hash) assigned to the seeded admin user by `npm run db:seed`.
-   * Optional (seeding is a manual step), but there is NO default: the old
-   * "changeme-on-first-login" placeholder is rejected explicitly so a
-   * forgotten variable can never ship a guessable credential.
+   * Optional (seeding is a manual step), with NO default. Strength and
+   * placeholder rejection are enforced by the seed script itself (PLACEHOLDER
+   * + length guards in src/db/seed.ts): a bad value is a seed-only concern
+   * and must not fail every runtime request path through the shared schema.
    */
-  SEED_ADMIN_PASSWORD: z
-    .string()
-    .min(8)
-    .optional()
-    .refine((value) => value !== "changeme-on-first-login", {
-      message:
-        'Refusing the placeholder password "changeme-on-first-login". Set a real SEED_ADMIN_PASSWORD (min 8 chars) before seeding.',
-    }),
+  SEED_ADMIN_PASSWORD: z.string().optional(),
   /**
    * Seed scope for `npm run db:seed`. `false` = production bootstrap: only
    * categories + the admin user. Anything else keeps full demo seeding.

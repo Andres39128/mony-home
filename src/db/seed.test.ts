@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { loadConfig } from "@/lib/config";
-import { seedDatabase } from "@/db/seed";
+import { PLACEHOLDER_SEED_PASSWORD, seedDatabase } from "@/db/seed";
 import { budgets, categories, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import { createTestDb } from "@/db/test-utils";
 
@@ -139,6 +139,20 @@ describe("seedDatabase", () => {
 
   it("refuses to seed without SEED_ADMIN_PASSWORD (no default anymore)", async () => {
     await expect(seedDatabase(db, loadConfig({}))).rejects.toThrow(/SEED_ADMIN_PASSWORD/);
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("refuses the old changeme placeholder password", async () => {
+    await expect(
+      seedDatabase(db, loadConfig({ SEED_ADMIN_PASSWORD: PLACEHOLDER_SEED_PASSWORD })),
+    ).rejects.toThrow(/placeholder/);
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("refuses too-short passwords (policy lives in the seed, not the env schema)", async () => {
+    await expect(seedDatabase(db, loadConfig({ SEED_ADMIN_PASSWORD: "short" }))).rejects.toThrow(
+      /SEED_ADMIN_PASSWORD/,
+    );
     expect(await db.select().from(users)).toHaveLength(0);
   });
 });

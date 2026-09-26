@@ -8,15 +8,12 @@ import { users } from "@/db/schema";
 import {
   IP_ATTEMPT_RETENTION_MS,
   IP_WINDOW_MS,
-  LOCKOUT_MS,
-  MAX_FAILED_ATTEMPTS,
-  MAX_IP_ATTEMPTS,
   SESSION_TTL_MS,
   UNKNOWN_IP,
+  MAX_IP_ATTEMPTS,
   createSession,
   destroySession,
   getSessionUser,
-  hashPassword,
   hashToken,
   ipFromHeaders,
   login,
@@ -25,6 +22,7 @@ import {
   setPassword,
   ForbiddenError,
 } from "@/lib/auth";
+import { LOCKOUT_MS, MAX_FAILED_ATTEMPTS, hashPassword } from "@/lib/password";
 import { loginIpAttempts, sessions } from "@/db/schema";
 
 /**

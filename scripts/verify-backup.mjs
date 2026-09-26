@@ -36,7 +36,10 @@ const CORE_TABLES = ["users", "transactions", "savings_goals"];
  */
 const STRICT = process.env.BACKUP_VERIFY_STRICT === "1";
 
-/** Manual steps printed when gh is unavailable (the drill exits 0 then). */
+/**
+ * Manual steps printed when gh is unavailable: the drill exits 0 by default
+ * (environment limit, not a backup failure), or 1 with BACKUP_VERIFY_STRICT=1.
+ */
 const MANUAL_STEPS = `
 Manual restore check (README "Backups"):
   1. gh run list --workflow=backup.yml            # pick a successful run

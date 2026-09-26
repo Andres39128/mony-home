@@ -12,6 +12,19 @@ const SRC = new URL("../src/", import.meta.url);
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    // "server-only" throws under Node's default condition (its index.js
+    // exists to be imported only via the react-server condition), and
+    // src/db/index.ts imports it at top level. Plain-node scripts must get
+    // the package's empty build instead — same trick as vitest.config.ts
+    // resolve.conditions. Direct file URL: the package exports only map "."
+    // by condition, so "server-only/empty.js" is not resolvable as a
+    // subpath import.
+    if (specifier === "server-only") {
+      return {
+        url: new URL("../node_modules/server-only/empty.js", import.meta.url).href,
+        shortCircuit: true,
+      };
+    }
     // App-alias imports: "@/db/schema" → <root>/src/db/schema(.ts).
     if (specifier.startsWith("@/")) {
       const base = new URL(specifier.slice(2), SRC);

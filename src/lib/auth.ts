@@ -19,20 +19,17 @@
  *   lockout for attacks that rotate usernames.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { hash, verify } from "@node-rs/argon2";
-import { and, count, desc, eq, gt, lt, ne } from "drizzle-orm";
+import { and, count, desc, eq, gt, lt } from "drizzle-orm";
 import { loginIpAttempts, sessions, users, type roleEnum } from "@/db/schema";
 import type { Database } from "@/db";
+import { LOCKOUT_MS, MAX_FAILED_ATTEMPTS, hashPassword, verifyPassword } from "@/lib/password";
+import { revokeUserSessions } from "@/lib/sessions";
 
 /** Cookie name; isolated in this module's public surface for the edge proxy. */
 export const SESSION_COOKIE_NAME = "mony_session";
 
 /** How long a session (and its cookie) lives: 30 days. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-/** Failed attempts before the account locks. */
-export const MAX_FAILED_ATTEMPTS = 5;
-/** Lockout window once MAX_FAILED_ATTEMPTS is reached. */
-export const LOCKOUT_MS = 10 * 60 * 1000;
 
 /** Failed logins allowed per IP before the IP is shut out of login. */
 export const MAX_IP_ATTEMPTS = 10;
@@ -90,7 +87,7 @@ export async function login(
   let [user] = await db.select().from(users).where(eq(users.username, normalized));
 
   if (!user) {
-    await verify(DUMMY_HASH, password);
+    await verifyPassword(DUMMY_HASH, password);
     return { ok: false, error: "invalid_credentials" };
   }
 
@@ -107,7 +104,7 @@ export async function login(
 
   if (!user.isActive) return { ok: false, error: "inactive" };
 
-  if (!(await verify(user.passwordHash, password))) {
+  if (!(await verifyPassword(user.passwordHash, password))) {
     const failedAttempts = user.failedAttempts + 1;
     const lockedUntil =
       failedAttempts >= MAX_FAILED_ATTEMPTS
@@ -278,27 +275,6 @@ export async function destroySession(
 }
 
 /**
- * Revoke every session of a user — run after credential rotation so a stolen
- * session cannot outlive a password change/reset (sessions carry no password
- * binding). `exceptTokenHash` keeps the caller's current session alive on the
- * self-service path; the admin reset path omits it to kill them all.
- */
-export async function revokeUserSessions(
-  // Accepts the pooled client or a transaction handle (structural, no cast).
-  db: Pick<Database, "delete">,
-  userId: string,
-  exceptTokenHash?: string,
-): Promise<void> {
-  await db
-    .delete(sessions)
-    .where(
-      exceptTokenHash
-        ? and(eq(sessions.userId, userId), ne(sessions.tokenHash, exceptTokenHash))
-        : eq(sessions.userId, userId),
-    );
-}
-
-/**
  * The user's not-yet-expired sessions, newest expiry first (e.g. the profile
  * page's expiry hint with limit 1). Only active sessions count: an expired
  * row is dead state, not a session worth showing.
@@ -327,16 +303,6 @@ export class ForbiddenError extends Error {
 /** Guard for admin-only operations; throws ForbiddenError. */
 export function requireAdmin(user: SessionUser): void {
   if (user.role !== "admin") throw new ForbiddenError();
-}
-
-/** Verify a password against a stored argon2 hash (login + self-service). */
-export function verifyPassword(passwordHash: string, password: string): Promise<boolean> {
-  return verify(passwordHash, password);
-}
-
-/** argon2id with library defaults (m=19456, t=2, p=1). */
-export function hashPassword(password: string): Promise<string> {
-  return hash(password);
 }
 
 /** Set (or reset) a user's password, e.g. from the admin members screen. */

@@ -9,7 +9,8 @@ import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { users } from "@/db/schema";
 import type { Database } from "@/db";
-import { hashPassword, verifyPassword, revokeUserSessions, MAX_FAILED_ATTEMPTS, LOCKOUT_MS } from "@/lib/auth";
+import { LOCKOUT_MS, MAX_FAILED_ATTEMPTS, hashPassword, verifyPassword } from "@/lib/password";
+import { revokeUserSessions } from "@/lib/sessions";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 
 export interface MemberView {

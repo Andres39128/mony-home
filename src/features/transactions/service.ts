@@ -270,17 +270,23 @@ export async function getReceiptFile(
   user: SessionUser,
   id: string,
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; mimeType: string } | null> {
-  const [row] = await db
-    .select({
-      bytes: movementReceipts.bytes,
-      mimeType: movementReceipts.mimeType,
-      memberId: transactions.memberId,
-    })
+  // Ownership first on metadata only (no blob read): an unauthorized request
+  // must not force the bytea transfer out of the DB.
+  const [meta] = await db
+    .select({ memberId: transactions.memberId })
     .from(movementReceipts)
     .innerJoin(transactions, eq(movementReceipts.transactionId, transactions.id))
     .where(eq(movementReceipts.id, id))
     .limit(1);
-  if (!row || (user.role !== "admin" && row.memberId !== user.id)) return null;
+  if (!meta || (user.role !== "admin" && meta.memberId !== user.id)) return null;
+
+  const [row] = await db
+    .select({ bytes: movementReceipts.bytes, mimeType: movementReceipts.mimeType })
+    .from(movementReceipts)
+    .where(eq(movementReceipts.id, id))
+    .limit(1);
+  // Raced with a delete between the two reads — same answer as missing.
+  if (!row) return null;
   return { bytes: new Uint8Array(row.bytes), mimeType: row.mimeType };
 }
 

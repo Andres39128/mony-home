@@ -29,22 +29,47 @@ function isoDay(year: number, month: number, day: number, lastDay: number): stri
   return `${year}-${String(month).padStart(2, "0")}-${String(clamped).padStart(2, "0")}`;
 }
 
+/**
+ * The old placeholder password, refused at seed time so a forgotten variable
+ * can never ship a guessable credential. Lives here (not in the shared env
+ * schema) because seeding is a CLI concern — an invalid value must not break
+ * every runtime request path.
+ */
+export const PLACEHOLDER_SEED_PASSWORD = "changeme-on-first-login";
+
 export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void> {
   // Guard: seeding is destructive-ish (writes users/categories); require an
   // explicit escape hatch before it runs against a production database.
+  // ponytail: this trusts NODE_ENV, not the database itself — DATABASE_URL is
+  // always the remote pooler (even in dev), so no host heuristic can tell
+  // them apart. A real prod-DB detector would need an explicit marker (e.g.
+  // a SEED_TARGET env allowlist) if NODE_ENV ever diverges from the target.
   if (process.env.NODE_ENV === "production" && process.env.SEED_ALLOW_PROD !== "yes") {
     throw new Error("Refusing to seed in production without SEED_ALLOW_PROD=yes");
   }
-  // Guard: the admin password has NO default anymore — never seed a
-  // guessable credential just because the variable was forgotten.
+  // Guards: the admin password has NO default — never seed a guessable
+  // credential (the old placeholder) or a too-short one just because the
+  // variable was forgotten. Enforced here, not in the env schema: this is a
+  // seed-only concern.
   if (config.SEED_ADMIN_PASSWORD === undefined) {
     throw new Error(
       "SEED_ADMIN_PASSWORD is required to seed (it has no default anymore). Set it to a real password (min 8 chars) and re-run.",
     );
   }
+  if (config.SEED_ADMIN_PASSWORD === PLACEHOLDER_SEED_PASSWORD) {
+    throw new Error(
+      `Refusing the placeholder password "${PLACEHOLDER_SEED_PASSWORD}". Set a real SEED_ADMIN_PASSWORD (min 8 chars) before seeding.`,
+    );
+  }
+  if (config.SEED_ADMIN_PASSWORD.length < 8) {
+    throw new Error(
+      "SEED_ADMIN_PASSWORD must be at least 8 characters. Set a real password and re-run.",
+    );
+  }
+  const password = config.SEED_ADMIN_PASSWORD;
 
   // --- Admin user (always; username is unique; conflicts skipped) ---
-  const passwordHash = await hash(config.SEED_ADMIN_PASSWORD);
+  const passwordHash = await hash(password);
   await db
     .insert(users)
     .values({ username: "admin", passwordHash, name: "Admin", role: "admin" as const })
@@ -327,7 +352,11 @@ async function seed(): Promise<void> {
 
   // dep: postgres — Postgres wire driver for the seed CLI; single package,
   // zero transitive deps, native ESM. Rejected `pg` (more transitive deps, CJS).
-  const client = postgres(config.DATABASE_URL);
+  const client = postgres(config.DATABASE_URL, {
+    // Same Supavisor constraint as the app client (src/db/index.ts): the
+    // transaction-mode pooler breaks named prepared statements.
+    prepare: false,
+  });
   const db = drizzle(client);
 
   try {

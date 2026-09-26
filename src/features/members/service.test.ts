@@ -17,7 +17,8 @@ import {
   updateMemberSchema,
   updateOwnName,
 } from "@/features/members/service";
-import { login, createSession, getSessionUser, hashToken, MAX_FAILED_ATTEMPTS } from "@/lib/auth";
+import { MAX_FAILED_ATTEMPTS } from "@/lib/password";
+import { login, createSession, getSessionUser, hashToken } from "@/lib/auth";
 import { sessions } from "@/db/schema";
 
 /**

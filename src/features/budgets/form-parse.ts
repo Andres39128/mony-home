@@ -22,12 +22,12 @@ import {
 } from "@/lib/money-errors";
 
 /** Inputs are named `amounts.<categoryId>`; one form covers every category. */
-export const AMOUNT_PREFIX = "amounts.";
+const AMOUNT_PREFIX = "amounts.";
 
 const INVALID_MONTH_MESSAGE = "El mes indicado no es válido.";
 const INVALID_CATEGORY_MESSAGE = "Categoría inválida.";
 
-export const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Mes inválido.");
+const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 
 /** Non-empty es-AR free text that parses to a non-negative cent amount. */
 const amountSchema = z.string().superRefine((raw, ctx) => {
@@ -44,14 +44,29 @@ const budgetEntrySchema = z.object({
   amount: amountSchema,
 });
 
-export type ParseBudgetFormResult =
-  | { ok: true; month: string; entries: BudgetEntryInput[] }
+/** Failed-parse result: either a single message or per-field errors. */
+export type ParseFailure =
   | { ok: false; error: string }
   | { ok: false; fieldErrors: Record<string, string> };
 
-export function parseBudgetForm(formData: FormData): ParseBudgetFormResult {
+/**
+ * Parse just the hidden `month` input — the copy-previous-month form carries
+ * no amount fields, so running the full budget parse there would reject
+ * valid submissions. The service still re-validates the month.
+ */
+export function parseMonth(formData: FormData): { ok: true; month: string } | ParseFailure {
   const month = monthSchema.safeParse(formData.get("month"));
   if (!month.success) return { ok: false, error: INVALID_MONTH_MESSAGE };
+  return { ok: true, month: month.data };
+}
+
+type ParseBudgetFormResult =
+  | { ok: true; month: string; entries: BudgetEntryInput[] }
+  | ParseFailure;
+
+export function parseBudgetForm(formData: FormData): ParseBudgetFormResult {
+  const month = parseMonth(formData);
+  if (!month.ok) return month;
 
   const fieldErrors: Record<string, string> = {};
   const entries: BudgetEntryInput[] = [];
@@ -71,5 +86,5 @@ export function parseBudgetForm(formData: FormData): ParseBudgetFormResult {
   }
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
 
-  return { ok: true, month: month.data, entries };
+  return { ok: true, month: month.month, entries };
 }

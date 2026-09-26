@@ -59,16 +59,16 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ SEED_DEMO_DATA: "1" })).toThrowError(/SEED_DEMO_DATA/);
   });
 
-  it("accepts a real SEED_ADMIN_PASSWORD and rejects too-short values", () => {
+  it("keeps SEED_ADMIN_PASSWORD verbatim (strength/placeholder is the seed's concern)", () => {
+    // The shared schema must not fail every runtime path over a seed-only
+    // variable: even short/placeholder values parse here; src/db/seed.ts
+    // refuses them at seed time.
     expect(loadConfig({ SEED_ADMIN_PASSWORD: "real-password-9" }).SEED_ADMIN_PASSWORD).toBe(
       "real-password-9",
     );
-    expect(() => loadConfig({ SEED_ADMIN_PASSWORD: "short" })).toThrowError(/SEED_ADMIN_PASSWORD/);
-  });
-
-  it("rejects the old changeme placeholder for SEED_ADMIN_PASSWORD", () => {
-    expect(() => loadConfig({ SEED_ADMIN_PASSWORD: "changeme-on-first-login" })).toThrowError(
-      /SEED_ADMIN_PASSWORD[\s\S]*placeholder/,
+    expect(loadConfig({ SEED_ADMIN_PASSWORD: "short" }).SEED_ADMIN_PASSWORD).toBe("short");
+    expect(loadConfig({ SEED_ADMIN_PASSWORD: "changeme-on-first-login" }).SEED_ADMIN_PASSWORD).toBe(
+      "changeme-on-first-login",
     );
   });
 });

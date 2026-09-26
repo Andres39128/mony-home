@@ -3,7 +3,7 @@
 import { getDb } from "@/db";
 import { adminGuard } from "@/features/auth/session";
 import { copyFromPreviousMonth, setForMonth } from "@/features/budgets/service";
-import { parseBudgetForm } from "@/features/budgets/form-parse";
+import { parseBudgetForm, parseMonth, type ParseFailure } from "@/features/budgets/form-parse";
 import type { FormState } from "@/lib/form-state";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar el presupuesto.";
@@ -29,14 +29,17 @@ function budgetErrorMessage(error: string): FormState {
   }
 }
 
+/** Map a failed form parse onto its FormState shape (field errors vs message). */
+function parseFailureState(parsed: ParseFailure): FormState {
+  return "fieldErrors" in parsed ? { fieldErrors: parsed.fieldErrors } : { error: parsed.error };
+}
+
 export async function setBudgetsAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const guard = await adminGuard(ADMIN_REQUIRED_MESSAGE);
   if (!guard.ok) return guard;
 
   const parsed = parseBudgetForm(formData);
-  if (!parsed.ok) {
-    return "fieldErrors" in parsed ? { fieldErrors: parsed.fieldErrors } : { error: parsed.error };
-  }
+  if (!parsed.ok) return parseFailureState(parsed);
 
   const result = await setForMonth(getDb(), guard.user, parsed.month, parsed.entries);
   if (!result.ok) return budgetErrorMessage(result.error);
@@ -50,10 +53,10 @@ export async function copyPreviousBudgetAction(
   const guard = await adminGuard(ADMIN_REQUIRED_MESSAGE);
   if (!guard.ok) return guard;
 
-  const parsed = parseBudgetForm(formData);
-  if (!parsed.ok) {
-    return "fieldErrors" in parsed ? { fieldErrors: parsed.fieldErrors } : { error: parsed.error };
-  }
+  // This form carries only the hidden month input — parsing the full budget
+  // form here would fail on the missing amount fields.
+  const parsed = parseMonth(formData);
+  if (!parsed.ok) return parseFailureState(parsed);
 
   const result = await copyFromPreviousMonth(getDb(), guard.user, parsed.month);
   if (!result.ok) return budgetErrorMessage(result.error);
