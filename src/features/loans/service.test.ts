@@ -30,6 +30,11 @@ import { todayIso } from "@/lib/date";
 import type { SessionUser } from "@/lib/auth";
 import { catchUpBankInterest } from "@/features/loans/accrual";
 import { allocateWaterfall } from "@/features/loans/amortization";
+import {
+  COMPOUNDED_33_DAY_INTEREST_CENTS,
+  GOLDEN,
+  seedGoldenBankLoan,
+} from "@/features/loans/golden-fixture";
 
 /**
  * Loans service suite: loan CRUD + scope CHECK, outstanding math in exact
@@ -730,65 +735,8 @@ describe("bank loan configuration — service roundtrip (integration on PGlite)"
   });
 });
 
-/** Golden Davivienda statement constants (R2 Spec Amendment):
- *  saldo0 = $204.993.414,80, EA cobrada 1295 bp, cuota $2.628.000,00,
- *  33-day interest line; per-millón rates BACK-COMPUTED so the saldo-based
- *  vida = $96.617,00 and the property-based incendio = $74.136,00 exactly. */
-const GOLDEN = {
-  saldo0Cents: 20_499_341_480,
-  propertyCents: 33_980_260_000,
-  chargedRateBp: 1295,
-  cuotaCents: 262_800_000,
-  days: 33,
-  // Back-computed integers (round(target × 1e11 / base)); engine-exact by
-  // construction: round(saldo0/1e6 × 47.131.758/1e5) = 9.661.700 etc.
-  lifeRateX100k: 47_131_758,
-  fireRateX100k: 21_817_373,
-  vidaCents: 9_661_700,
-  incendioCents: 7_413_600,
-  interest33Cents: 226_940_638, // engine day-by-day compounded sum (ground truth)
-  bankStatedInterestCents: 208_346_634, // $2.083.466,34 statement line
-} as const;
-
-interface GoldenOverrides {
-  name?: string;
-  principalCents?: number;
-  lifeX100k?: number;
-  fireX100k?: number;
-  otrosCents?: number;
-  propertyCents?: number;
-  moraRateBp?: number;
-}
-
-/** Bank-mode loan at golden scale, created 2026-01-10, cuota closing day 25. */
-async function seedGoldenBankLoan(
-  db: PgliteDatabase,
-  overrides: GoldenOverrides = {},
-): Promise<string> {
-  const [loan] = await db
-    .insert(loans)
-    .values({
-      name: overrides.name ?? "Golden Davivienda",
-      kind: "mortgage",
-      entity: "Davivienda",
-      scope: "common",
-      principalCents: overrides.principalCents ?? GOLDEN.saldo0Cents,
-      amortizationMode: "bank",
-      chargedRateBp: GOLDEN.chargedRateBp,
-      contractualRateBp: 1747,
-      termMonths: 228,
-      fixedCuotaCents: GOLDEN.cuotaCents,
-      cuotaDay: 25,
-      lifeInsuranceRatePerMillonX100k: overrides.lifeX100k ?? null,
-      fireInsuranceRatePerMillonX100k: overrides.fireX100k ?? null,
-      otherChargesCents: overrides.otrosCents ?? null,
-      propertyValueCents: overrides.propertyCents ?? null,
-      moraRateBp: overrides.moraRateBp ?? null,
-      createdAt: new Date("2026-01-10T12:00:00Z"),
-    })
-    .returning();
-  return loan.id;
-}
+/** Golden Davivienda constants and the seed helper live in the shared
+ * golden-fixture module (used by accrual.test.ts and amortization.test.ts too). */
 
 describe("golden reconciliation — period statement (R2 amendment, integration)", () => {
   let db: PgliteDatabase;
@@ -822,7 +770,7 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
   it("engine interest over the 33-day window equals the compounded formula EXACTLY", async () => {
     // Components OFF: the 33 days accrue over the unaugmented saldo0, which
     // is exactly the statement's interest-line basis.
-    const loanId = await seedGoldenBankLoan(db, { name: "Dorada 33" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Dorada 33", principalCents: GOLDEN.saldo0Cents });
     await catchUpBankInterest(appDb, loanId, new Date("2026-02-13T12:00:00Z")); // yesterday 02-12
 
     const rows = (await ledgerOf(loanId)).filter((r) => r.kind === "interest");
@@ -841,7 +789,7 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
     expect(rows.at(-1)!.amountCents).toBe(6_913_762);
 
     const sum = rows.reduce((acc, r) => acc + r.amountCents, 0);
-    expect(sum).toBe(GOLDEN.interest33Cents);
+    expect(sum).toBe(COMPOUNDED_33_DAY_INTEREST_CENTS);
 
     // Closed form (1+EA)^(33/365)−1 differs only by accumulated rounding:
     // the amendment bound is ≤ 1 cent per accrued day.
@@ -854,6 +802,7 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
     // run on the period-start saldo (saldo0) and the constant property value.
     const loanId = await seedGoldenBankLoan(db, {
       name: "Dorada componentes",
+      principalCents: GOLDEN.saldo0Cents,
       lifeX100k: GOLDEN.lifeRateX100k,
       fireX100k: GOLDEN.fireRateX100k,
       propertyCents: GOLDEN.propertyCents,
@@ -872,28 +821,28 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
       vida + incendio,
       0,
       0,
-      GOLDEN.interest33Cents,
+      COMPOUNDED_33_DAY_INTEREST_CENTS,
     );
-    expect(vida + incendio + GOLDEN.interest33Cents + capitalCents).toBe(GOLDEN.cuotaCents);
+    expect(vida + incendio + COMPOUNDED_33_DAY_INTEREST_CENTS + capitalCents).toBe(GOLDEN.cuotaCents);
     expect(capitalCents).toBe(18_784_062); // $187.840,62 — the golden residual
     expect(capitalCents).toBe(
-      GOLDEN.cuotaCents - (vida + incendio + GOLDEN.interest33Cents),
+      GOLDEN.cuotaCents - (vida + incendio + COMPOUNDED_33_DAY_INTEREST_CENTS),
     );
 
     // Bank delta (R2 amendment #4): recorded in the output, NOT asserted
     // equal — the drift is absorbed operationally by the true-up.
     const delta = {
-      engineInterestCents: GOLDEN.interest33Cents,
+      engineInterestCents: COMPOUNDED_33_DAY_INTEREST_CENTS,
       bankStatedInterestCents: GOLDEN.bankStatedInterestCents,
-      deltaCents: GOLDEN.interest33Cents - GOLDEN.bankStatedInterestCents,
+      deltaCents: COMPOUNDED_33_DAY_INTEREST_CENTS - GOLDEN.bankStatedInterestCents,
     };
     console.info("[golden] engine vs bank statement interest line:", delta);
-    expect(delta.deltaCents).toBe(GOLDEN.interest33Cents - GOLDEN.bankStatedInterestCents);
   });
 
   it("listLoanPeriods renders the 5 sections and the saldo identity EXACTLY (golden period 1)", async () => {
     const loanId = await seedGoldenBankLoan(db, {
       name: "Dorada período",
+      principalCents: GOLDEN.saldo0Cents,
       lifeX100k: GOLDEN.lifeRateX100k,
       fireX100k: GOLDEN.fireRateX100k,
       propertyCents: GOLDEN.propertyCents,
@@ -1003,7 +952,7 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
 
     // Bank loan whose rows never reached an anchor: the open tail is not a
     // closed cuota, so the statement stays empty.
-    const loanId = await seedGoldenBankLoan(db, { name: "Dorada abierta" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Dorada abierta", principalCents: GOLDEN.saldo0Cents });
     await db.insert(loanPayments).values({
       loanId,
       memberId: payerId,
@@ -1017,6 +966,7 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
   it("listLoans and the true-up are charge-aware: unpaid charges are debt (D5)", async () => {
     const loanId = await seedGoldenBankLoan(db, {
       name: "Dorada agregación",
+      principalCents: GOLDEN.saldo0Cents,
       lifeX100k: GOLDEN.lifeRateX100k,
       fireX100k: GOLDEN.fireRateX100k,
       propertyCents: GOLDEN.propertyCents,

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   allocateWaterfall,
   dailyInterestCents,
-  derivedFrenchCuotaCents,
   moraDailyCents,
 } from "@/features/loans/amortization";
+import { FLAT_33_DAY_INTEREST_CENTS, GOLDEN } from "@/features/loans/golden-fixture";
 
 /**
  * Pure-math unit suite for the bank-style amortization module (design D2,
@@ -13,19 +13,16 @@ import {
  * approximations from the tasks sketch.
  */
 
-// Seed constants from the liquidación (spec: backfill seed / golden reconciliation).
-const SALDO_0_CENTS = 20_499_341_480; // 204,993,414.80 — golden period-start saldo
-const SEED_PRINCIPAL_CENTS = 20_461_963_414; // 204,619,634.14
-const STORED_CUOTA_CENTS = 262_800_000; // 2,628,000.00 — bank-published, ALWAYS wins (A3)
-const EA_CHARGED_BP = 1295; // 12.95% EA — the only rate that drives math
-const TERM_MONTHS = 228;
-
-// Golden period components (design testing strategy: back-computed so the
-// saldo-based components reproduce the statement lines exactly).
-const GOLDEN_VIDA_CENTS = 9_661_700; // 96,617.00
-const GOLDEN_INCENDIO_CENTS = 7_413_600; // 74,136.00
+// Golden constants from the liquidación (spec: backfill seed / golden reconciliation).
+const {
+  saldo0Cents: SALDO_0_CENTS, // 204,993,414.80 — golden period-start saldo
+  chargedRateBp: EA_CHARGED_BP, // 12.95% EA — the only rate that drives math
+  cuotaCents: STORED_CUOTA_CENTS, // 2,628,000.00 — bank-published, ALWAYS wins (A3)
+  vidaCents: GOLDEN_VIDA_CENTS, // 96,617.00
+  incendioCents: GOLDEN_INCENDIO_CENTS, // 74,136.00
+} = GOLDEN;
 const GOLDEN_SEGUROS_CENTS = GOLDEN_VIDA_CENTS + GOLDEN_INCENDIO_CENTS; // 17,075,300
-const GOLDEN_INTERES_CENTS = 225_731_286; // 33 daily rows × 6,840,342c at saldo0/EA1295
+const GOLDEN_INTERES_CENTS = FLAT_33_DAY_INTEREST_CENTS;
 
 describe("dailyInterestCents", () => {
   it("charges round(saldo × ((1+EA)^(1/365) − 1)) on the golden saldo at EA 1295bp", () => {
@@ -56,30 +53,6 @@ describe("dailyInterestCents", () => {
     expect(dailyInterestCents(SALDO_0_CENTS, EA_CHARGED_BP)).toBe(
       Math.round(SALDO_0_CENTS * ((1 + EA_CHARGED_BP / 10_000) ** (1 / 365) - 1)),
     );
-  });
-});
-
-describe("derivedFrenchCuotaCents", () => {
-  it("derives the French cuota for the seed params — and NOT the stored cuota (stored wins)", () => {
-    const derived = derivedFrenchCuotaCents(SEED_PRINCIPAL_CENTS, EA_CHARGED_BP, TERM_MONTHS);
-    expect(derived).toBe(231_607_730); // 2,316,077.30 — pure P/i/n derivation
-    // Spec scenario "Derived vs stored cuota": derivation ≠ stored, stored wins.
-    // The bank-published cuota bundles insurance on top of the pure annuity.
-    expect(derived).not.toBe(STORED_CUOTA_CENTS);
-  });
-
-  it("triangulates on a short 12-month term", () => {
-    expect(derivedFrenchCuotaCents(100_000_000, EA_CHARGED_BP, 12)).toBe(8_896_087);
-  });
-
-  it("triangulates on the pactada rate over the seed term", () => {
-    expect(derivedFrenchCuotaCents(SEED_PRINCIPAL_CENTS, 1747, TERM_MONTHS)).toBe(290_011_641);
-  });
-
-  it("splits the principal straight-line at EA 0bp (no NaN)", () => {
-    // 0% is inside the schema CHECK domain (0..100000); the annuity formula
-    // degenerates to 0/0 there, so the helper must fall back to P/n.
-    expect(derivedFrenchCuotaCents(1_000_000, 0, 10)).toBe(100_000);
   });
 });
 

@@ -46,11 +46,17 @@
  */
 import { and, eq, isNotNull, max, or } from "drizzle-orm";
 import { loanPayments, loans } from "@/db/schema";
-import type { Database } from "@/db";
+import { type AccrualDb, type AccrualReader, type Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import { formatRatePercent } from "@/features/savings/math";
 import { dailyInterestCents, moraDailyCents } from "@/features/loans/amortization";
-import { monthIndexOfDate, todayIso } from "@/lib/date";
+import {
+  dayIndexOfDate,
+  dayIndexOfIso,
+  isoOfDayIndex,
+  monthIndexOfDate,
+  todayIso,
+} from "@/lib/date";
 
 /** Months since year 0 for a 'YYYY-MM-DD' string — comparable and add/subtract friendly. */
 function monthIndexOfIso(iso: string): number {
@@ -130,11 +136,6 @@ export async function catchUpAllLoanInterest(db: Database, now: Date = new Date(
     }
   }
 }
-
-/** Any Postgres drizzle database — the app pool in production, PGlite in tests. */
-type AccrualDb = Parameters<Parameters<Database["transaction"]>[0]>[0];
-/** Read-only view (pool OR open transaction) for the cheap base query. */
-type AccrualReader = Pick<Database, "select">;
 
 /** Accrual base month: latest interest month, or the loan creation month. */
 async function baseMonthFor(
@@ -221,30 +222,13 @@ async function accrueLoan(
 /* ────────────────────────── bank engine (mode 'bank') ────────────────── */
 
 /** One visible ledger row per loan per day; constant note keeps the
- * (loan_id, date, note) partial unique index idempotent across rate edits. */
-const BANK_DAILY_INTEREST_NOTE = "Interés diario";
-const LIFE_INSURANCE_NOTE = "Seguro de vida";
-const FIRE_INSURANCE_NOTE = "Seguro de incendio";
-const OTHER_CHARGES_NOTE = "Otros cargos";
-const MORA_NOTE = "Mora";
-
-const DAY_MS = 86_400_000;
-
-/** Whole days since 1970-01-01 for a 'YYYY-MM-DD' string (calendar math only). */
-function dayIndexOfIso(iso: string): number {
-  const [year, month, day] = iso.split("-").map(Number);
-  return Date.UTC(year, month - 1, day) / DAY_MS;
-}
-
-/** Day index of a Date instant, in the app timezone. */
-function dayIndexOfDate(date: Date): number {
-  return dayIndexOfIso(todayIso(date));
-}
-
-/** Day index → 'YYYY-MM-DD'. */
-function isoOfDayIndex(dayIndex: number): string {
-  return new Date(dayIndex * DAY_MS).toISOString().slice(0, 10);
-}
+ * (loan_id, date, note) partial unique index idempotent across rate edits.
+ * Exported so read paths classify rows by the SAME constants (no drift). */
+export const BANK_DAILY_INTEREST_NOTE = "Interés diario";
+export const LIFE_INSURANCE_NOTE = "Seguro de vida";
+export const FIRE_INSURANCE_NOTE = "Seguro de incendio";
+export const OTHER_CHARGES_NOTE = "Otros cargos";
+export const MORA_NOTE = "Mora";
 
 /**
  * Per-millón component charge in cents: round(baseCents / 1e6 × rateX100k / 1e5).

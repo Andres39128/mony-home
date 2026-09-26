@@ -117,7 +117,7 @@ function PaymentHistory({ entries }: { entries: PaymentView[] }) {
             // Charge rows carry their component in the note — render it as
             // the pill itself (seguros, otros cargos, mora).
             <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
-              {entry.note ?? "Cargo"}
+              {entry.note}
             </span>
           ) : (
             <span className="text-muted">Pago</span>

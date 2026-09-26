@@ -14,6 +14,11 @@ import * as schema from "./schema";
 
 export type Database = PostgresJsDatabase<typeof schema>;
 
+/** Any Postgres drizzle database — the app pool in production, PGlite in tests. */
+export type AccrualDb = Parameters<Parameters<Database["transaction"]>[0]>[0];
+/** Read-only view (pool OR open transaction) for the cheap base queries. */
+export type AccrualReader = Pick<Database, "select">;
+
 let cached: { db: Database; client: postgres.Sql } | undefined;
 
 export function getDb(): Database {

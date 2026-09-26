@@ -6,6 +6,7 @@ import { loanPayments, loans, users } from "@/db/schema";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { catchUpAllLoanInterest, catchUpBankInterest, catchUpInterest } from "@/features/loans/accrual";
+import { COMPOUNDED_33_DAY_INTEREST_CENTS, GOLDEN, seedGoldenBankLoan } from "@/features/loans/golden-fixture";
 import { getDebtCents, listLoans, updateOutstanding } from "@/features/loans/service";
 import type { SessionUser } from "@/lib/auth";
 
@@ -289,48 +290,6 @@ describe("catchUpInterest (integration on PGlite)", () => {
   });
 });
 
-interface BankOverrides {
-  name?: string;
-  principalCents?: number;
-  lifeX100k?: number;
-  fireX100k?: number;
-  otrosCents?: number;
-  propertyCents?: number;
-  moraRateBp?: number;
-  createdAt?: Date;
-}
-
-/**
- * Bank-mode loan fixture: $1.000.000 principal at 12.95% EA, cuota closing
- * day 25, created 2026-01-10 (accrual base day = creation day; first daily
- * row is 2026-01-11). Insurance components default to OFF (null = off).
- */
-async function seedBankLoan(db: PgliteDatabase, overrides: BankOverrides = {}): Promise<string> {
-  const [loan] = await db
-    .insert(loans)
-    .values({
-      name: overrides.name ?? "Hipoteca banca",
-      kind: "mortgage",
-      entity: "Davivienda",
-      scope: "common",
-      principalCents: overrides.principalCents ?? 100_000_000,
-      amortizationMode: "bank",
-      chargedRateBp: 1295,
-      contractualRateBp: 1747,
-      termMonths: 228,
-      fixedCuotaCents: 262_800_000,
-      cuotaDay: 25,
-      lifeInsuranceRatePerMillonX100k: overrides.lifeX100k,
-      fireInsuranceRatePerMillonX100k: overrides.fireX100k,
-      otherChargesCents: overrides.otrosCents,
-      propertyValueCents: overrides.propertyCents,
-      moraRateBp: overrides.moraRateBp,
-      createdAt: overrides.createdAt ?? new Date("2026-01-10T12:00:00Z"),
-    })
-    .returning();
-  return loan.id;
-}
-
 describe("catchUpBankInterest — daily bank engine (integration on PGlite)", () => {
   let db: PgliteDatabase;
   let appDb: Database;
@@ -352,7 +311,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("accrues one rounded daily row per elapsed day over the RUNNING saldo", async () => {
-    const loanId = await seedBankLoan(db, { name: "Diaria" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Diaria" });
 
     const inserted = await catchUpBankInterest(appDb, loanId, new Date("2026-01-14T12:00:00Z"));
     expect(inserted).toBe(3);
@@ -370,7 +329,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("materializes exactly 33 daily rows for a 33-day period — including at golden scale", async () => {
-    const loanId = await seedBankLoan(db, { name: "Treinta y tres" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Treinta y tres" });
     await catchUpBankInterest(appDb, loanId, new Date("2026-02-13T12:00:00Z")); // yesterday 02-12
 
     const rows = (await ledgerRows(db, loanId)).filter((r) => r.kind === "interest");
@@ -382,20 +341,20 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
     expect((await ledgerRows(db, loanId)).filter((r) => r.kind === "charge")).toHaveLength(0);
 
     // Davivienda statement scale: saldo0 $204.993.414,80 at 12,95% EA, 33 days.
-    const goldenId = await seedBankLoan(db, {
+    const goldenId = await seedGoldenBankLoan(db, {
       name: "Escala dorada",
-      principalCents: 20_499_341_480,
+      principalCents: GOLDEN.saldo0Cents,
     });
     await catchUpBankInterest(appDb, goldenId, new Date("2026-02-13T12:00:00Z"));
     const golden = (await ledgerRows(db, goldenId)).filter((r) => r.kind === "interest");
     expect(golden).toHaveLength(33);
     expect(golden[0].amountCents).toBe(6_840_342); // slice-2 ground truth on saldo0
     expect(golden.at(-1)!.amountCents).toBe(6_913_762); // compounded running saldo
-    expect(golden.reduce((sum, r) => sum + r.amountCents, 0)).toBe(226_940_638);
+    expect(golden.reduce((sum, r) => sum + r.amountCents, 0)).toBe(COMPOUNDED_33_DAY_INTEREST_CENTS);
   });
 
   it("is idempotent: a second read with the same now inserts nothing; a later now only extends", async () => {
-    const loanId = await seedBankLoan(db, { name: "Idempotente banca" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Idempotente banca" });
     const now = new Date("2026-01-14T12:00:00Z");
     expect(await catchUpBankInterest(appDb, loanId, now)).toBe(3);
 
@@ -415,7 +374,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("a mid-period payment reduces the saldo for later days only (earns from the day AFTER)", async () => {
-    const loanId = await seedBankLoan(db, { name: "Pago intermedio" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Pago intermedio" });
     await db.insert(loanPayments).values({
       loanId,
       memberId: payerId,
@@ -441,7 +400,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("materializes one charge row per component at the cuota_day close, exact per-millón cents", async () => {
-    const loanId = await seedBankLoan(db, {
+    const loanId = await seedGoldenBankLoan(db, {
       name: "Cargos",
       lifeX100k: 46_790_000, // 467,90/millón
       fireX100k: 18_330_000, // 183,30/millón
@@ -477,7 +436,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("charges recur every period: vida tracks the balance, incendio stays on the property value", async () => {
-    const loanId = await seedBankLoan(db, {
+    const loanId = await seedGoldenBankLoan(db, {
       name: "Recurrentes",
       lifeX100k: 46_790_000,
       fireX100k: 18_330_000,
@@ -507,7 +466,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("mora accrues daily while the closed cuota is unpaid past the anchor and stops once paid", async () => {
-    const loanId = await seedBankLoan(db, { name: "Morosa", moraRateBp: 3650 });
+    const loanId = await seedGoldenBankLoan(db, { name: "Morosa", moraRateBp: 3650 });
 
     // Phase 1: Jan 25 closes a cuota whose lines (15 daily rows, 11–25 Jan)
     // total 501_700 — nobody pays → mora = round(501_700 × 0,365/365) = 502/day.
@@ -546,7 +505,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("rate edits are prospective: existing rows stay byte-identical, new days use the new factor", async () => {
-    const loanId = await seedBankLoan(db, { name: "Retasada" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Retasada" });
     await catchUpBankInterest(appDb, loanId, new Date("2026-01-15T12:00:00Z"));
     const before = (await ledgerRows(db, loanId))
       .filter((r) => r.kind === "interest")
@@ -572,7 +531,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("leap year: February 2028 accrues 29 daily rows and the divisor stays 365", async () => {
-    const loanId = await seedBankLoan(db, {
+    const loanId = await seedGoldenBankLoan(db, {
       name: "Bisiesta",
       createdAt: new Date("2028-01-20T12:00:00Z"),
     });
@@ -590,30 +549,12 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
 
   it("fan-out: simple-mode loans keep the monthly engine untouched; bank loans go daily (no double-charge)", async () => {
     // Simple loan, same fixture as the monthly suite: 3 months → 500/505/510.
-    const [simple] = await db
-      .insert(loans)
-      .values({
-        name: "Simple intacta",
-        kind: "credit_card",
-        entity: "Banco",
-        scope: "common",
-        principalCents: 100_000,
-        annualRateBp: 1200,
-        createdAt: new Date("2026-08-15T12:00:00Z"),
-      })
-      .returning();
-    await db.insert(loanPayments).values({
-      loanId: simple.id,
-      memberId: payerId,
-      kind: "payment",
-      amountCents: 50_000,
-      date: "2026-08-20",
-    });
-    const bankId = await seedBankLoan(db, { name: "Banca fan-out" });
+    const simpleId = await seedDecliningFixture(db, payerId, "Simple intacta");
+    const bankId = await seedGoldenBankLoan(db, { name: "Banca fan-out" });
 
     await catchUpAllLoanInterest(appDb, new Date("2026-11-05T12:00:00Z"));
 
-    const simpleRows = await ledgerRows(db, simple.id);
+    const simpleRows = await ledgerRows(db, simpleId);
     const simpleInterest = simpleRows.filter((r) => r.kind === "interest");
     expect(simpleInterest.map((r) => [r.date, r.amountCents, r.note])).toEqual([
       ["2026-09-01", 500, "Interés 12% TNA"], // exactly the monthly engine's cents
@@ -631,7 +572,7 @@ describe("catchUpBankInterest — daily bank engine (integration on PGlite)", ()
   });
 
   it("recovers from a 23505 on the batch insert: savepoint replay keeps the racing writer's row", async () => {
-    const loanId = await seedBankLoan(db, { name: "Carrera banca" });
+    const loanId = await seedGoldenBankLoan(db, { name: "Carrera banca" });
 
     // A pre-inserted duplicate can't exist in the pending window (any
     // interest row advances the accrual base past itself), so the racing

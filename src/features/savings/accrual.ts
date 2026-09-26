@@ -27,31 +27,13 @@
  */
 import { and, eq, isNotNull, max } from "drizzle-orm";
 import { savingsContributions, savingsGoals } from "@/db/schema";
-import type { Database } from "@/db";
+import { type AccrualDb, type AccrualReader, type Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
-import { todayIso } from "@/lib/date";
+import { dayIndexOfDate, dayIndexOfIso, isoOfDayIndex, todayIso } from "@/lib/date";
 
 /** One visible ledger row per goal per day; constant note keeps the
  * (goal_id, date, note) partial unique index idempotent across rate edits. */
 const DAILY_INTEREST_NOTE = "Interés diario";
-
-const DAY_MS = 86_400_000;
-
-/** Whole days since 1970-01-01 for a 'YYYY-MM-DD' string (calendar math only). */
-function dayIndexOfIso(iso: string): number {
-  const [year, month, day] = iso.split("-").map(Number);
-  return Date.UTC(year, month - 1, day) / DAY_MS;
-}
-
-/** Day index of a Date instant, in the app timezone. */
-function dayIndexOfDate(date: Date): number {
-  return dayIndexOfIso(todayIso(date));
-}
-
-/** Day index → 'YYYY-MM-DD'. */
-function isoOfDayIndex(dayIndex: number): string {
-  return new Date(dayIndex * DAY_MS).toISOString().slice(0, 10);
-}
 
 /** Daily rate fraction for a goal: TEA-derived for compound, nominal for simple. */
 function dailyRate(rateBp: number, mode: "simple" | "compound"): number {
@@ -128,11 +110,6 @@ export async function catchUpAllInterest(db: Database, now: Date = new Date()): 
     await catchUpInterest(db, goal.id, now);
   }
 }
-
-/** Any Postgres drizzle database — the app pool in production, PGlite in tests. */
-type AccrualDb = Parameters<Parameters<Database["transaction"]>[0]>[0];
-/** Read-only view (pool OR open transaction) for the cheap base queries. */
-type AccrualReader = Pick<Database, "select">;
 
 /** Latest interest day for a goal — or null (the lock-free cold gate reads this). */
 async function lastInterestDay(

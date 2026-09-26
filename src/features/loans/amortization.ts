@@ -21,22 +21,6 @@ export function dailyInterestCents(
 }
 
 /**
- * French cuota derived from principal/EA/term — DISPLAY-ONLY sanity helper.
- * i = (1+EA)^(1/12) − 1, C = P·i/(1−(1+i)^(−n)). The stored
- * fixed_cuota_cents ALWAYS wins (assumption A3; spec "Derived vs stored
- * cuota"); the bank-published cuota bundles insurance the annuity ignores.
- */
-export function derivedFrenchCuotaCents(
-  principalCents: number,
-  eaBp: number,
-  termMonths: number,
-): number {
-  const i = (1 + eaBp / 10_000) ** (1 / 12) - 1;
-  if (i === 0) return Math.round(principalCents / termMonths); // 0% EA: formula is 0/0
-  return Math.round((principalCents * i) / (1 - (1 + i) ** (-termMonths)));
-}
-
-/**
  * Payment waterfall residual (seguros → otros cargos → mora → intereses →
  * capital): capital = cuota − sum(other components), so the cuota identity
  * holds EXACTLY in integer cents by construction. Allocation is

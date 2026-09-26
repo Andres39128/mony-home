@@ -24,3 +24,21 @@ export function monthIndexOfDate(date: Date): number {
   const [year, month] = todayIso(date).split("-").map(Number);
   return year * 12 + (month - 1);
 }
+
+const DAY_MS = 86_400_000;
+
+/** Whole days since 1970-01-01 for a 'YYYY-MM-DD' string (calendar math only). */
+export function dayIndexOfIso(iso: string): number {
+  const [year, month, day] = iso.split("-").map(Number);
+  return Date.UTC(year, month - 1, day) / DAY_MS;
+}
+
+/** Day index of a Date instant, in the app timezone. */
+export function dayIndexOfDate(date: Date): number {
+  return dayIndexOfIso(todayIso(date));
+}
+
+/** Day index → 'YYYY-MM-DD'. */
+export function isoOfDayIndex(dayIndex: number): string {
+  return new Date(dayIndex * DAY_MS).toISOString().slice(0, 10);
+}

@@ -22,8 +22,10 @@ import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import { parseAmountCents } from "@/lib/money-errors";
 import type { SessionUser } from "@/lib/auth";
-import { todayIso } from "@/lib/date";
-import { catchUpAllLoanInterest, catchUpInterest } from "./accrual";
+import { dayIndexOfIso, isoOfDayIndex, todayIso } from "@/lib/date";
+import { catchUpAllLoanInterest } from "./accrual";
+import { FIRE_INSURANCE_NOTE, LIFE_INSURANCE_NOTE, MORA_NOTE } from "./accrual";
+import { allocateWaterfall } from "./amortization";
 // Pure math lives in a client-safe module; re-exported here so the service
 // stays the single import surface for server-side callers and tests.
 export { computeOutstanding, computePaidPct } from "./math";
@@ -344,24 +346,11 @@ function parseBankConfig(
     };
   }
 
-  /** AR percent → bp within the schema's 0..100000 bound; null = invalid. */
-  const percentBp = (text: string): number | null => {
-    try {
-      const bp = parseAmountToCents(text);
-      return bp >= 0 && bp <= 100000 ? bp : null;
-    } catch {
-      return null;
-    }
-  };
   /** AR amount → non-negative cents (positive when required); null = invalid. */
   const amountCents = (text: string, positive = false): number | null => {
-    try {
-      const value = parseAmountToCents(text);
-      if (value < 0 || (positive && value <= 0)) return null;
-      return value;
-    } catch {
-      return null;
-    }
+    const value = parseLenientCents(text);
+    if (value === null || value < 0 || (positive && value <= 0)) return null;
+    return value;
   };
   /** Per-millón "471,32" → 47132 cents × 1000 (the ×100.000 column basis). */
   const perMillonX100k = (text: string): number | null => {
@@ -380,17 +369,18 @@ function parseBankConfig(
     return { ok: false, field: "cuotaDay" };
   }
   // Core fields (the gate CHECK requires all four).
-  const chargedRateBp = percentBp(input.chargedRate);
-  if (chargedRateBp === null) return { ok: false, field: "chargedRate" };
+  const charged = parseOptionalRate(input.chargedRate);
+  if ("error" in charged || charged.bp === null) return { ok: false, field: "chargedRate" };
+  const chargedRateBp = charged.bp;
   const fixedCuotaCents = amountCents(input.fixedCuota, true);
   if (fixedCuotaCents === null) return { ok: false, field: "fixedCuota" };
 
-  const contractualRateBp = optional(input.contractualRate, () => percentBp(input.contractualRate));
-  if (input.contractualRate !== "" && contractualRateBp === null) {
-    return { ok: false, field: "contractualRate" };
-  }
-  const moraRateBp = optional(input.moraRate, () => percentBp(input.moraRate));
-  if (input.moraRate !== "" && moraRateBp === null) return { ok: false, field: "moraRate" };
+  const contractual = parseOptionalRate(input.contractualRate);
+  if ("error" in contractual) return { ok: false, field: "contractualRate" };
+  const contractualRateBp = contractual.bp;
+  const mora = parseOptionalRate(input.moraRate);
+  if ("error" in mora) return { ok: false, field: "moraRate" };
+  const moraRateBp = mora.bp;
   const propertyValueCents = optional(input.propertyValue, () => amountCents(input.propertyValue));
   if (input.propertyValue !== "" && propertyValueCents === null) {
     return { ok: false, field: "propertyValue" };
@@ -810,17 +800,6 @@ export interface LoanPeriodView {
   saldoAfterCents: number;
 }
 
-/** Whole days since 1970-01-01 for a 'YYYY-MM-DD' string (calendar math only). */
-function dayIndexOfIso(iso: string): number {
-  const [year, month, day] = iso.split("-").map(Number);
-  return Date.UTC(year, month - 1, day) / 86_400_000;
-}
-
-/** Day index → 'YYYY-MM-DD'. */
-function isoOfDayIndex(dayIndex: number): string {
-  return new Date(dayIndex * 86_400_000).toISOString().slice(0, 10);
-}
-
 /**
  * Statement breakdown for a bank loan (D5): ONE indexed ledger read, grouped
  * in JS by anchor-to-anchor windows. A period is (previousAnchor, anchor] —
@@ -896,18 +875,18 @@ export async function listLoanPeriods(db: Database, loanId: string): Promise<Loa
       };
       prevEndDay = dayIndexOfIso(endDate);
     }
-    // Classify: mora by note, seguros by "Seguro*" notes, everything else
-    // note-keyed into otros; interest is signed (true-ups can be negative).
+    // Classify: mora by note, seguros by note, everything else note-keyed
+    // into otros; interest is signed (true-ups can be negative).
     if (row.kind === "payment") {
       current.paymentsCents += row.amountCents;
       saldo -= row.amountCents;
     } else if (row.kind === "interest") {
       current.sections.interesesCents += row.amountCents;
       saldo += row.amountCents;
-    } else if (row.note === "Mora") {
+    } else if (row.note === MORA_NOTE) {
       current.sections.moraCents += row.amountCents;
       saldo += row.amountCents;
-    } else if (row.note?.startsWith("Seguro")) {
+    } else if (row.note === LIFE_INSURANCE_NOTE || row.note === FIRE_INSURANCE_NOTE) {
       current.sections.segurosCents += row.amountCents;
       saldo += row.amountCents;
     } else {
@@ -928,16 +907,14 @@ export async function listLoanPeriods(db: Database, loanId: string): Promise<Loa
       period.sections.otrosCargosCents +
       period.sections.moraCents -
       period.paymentsCents;
-    period.sections.capitalCents =
-      period.cuotaCents -
-      (period.sections.segurosCents +
-        period.sections.otrosCargosCents +
-        period.sections.moraCents +
-        period.sections.interesesCents);
+    period.sections.capitalCents = allocateWaterfall(
+      period.cuotaCents,
+      period.sections.segurosCents,
+      period.sections.otrosCargosCents,
+      period.sections.moraCents,
+      period.sections.interesesCents,
+    ).capitalCents;
   }
   // Newest cuota first — the same order the history list uses.
   return periods.reverse();
 }
-
-// Re-exported for the accrual engine's test surface and read-path callers.
-export { catchUpInterest };
