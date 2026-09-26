@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
-import type { LoanView, PaymentView } from "@/features/loans/service";
+import { useActionState, useEffect, useRef, useState } from "react";
+import type { LoanPeriodView, LoanView, PaymentView } from "@/features/loans/service";
 import { formatCents } from "@/lib/money";
 import type { FormState } from "@/lib/form-state";
 import { formatRatePercent } from "@/features/savings/math";
@@ -25,6 +25,8 @@ interface Props {
   isAdmin: boolean;
   summary: { debtCents: number; activeCount: number };
   paymentsByLoan: Record<string, PaymentView[]>;
+  /** Closed-cuota statement breakdowns for bank loans (D5), newest first. */
+  periodsByLoan: Record<string, LoanPeriodView[]>;
   createAction: LoanAction;
   updateAction: LoanAction;
   toggleAction: LoanAction;
@@ -49,8 +51,7 @@ function KindBadge({ loan }: { loan: LoanView }) {
 }
 
 /** Entity line + how much interest the debt has generated so far. */
-function DebtLine({ loan }: { loan: LoanView }) {
-  return (
+function DebtLine({ loan }: { loan: LoanView }) {  return (
     <p className="text-xs text-muted">
       <span>Entidad: {loan.entity}</span>
       {loan.interestCents > 0 && (
@@ -64,17 +65,25 @@ function DebtLine({ loan }: { loan: LoanView }) {
           </span>
         </>
       )}
+      {loan.chargesCents > 0 && (
+        <>
+          {" · "}
+          <span>Cargos del período: {formatCents(loan.chargesCents)}</span>
+        </>
+      )}
+      {loan.amortizationMode === "bank" && (
+        <>
+          {" · "}
+          <span>
+            Cuota {formatCents(loan.fixedCuotaCents ?? 0)} día {loan.cuotaDay}
+            {loan.contractualRateBp !== null &&
+              ` · EA cobrada ${formatRatePercent(loan.chargedRateBp ?? 0)}% (pactada ${formatRatePercent(loan.contractualRateBp)}%)`}
+          </span>
+        </>
+      )}
     </p>
   );
 }
-
-const KIND_LABELS_HISTORY = {
-  payment: "Pago",
-  interest: "Interés",
-  // Bank-style cuota component (seguros, otros cargos, mora); the row's
-  // note carries the specific component name.
-  charge: "Cargo",
-} as const;
 
 /**
  * Per-loan collapsible history of every ledger entry. Interest rows carry
@@ -104,8 +113,14 @@ function PaymentHistory({ entries }: { entries: PaymentView[] }) {
             <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
               Interés
             </span>
+          ) : entry.kind === "charge" ? (
+            // Charge rows carry their component in the note — render it as
+            // the pill itself (seguros, otros cargos, mora).
+            <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
+              {entry.note ?? "Cargo"}
+            </span>
           ) : (
-            <span className="text-muted">{KIND_LABELS_HISTORY[entry.kind]}</span>
+            <span className="text-muted">Pago</span>
           )}
           <span className="ml-auto font-medium tabular-nums text-ink">
             {entry.kind === "payment" ? "−" : "+"}
@@ -141,6 +156,89 @@ function HistoryDetails({
       </summary>
       <div className="pt-2">
         <PaymentHistory entries={entries} />
+      </div>
+    </details>
+  );
+}
+
+/** Short '4 sep' style date for period headers (no year clutter). */
+const PERIOD_DATE = new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short" });
+const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
+
+/**
+ * One closed cuota's statement breakdown (D5): the five Davivienda sections
+ * plus the saldo identity — saldo_after = saldo_before − capital when the
+ * payment covers the cuota. Includes the bank-delta disclosure (R2): the
+ * daily-compound interest line can drift vs the bank's stated interest;
+ * the residual is absorbed operationally by "Ajustar saldo".
+ */
+function PeriodResumen({ period }: { period: LoanPeriodView }) {
+  const { sections } = period;
+  const rows: Array<[string, number]> = [
+    ["Seguros", sections.segurosCents],
+    ["Otros cargos", sections.otrosCargosCents],
+    ["Mora", sections.moraCents],
+    ["Intereses", sections.interesesCents],
+    ["Capital (cuota − componentes)", sections.capitalCents],
+  ];
+  return (
+    <details className="group border-b border-line py-2 last:border-b-0">
+      <summary className="cursor-pointer list-none text-sm text-ink hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span aria-hidden className="mr-1 inline-block text-muted transition-transform group-open:rotate-90">
+          ▸
+        </span>
+        Cuota del {PERIOD_DATE.format(asLocalDate(period.endDate))} — {formatCents(period.cuotaCents)}
+        <span className="ml-2 text-xs text-muted tabular-nums">
+          saldo {formatCents(period.saldoAfterCents)}
+        </span>
+      </summary>
+      <div className="flex flex-col gap-1 pt-2">
+        {rows.map(([label, cents]) => (
+          <div key={label} className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-muted">{label}</span>
+            <span className="tabular-nums text-ink">{formatCents(cents)}</span>
+          </div>
+        ))}
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-muted">Pagos del período</span>
+          <span className="tabular-nums text-ink">−{formatCents(period.paymentsCents)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2 text-xs font-medium">
+          <span className="text-muted">
+            Saldo {PERIOD_DATE.format(asLocalDate(period.startDate))} →{" "}
+            {PERIOD_DATE.format(asLocalDate(period.endDate))}
+          </span>
+          <span className="tabular-nums text-ink">
+            {formatCents(period.saldoBeforeCents)} → {formatCents(period.saldoAfterCents)}
+          </span>
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted">
+          El interés se computa por capitalización diaria efectiva y puede diferir
+          del enunciado del banco; la diferencia se absorbe con “Ajustar saldo”.
+        </p>
+      </div>
+    </details>
+  );
+}
+
+/** Expandable "Resumen del período" per cuota for bank loans (D5). */
+function PeriodBreakdown({ periods }: { periods: LoanPeriodView[] }) {
+  if (periods.length === 0) return null;
+  return (
+    <details className="group border-t border-line pt-3">
+      <summary className="cursor-pointer list-none text-xs font-medium text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span
+          aria-hidden
+          className="mr-1 inline-block transition-transform group-open:rotate-90"
+        >
+          ▸
+        </span>
+        Resumen por cuota ({periods.length})
+      </summary>
+      <div className="pt-1">
+        {periods.map((period) => (
+          <PeriodResumen key={period.endDate} period={period} />
+        ))}
       </div>
     </details>
   );
@@ -208,12 +306,14 @@ function LoanCard({
   autoFocusPayment,
   tourIds,
   entries,
+  periods,
 }: {
   loan: LoanView;
   paymentAction: LoanAction;
   autoFocusPayment: boolean;
   tourIds?: { card?: string; interest?: string; payment?: string; history?: string };
   entries: PaymentView[];
+  periods: LoanPeriodView[];
 }) {
   return (
     <li
@@ -228,6 +328,10 @@ function LoanCard({
           <KindBadge loan={loan} />
           <ScopeBadge scope={loan.scope} memberName={loan.memberName} />
           <RateBadge annualRateBp={loan.annualRateBp} mode="TNA" />
+          {loan.amortizationMode === "bank" && (
+            // EA cobrada is an effective annual rate — the TEA badge.
+            <RateBadge annualRateBp={loan.chargedRateBp} mode="TEA" />
+          )}
         </div>
       </div>
       <div data-tour={tourIds?.interest}>
@@ -247,6 +351,7 @@ function LoanCard({
         <ProgressBar pct={loan.paidPct} status={loan.paidPct >= 100 ? "over" : loan.paidPct >= 75 ? "warn" : "ok"} />
       </div>
       <DebtLine loan={loan} />
+      {loan.amortizationMode === "bank" && <PeriodBreakdown periods={periods} />}
       <HistoryDetails entries={entries} tourId={tourIds?.history} />
       {loan.isActive && (
         <QuickPaymentForm
@@ -260,6 +365,159 @@ function LoanCard({
   );
 }
 
+/** Per-millón display: integer ×100.000 basis → "471,32" pesos por millón. */
+function formatPerMillon(x100k: number): string {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(x100k / 1e5);
+}
+
+/**
+ * Bank calibration section (D4) — rendered when the amortization mode is
+ * "bank". Fields are free text parsed by the service through the sanctioned
+ * money parser; per-millón inputs accept "471,32" (2 decimals — the seeded
+ * full-precision rates round to this on edit).
+ */
+function BankFields({ state, loan }: { state: FormState; loan?: LoanView }) {
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-line bg-line/30 p-4">
+      <p className="text-xs text-muted">
+        Calibración bancaria: la EA cobrada maneja el cálculo; la pactada es solo
+        informativa.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">EA cobrada %</span>
+          <input
+            name="chargedRate"
+            inputMode="decimal"
+            placeholder="12,95"
+            defaultValue={loan?.chargedRateBp != null ? formatRatePercent(loan.chargedRateBp) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.chargedRate} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Tasa pactada % (opcional)</span>
+          <input
+            name="contractualRate"
+            inputMode="decimal"
+            placeholder="17,47"
+            defaultValue={loan?.contractualRateBp != null ? formatRatePercent(loan.contractualRateBp) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.contractualRate} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Plazo (meses)</span>
+          <input
+            name="termMonths"
+            inputMode="numeric"
+            placeholder="228"
+            defaultValue={loan?.termMonths ?? undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.termMonths} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Cuota fija</span>
+          <input
+            name="fixedCuota"
+            inputMode="decimal"
+            placeholder="2.628.000,00"
+            defaultValue={loan?.fixedCuotaCents != null ? formatCents(loan.fixedCuotaCents) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.fixedCuota} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Día de cuota (1–28)</span>
+          <input
+            name="cuotaDay"
+            inputMode="numeric"
+            placeholder="25"
+            defaultValue={loan?.cuotaDay ?? undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.cuotaDay} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Tasa de mora % (opcional)</span>
+          <input
+            name="moraRate"
+            inputMode="decimal"
+            placeholder="36,5"
+            defaultValue={loan?.moraRateBp != null ? formatRatePercent(loan.moraRateBp) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.moraRate} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Valor del inmueble</span>
+          <input
+            name="propertyValue"
+            inputMode="decimal"
+            placeholder="339.802.600,00"
+            defaultValue={loan?.propertyValueCents != null ? formatCents(loan.propertyValueCents) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.propertyValue} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Base asegurada (referencia)</span>
+          <input
+            name="insuredBase"
+            inputMode="decimal"
+            placeholder="204.993.414,80"
+            defaultValue={loan?.insuredBaseCents != null ? formatCents(loan.insuredBaseCents) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.insuredBase} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Otros cargos por período</span>
+          <input
+            name="otherCharges"
+            inputMode="decimal"
+            placeholder="0,00"
+            defaultValue={loan?.otherChargesCents != null ? formatCents(loan.otherChargesCents) : undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.otherCharges} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Seguro de vida $/millón</span>
+          <input
+            name="lifeRatePerMillon"
+            inputMode="decimal"
+            placeholder="471,32"
+            defaultValue={
+              loan?.lifeInsuranceRatePerMillonX100k != null
+                ? formatPerMillon(loan.lifeInsuranceRatePerMillonX100k)
+                : undefined
+            }
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.lifeRatePerMillon} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Seguro de incendio $/millón</span>
+          <input
+            name="fireRatePerMillon"
+            inputMode="decimal"
+            placeholder="218,17"
+            defaultValue={
+              loan?.fireInsuranceRatePerMillonX100k != null
+                ? formatPerMillon(loan.fireInsuranceRatePerMillonX100k)
+                : undefined
+            }
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.fireRatePerMillon} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function LoanFields({
   state,
   members,
@@ -269,6 +527,11 @@ function LoanFields({
   members: { id: string; name: string }[];
   loan?: LoanView;
 }) {
+  // Amortization mode drives the bank section; stateful because the form is
+  // otherwise uncontrolled (defaultValue) and the toggle must re-render it.
+  const [mode, setMode] = useState<"simple" | "bank">(
+    loan?.amortizationMode === "bank" ? "bank" : "simple",
+  );
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -321,6 +584,19 @@ function LoanFields({
           </select>
           <FieldError message={state.fieldErrors?.memberId} />
         </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Modo de amortización</span>
+          <select
+            name="amortizationMode"
+            value={mode}
+            onChange={(event) => setMode(event.target.value === "bank" ? "bank" : "simple")}
+            className={inputClass}
+          >
+            <option value="">Rastreador simple (TNA mensual)</option>
+            <option value="bank">Bancario (EA diaria + cuota)</option>
+          </select>
+          <FieldError message={state.fieldErrors?.amortizationMode} />
+        </label>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
@@ -337,7 +613,7 @@ function LoanFields({
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-muted">
-            Tasa anual TNA % (opcional)
+            Tasa anual TNA % (solo modo simple)
           </span>
           <input
             name="annualRate"
@@ -349,6 +625,7 @@ function LoanFields({
           <FieldError message={state.fieldErrors?.annualRate} />
         </label>
       </div>
+      {mode === "bank" && <BankFields state={state} loan={loan} />}
     </div>
   );
 }
@@ -469,6 +746,7 @@ export default function LoansPanel({
   isAdmin,
   summary,
   paymentsByLoan,
+  periodsByLoan,
   createAction,
   updateAction,
   toggleAction,
@@ -515,6 +793,7 @@ export default function LoansPanel({
                   : undefined
               }
               entries={paymentsByLoan[loan.id] ?? []}
+              periods={loan.amortizationMode === "bank" ? (periodsByLoan[loan.id] ?? []) : []}
             />
           ))}
         </ul>
