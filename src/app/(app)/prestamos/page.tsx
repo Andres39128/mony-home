@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
-import { listLoans, listPayments } from "@/features/loans/service";
+import { listLoanPeriods, listLoans, listPayments } from "@/features/loans/service";
 import { listMembers } from "@/features/members/service";
 import {
   addLoanPaymentAction,
@@ -14,12 +14,16 @@ import LoansPanel from "./loans-panel";
 
 export default async function PrestamosPage() {
   const user = await requireUser();
-  // listLoans FIRST: it triggers the lazy interest catch-up, so the history
-  // query below is guaranteed to see the freshly materialized entries.
+  // listLoans FIRST: it triggers the lazy interest catch-up, so the queries
+  // below are guaranteed to see the freshly materialized entries.
   const loans = await listLoans(getDb());
-  const [members, payments] = await Promise.all([
+  const bankIds = loans.filter((loan) => loan.amortizationMode === "bank").map((loan) => loan.id);
+  const [members, payments, bankPeriodLists] = await Promise.all([
     listMembers(getDb()),
     listPayments(getDb()),
+    // Statement breakdown per bank loan (D5); listLoanPeriods only groups
+    // what listLoans already materialized above.
+    Promise.all(bankIds.map((id) => listLoanPeriods(getDb(), id))),
   ]);
 
   // One query for every card's collapsible history, grouped here.
@@ -28,6 +32,10 @@ export default async function PrestamosPage() {
     const list = paymentsByLoan[entry.loanId] ?? [];
     list.push(entry);
     paymentsByLoan[entry.loanId] = list;
+  }
+  const periodsByLoan: Record<string, (typeof bankPeriodLists)[number]> = {};
+  for (const [index, id] of bankIds.entries()) {
+    periodsByLoan[id] = bankPeriodLists[index]!;
   }
 
   const activeCount = loans.filter((loan) => loan.isActive).length;
@@ -47,6 +55,7 @@ export default async function PrestamosPage() {
         isAdmin={user.role === "admin"}
         summary={{ debtCents, activeCount }}
         paymentsByLoan={paymentsByLoan}
+        periodsByLoan={periodsByLoan}
         createAction={createLoanAction}
         updateAction={updateLoanAction}
         toggleAction={toggleLoanAction}
