@@ -1,11 +1,18 @@
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
-import { listLoanPeriods, listLoans, listPayments } from "@/features/loans/service";
+import {
+  listCardCycles,
+  listLoanPeriods,
+  listLoans,
+  listPayments,
+} from "@/features/loans/service";
 import { listMembers } from "@/features/members/service";
 import {
+  addCardPaymentAction,
   addLoanPaymentAction,
   createLoanAction,
   deleteLoanAction,
+  removeLedgerEntryAction,
   toggleLoanAction,
   updateLoanAction,
   updateOutstandingAction,
@@ -18,12 +25,17 @@ export default async function PrestamosPage() {
   // below are guaranteed to see the freshly materialized entries.
   const loans = await listLoans(getDb());
   const bankIds = loans.filter((loan) => loan.amortizationMode === "bank").map((loan) => loan.id);
-  const [members, payments, bankPeriodLists] = await Promise.all([
+  const cardIds = loans
+    .filter((loan) => loan.amortizationMode === "revolving")
+    .map((loan) => loan.id);
+  const [members, payments, bankPeriodLists, cardCycleLists] = await Promise.all([
     listMembers(getDb()),
     listPayments(getDb()),
     // Statement breakdown per bank loan (D5); listLoanPeriods only groups
     // what listLoans already materialized above.
     Promise.all(bankIds.map((id) => listLoanPeriods(getDb(), id))),
+    // Billing-cycle breakdown per revolving card (statement_day grouping).
+    Promise.all(cardIds.map((id) => listCardCycles(getDb(), id))),
   ]);
 
   // One query for every card's collapsible history, grouped here.
@@ -36,6 +48,10 @@ export default async function PrestamosPage() {
   const periodsByLoan: Record<string, (typeof bankPeriodLists)[number]> = {};
   for (const [index, id] of bankIds.entries()) {
     periodsByLoan[id] = bankPeriodLists[index]!;
+  }
+  const cyclesByLoan: Record<string, (typeof cardCycleLists)[number]> = {};
+  for (const [index, id] of cardIds.entries()) {
+    cyclesByLoan[id] = cardCycleLists[index]!;
   }
 
   const activeCount = loans.filter((loan) => loan.isActive).length;
@@ -56,12 +72,15 @@ export default async function PrestamosPage() {
         summary={{ debtCents, activeCount }}
         paymentsByLoan={paymentsByLoan}
         periodsByLoan={periodsByLoan}
+        cyclesByLoan={cyclesByLoan}
         createAction={createLoanAction}
         updateAction={updateLoanAction}
         toggleAction={toggleLoanAction}
         deleteAction={deleteLoanAction}
         outstandingAction={updateOutstandingAction}
         paymentAction={addLoanPaymentAction}
+        cardPaymentAction={addCardPaymentAction}
+        removeEntryAction={removeLedgerEntryAction}
       />
     </section>
   );
