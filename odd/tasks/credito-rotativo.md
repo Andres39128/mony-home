@@ -51,3 +51,7 @@ ask-on-risk (default). Forecast ~1200-1500 líneas changed → superará 400: ap
 
 ## Next step
 Entrega: decidir estrategia de PR (presupuesto >400 líneas). Reviews: T1 acknowledged; T2 capturado+fixeado pero refutación nativa pendiente por defecto del runtime del subagente (lineage review-bedc52f87ad40cb6).
+
+## Deploy Supabase (2026-09-26)
+- Migración 0012 aplicada en prod (13/13) + categorías sistema sembradas (SEED_DEMO_DATA=false; admin existente intacto por onConflictDoNothing).
+- GOTCHAS descubiertos: (1) DIRECT_URL de Supabase es IPv6-only y esta red no tiene ruta IPv6 → usar el SESSION pooler (mismo host del pooler, puerto 5432, acepta prepared statements; el 6543 transaction-mode NO los acepta). (2) PG real rechaza usar un valor de enum recién agregado en la MISMA transacción (55P04 unsafe use) — el migrador JS (una tx por archivo) falla con 0012; drizzle-kit CLI aplica per-statement (autocommit) y por eso funciona; aplicado manualmente con esa semántica + hash del archivo registrado en __drizzle_migrations. PGlite tolera el uso same-txn (por eso los tests pasan). (3) npm run db:migrate (CLI) hizo no-op silencioso en esta red — sin diagnóstico; el estado quedó consistente por inserción manual del hash.
