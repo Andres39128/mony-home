@@ -40,13 +40,13 @@ ask-on-risk (default). Forecast ~1200-1500 líneas changed → superará 400: ap
 - [ ] T7: Higienización + npm run verify completo.
 
 ## Progress / evidence
-- [x] T1 (commit feat db): schema + migración 0012 + 11 tests schema. 53/53 schema suite. RDD: assessed medium, review granted+acknowledged (lineage review-193469cc0ab1a751); 3 WARNING informativos (FK target solo-revolving → lo cubre el servicio T3; doc SET NULL desactualizado → corregido acá; falso positivo ADD VALUE con precedente 0011). Boundary: commit T1.
-- [x] T2 (commit b1c8cd02eea8): loanSchema revolving (gates 3 modos), parseRevolvingConfig, listLoans con compras (subquery correlacionada) + disponible clamp, addCardPayment (sin espejo capital, espejo interés/fee, savepoint suffix retry), removeLedgerEntry CASCADE, updateOutstanding con compras, listCardCycles, accrual skip, helper espejo compartido. 72/72 loans suite. RDD: consent granted, reviewer T2 PENDIENTE DE COLECTAR (transporte del subagente devolvió vacío 4 veces — decisión del usuario: continuar e reintentar más tarde; lineage review-bedc52f87ad40cb6 queda en estado collect).
-- [ ] T3: Transactions: method/cardId + validaciones (activa, revolving, expense, cupo create/edit) + view/filters + tests.
-- [ ] T4: UI /prestamos: sección crédito rotativo, form tarjeta, pago con prompt interés/fee, ciclos, corrección admin.
-- [ ] T5: UI /movimientos: toggle medio de pago, select con cupo, badge, filtro, CSV.
-- [ ] T6: Seed: categorías sistema + tarjeta demo.
-- [ ] T7: Higienización + npm run verify completo.
+- [x] T1 (commit 9209c80c472b): schema + migración 0012 + 11 tests schema. 53/53 schema suite. RDD: assessed medium, review granted+acknowledged (lineage review-193469cc0ab1a751); 3 WARNING informativos. Boundary: commit T1.
+- [x] T2 (commit b1c8cd02eea8): motor revolving completo. 72/72 loans suite. RDD: consent granted, reviewer PENDIENTE DE COLECTAR (transporte devolvió vacío 4 veces — decisión del usuario: continuar e reintentar; lineage review-bedc52f87ad40cb6 en estado collect).
+- [x] T3 (commit 40a15e40dd8f): method/cardId en transactions, cupo en create/edit/delta, vista con cardName, filtro, CSV. 451/451 total suite.
+- [x] T4 (commit f29130386f5b): sección Crédito rotativo en /prestamos (cupo bar, ciclos, pago con interés/fee, corrección admin ✕).
+- [x] T5 (commit b8c445bf1187): form movimientos con toggle Efectivo|Tarjeta + select con cupo, badge en filas, filtro Medio de pago, CSV.
+- [x] T6 (commit 00c05c8d9e8f): categorías sistema de tarjetas + demo Visa Oro Galicia con ciclo completo.
+- [x] T7: npm run verify completo (lint 1 warning preexistente, typecheck, 451/451 tests, build OK). Barrido anti-huérfanos: todos los símbolos nuevos tienen consumidores. Helper espejo y matemática de cupo compartidos (cero duplicación).
 
 ## Next step
-T3.
+Entrega: decidir estrategia de PR con el usuario (presupuesto >400 líneas). Review T2 pendiente de colectar.
