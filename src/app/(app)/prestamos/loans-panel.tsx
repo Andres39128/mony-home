@@ -7,7 +7,7 @@ import type {
   LoanView,
   PaymentView,
 } from "@/features/loans/service";
-import { formatCents } from "@/lib/money";
+import { formatCents, formatPerMillon } from "@/lib/money";
 import type { FormState } from "@/lib/form-state";
 import { formatRatePercent } from "@/features/savings/math";
 import { ProgressBar } from "@/components/progress";
@@ -643,10 +643,6 @@ function LoanCard({
   );
 }
 
-/** Per-millón display: integer ×100.000 basis → "471,32" pesos por millón. */
-function formatPerMillon(x100k: number): string {
-  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(x100k / 1e5);
-}
 
 /**
  * Bank calibration section (D4) — rendered when the amortization mode is

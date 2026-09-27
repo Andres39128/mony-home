@@ -158,3 +158,12 @@ export function percentage(part: number, total: number): number {
   if (total <= 0) return 0;
   return Math.round((part / total) * 10000) / 100;
 }
+
+/**
+ * Per-millón insurance rates stored on the ×100.000 basis (46.790.000 →
+ * "467,90" pesos por millón). Shared by the loans UI and the assistant
+ * context — one canonical formatter.
+ */
+export function formatPerMillon(x100k: number): string {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(x100k / 1e5);
+}

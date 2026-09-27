@@ -14,7 +14,7 @@
  * Kept free of Next.js imports and pure-ish over the DB, like every service,
  * so it tests against PGlite and runs under plain node (eval script).
  */
-import { formatCents, percentage } from "@/lib/money";
+import { formatCents, formatPerMillon, percentage } from "@/lib/money";
 import type { Database } from "@/db";
 import { transactionTotals } from "@/features/transactions/service";
 import { todayIso } from "@/lib/date";
@@ -89,8 +89,35 @@ export interface ContextDeuda {
   name: string;
   entity: string;
   kind: "credit_card" | "investment_line" | "mortgage" | "other";
+  /** Original borrowed amount. */
+  principalCents: number;
   /** Computed outstanding (principal + interest + charges − payments). */
   outstandingCents: number;
+  /** Sum of 'payment' rows so far. */
+  paidCents: number;
+  /** Interest generated so far (engine + manual true-ups). */
+  interestCents: number;
+  /** Bank cuota components charged so far (seguros, otros cargos, mora). */
+  chargesCents: number;
+  /** Simple-tracker TNA in bp; null on bank loans. */
+  annualRateBp: number | null;
+  /** Bank calibration block; null on simple trackers. */
+  bank: {
+    /** EA efectivamente cobrada in bp — the accrual driver. */
+    chargedRateBp: number;
+    /** Pactada in bp — display only; null when unset. */
+    contractualRateBp: number | null;
+    termMonths: number;
+    fixedCuotaCents: number;
+    cuotaDay: number;
+    /** Mora annual rate in bp; null = none. */
+    moraRateBp: number | null;
+    /** Per-millón insurance rates (×100.000 basis); null = component off. */
+    lifeInsuranceRatePerMillonX100k: number | null;
+    fireInsuranceRatePerMillonX100k: number | null;
+    /** Fixed "Otros cargos" per period; null = none. */
+    otherChargesCents: number | null;
+  } | null;
   isActive: boolean;
 }
 
@@ -108,6 +135,8 @@ export interface ContextTarjeta {
   outstandingCents: number;
   /** Card purchases accumulated so far (they live in transactions). */
   purchasesCents: number;
+  /** Card payments accumulated so far. */
+  paidCents: number;
   /** Manual interest entered at payment time, accumulated. */
   interestCents: number;
   /** Fixed cuota de manejo; null = sin cuota. */
@@ -288,6 +317,7 @@ export async function buildFinanceContext(
       availableCents: card.availableCents ?? 0,
       outstandingCents: card.outstandingCents,
       purchasesCents: card.purchasesCents ?? 0,
+      paidCents: card.paidCents,
       interestCents: card.interestCents,
       managementFeeCents: card.managementFeeCents,
       statementDay: card.statementDay,
@@ -299,7 +329,26 @@ export async function buildFinanceContext(
       name: loan.name,
       entity: loan.entity,
       kind: loan.kind,
+      principalCents: loan.principalCents,
       outstandingCents: loan.outstandingCents,
+      paidCents: loan.paidCents,
+      interestCents: loan.interestCents,
+      chargesCents: loan.chargesCents,
+      annualRateBp: loan.annualRateBp,
+      bank:
+        loan.amortizationMode === "bank"
+          ? {
+              chargedRateBp: loan.chargedRateBp ?? 0,
+              contractualRateBp: loan.contractualRateBp,
+              termMonths: loan.termMonths ?? 0,
+              fixedCuotaCents: loan.fixedCuotaCents ?? 0,
+              cuotaDay: loan.cuotaDay ?? 0,
+              moraRateBp: loan.moraRateBp,
+              lifeInsuranceRatePerMillonX100k: loan.lifeInsuranceRatePerMillonX100k,
+              fireInsuranceRatePerMillonX100k: loan.fireInsuranceRatePerMillonX100k,
+              otherChargesCents: loan.otherChargesCents,
+            }
+          : null,
       isActive: loan.isActive,
     }));
   // Same clamp as getDebtCents, computed over the rows we already hold (a
@@ -512,8 +561,47 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
       nombre: deuda.name,
       entidad: deuda.entity,
       tipo: DEBT_KIND_LABELS[deuda.kind],
-      saldo_pendiente: ar(deuda.outstandingCents),
       estado: deuda.isActive ? "activa" : "inactiva",
+      capital: ar(deuda.principalCents),
+      saldo_pendiente: ar(deuda.outstandingCents),
+      pagado: ar(deuda.paidCents),
+      intereses_generados: ar(deuda.interestCents),
+      cargos: ar(deuda.chargesCents),
+      // Rates pre-formatted: the model quotes, never converts.
+      tasa: deuda.bank
+        ? {
+            ea_cobrada: `${formatRatePercent(deuda.bank.chargedRateBp)}%`,
+            pactada:
+              deuda.bank.contractualRateBp !== null
+                ? `${formatRatePercent(deuda.bank.contractualRateBp)}%`
+                : undefined,
+            mora:
+              deuda.bank.moraRateBp !== null
+                ? `${formatRatePercent(deuda.bank.moraRateBp)}%`
+                : undefined,
+          }
+        : deuda.annualRateBp !== null
+          ? { tna: `${formatRatePercent(deuda.annualRateBp)}%` }
+          : undefined,
+      cuota: deuda.bank
+        ? {
+            monto: ar(deuda.bank.fixedCuotaCents),
+            dia_del_mes: deuda.bank.cuotaDay,
+            plazo_meses: deuda.bank.termMonths,
+            otros_cargos:
+              deuda.bank.otherChargesCents !== null
+                ? ar(deuda.bank.otherChargesCents)
+                : undefined,
+            seguro_vida_por_millon:
+              deuda.bank.lifeInsuranceRatePerMillonX100k !== null
+                ? formatPerMillon(deuda.bank.lifeInsuranceRatePerMillonX100k)
+                : undefined,
+            seguro_incendio_por_millon:
+              deuda.bank.fireInsuranceRatePerMillonX100k !== null
+                ? formatPerMillon(deuda.bank.fireInsuranceRatePerMillonX100k)
+                : undefined,
+          }
+        : undefined,
     })),
     tarjetas: ctx.tarjetas.map((tarjeta) => ({
       nombre: tarjeta.name,
@@ -526,6 +614,7 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
       saldo_a_favor:
         tarjeta.outstandingCents < 0 ? ar(-tarjeta.outstandingCents) : undefined,
       compras_con_tarjeta: ar(tarjeta.purchasesCents),
+      pagos_acumulados: ar(tarjeta.paidCents),
       intereses_generados: ar(tarjeta.interestCents),
       cuota_de_manejo: tarjeta.managementFeeCents !== null ? ar(tarjeta.managementFeeCents) : undefined,
       dia_de_corte: tarjeta.statementDay ?? undefined,

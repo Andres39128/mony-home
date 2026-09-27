@@ -348,6 +348,7 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
       entity: "Banco Nación",
       scope: "common",
       principalCents: 500_000,
+      annualRateBp: 4500,
     });
     // The mortgaged apartment: bank-style loan carrying the property value.
     // Created "now" → the daily accrual has no elapsed days → no interest
@@ -395,10 +396,37 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
 
   it("separates fixed debts from revolving cards with the full cupo facts", async () => {
     const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
-    expect(ctx.deudas).toEqual([
-      { name: "Apartamento", entity: "Davivienda", kind: "mortgage", outstandingCents: 200_000, isActive: true },
-      { name: "Hipoteca", entity: "Banco Nación", kind: "mortgage", outstandingCents: 500_000, isActive: true },
-    ]);
+    expect(ctx.deudas).toHaveLength(2);
+    const [apto, hipoteca] = ctx.deudas;
+    // Bank loan: the full financial block travels with the debt.
+    expect(apto).toMatchObject({
+      name: "Apartamento",
+      entity: "Davivienda",
+      kind: "mortgage",
+      principalCents: 200_000,
+      outstandingCents: 200_000,
+      paidCents: 0,
+      interestCents: 0,
+      chargesCents: 0,
+      annualRateBp: null,
+      isActive: true,
+    });
+    expect(apto.bank).toMatchObject({
+      chargedRateBp: 1295,
+      contractualRateBp: null,
+      termMonths: 240,
+      fixedCuotaCents: 20_000,
+      cuotaDay: 5,
+    });
+    // Simple tracker: TNA rides along, no bank block.
+    expect(hipoteca).toMatchObject({
+      name: "Hipoteca",
+      entity: "Banco Nación",
+      principalCents: 500_000,
+      outstandingCents: 500_000,
+      annualRateBp: 4500,
+      bank: null,
+    });
     expect(ctx.tarjetas).toHaveLength(1);
     expect(ctx.tarjetas[0]).toMatchObject({
       name: "Visa Oro",
@@ -427,14 +455,20 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
       expect.objectContaining({
         nombre: "Apartamento",
         tipo: "hipoteca",
-        saldo_pendiente: "$ 2.000,00",
         estado: "activa",
+        capital: "$ 2.000,00",
+        saldo_pendiente: "$ 2.000,00",
+        pagado: "$ 0,00",
+        tasa: { ea_cobrada: "12,95%" },
+        cuota: { monto: "$ 200,00", dia_del_mes: 5, plazo_meses: 240 },
       }),
       expect.objectContaining({
         nombre: "Hipoteca",
         tipo: "hipoteca",
         saldo_pendiente: "$ 5.000,00",
         estado: "activa",
+        tasa: { tna: "45%" },
+        capital: "$ 5.000,00",
       }),
     ]);
     expect(prompt.tarjetas[0]).toMatchObject({

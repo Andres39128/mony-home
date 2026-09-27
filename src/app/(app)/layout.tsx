@@ -10,15 +10,58 @@ import { TopNavLinks } from "@/components/top-nav";
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
-/** Brand logo. Mobile header and desktop bar share it. */
+/** Brand mark: line-only house + budget bars (canonical asset:
+ *  public/logo-line.svg). Inlined so the ink stroke follows var(--ink)
+ *  and stays visible when dark mode inverts the palette. */
 function AppMark() {
   return (
-    <Link href="/" aria-label="mony-home — Ir al inicio">
-      <img
-        src="/logo-mh.svg"
-        alt="Mony Home logo"
-        className="size-11 shrink-0 object-contain"
-      />
+    <Link
+      href="/"
+      aria-label="mony-home — Ir al inicio"
+      className="inline-flex shrink-0 text-ink"
+    >
+      <svg viewBox="0 0 64 64" className="size-11" aria-hidden="true">
+        <rect
+          x="14.5"
+          y="30"
+          width="35"
+          height="22"
+          rx="3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M8.5 30 32 12.5 55.5 30"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M24 45.5v-6"
+          fill="none"
+          stroke="#a8dadc"
+          strokeWidth="4.5"
+          strokeLinecap="round"
+        />
+        <path
+          d="M32 45.5v-10"
+          fill="none"
+          stroke="#ffe5a3"
+          strokeWidth="4.5"
+          strokeLinecap="round"
+        />
+        <path
+          d="M40 45.5v-11"
+          fill="none"
+          stroke="#c7e9c0"
+          strokeWidth="4.5"
+          strokeLinecap="round"
+        />
+      </svg>
     </Link>
   );
 }
