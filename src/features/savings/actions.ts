@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
 import {
@@ -76,6 +78,7 @@ export async function createGoalAction(
 
   const result = await createGoal(getDb(), guard.user, parsed.data);
   if (!result.ok) return mapGoalError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -94,6 +97,7 @@ export async function updateGoalAction(
 
   const result = await updateGoal(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapGoalError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -109,6 +113,7 @@ export async function toggleGoalAction(
 
   const result = await toggleGoalActive(getDb(), guard.user, id);
   if (!result.ok) return mapGoalError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -124,6 +129,7 @@ export async function deleteGoalAction(
 
   const result = await removeGoal(getDb(), guard.user, id);
   if (!result.ok) return mapGoalError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -152,6 +158,7 @@ export async function updateGoalValueAction(
     }
     return mapGoalError(result.error);
   }
+  refresh();
   return { ok: true };
 }
 
@@ -195,6 +202,7 @@ export async function addContributionAction(
     }
     return { error: "No tenés permiso para registrar ese aporte." };
   }
+  refresh();
   return { ok: true };
 }
 
@@ -213,5 +221,6 @@ export async function markRateReviewedAction(
 
   const result = await markRateReviewed(getDb(), guard.user);
   if (!result.ok) return mapGoalError(result.error);
+  refresh();
   return { ok: true };
 }

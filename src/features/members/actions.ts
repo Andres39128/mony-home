@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { cookies } from "next/headers";
 import { getDb } from "@/db";
 import { ForbiddenError, hashToken, requireAdmin } from "@/lib/auth";
@@ -65,6 +67,7 @@ export async function createMemberAction(
     }
     return { error: "No se pudo crear el integrante." };
   }
+  refresh();
   return { ok: true };
 }
 
@@ -88,6 +91,7 @@ export async function updateMemberAction(
 
   const result = await updateMember(getDb(), id, parsed.data);
   if (!result.ok) return { error: "No se pudo guardar el integrante." };
+  refresh();
   return { ok: true };
 }
 
@@ -110,6 +114,7 @@ export async function deleteMemberAction(
     }
     return { error: "No se pudo eliminar el integrante." };
   }
+  refresh();
   return { ok: true };
 }
 
@@ -161,6 +166,7 @@ export async function changeOwnPasswordAction(
     }
     return { error: "No se pudo cambiar la contraseña." };
   }
+  refresh();
   return { ok: true };
 }
 
@@ -175,5 +181,6 @@ export async function updateOwnNameAction(
 
   const result = await updateOwnName(getDb(), user.id, parsed.data.name);
   if (!result.ok) return { error: "No se pudo guardar el nombre." };
+  refresh();
   return { ok: true };
 }
