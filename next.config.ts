@@ -18,7 +18,11 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Strict-Transport-Security",
-            value: "max-age=31536000; includeSubDomains",
+            // preload is future-proofing: mony-home.vercel.app is a subdomain,
+            // and the browser preload list only accepts registrable domains —
+            // enroll for real only after moving to an own domain
+            // (hstspreload.org).
+            value: "max-age=31536000; includeSubDomains; preload",
           },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },

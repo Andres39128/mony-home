@@ -76,12 +76,14 @@ describe("proxy CSP", () => {
     // The static hash must be derived from the actual theme-init script, or
     // global-error's inline copy would be blocked at runtime.
     const themeHash = `'sha256-${createHash("sha256").update(themeInitScript).digest("base64")}'`;
-    // NODE_ENV is "test" here, so the dev-only 'unsafe-eval' must be absent.
+    // NODE_ENV is "test" here, so the dev-only 'unsafe-eval' must be absent
+    // and style-src uses the production split (elem/attr), not the blanket.
     expect(directives(csp)).toEqual(
       new Map([
         ["default-src", ["'self'"]],
         ["script-src", ["'self'", nonce, themeHash, "'strict-dynamic'"]],
-        ["style-src", ["'self'", "'unsafe-inline'"]],
+        ["style-src-elem", ["'self'"]],
+        ["style-src-attr", ["'unsafe-inline'"]],
         ["img-src", ["'self'", "data:", "blob:"]],
         ["font-src", ["'self'"]],
         ["connect-src", ["'self'"]],
@@ -92,6 +94,20 @@ describe("proxy CSP", () => {
       ]),
     );
     expect(csp).not.toContain("'unsafe-eval'");
+  });
+
+  it("keeps the blanket style-src only in development (Turbopack HMR)", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    try {
+      const csp = cspOf(proxy(new NextRequest("http://localhost/login")));
+      const d = directives(csp);
+      expect(d.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
+      expect(d.has("style-src-elem")).toBe(false);
+      expect(d.has("style-src-attr")).toBe(false);
+      expect(csp).toContain("'unsafe-eval'");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("forwards the nonce to SSR via the request headers", () => {
