@@ -1332,7 +1332,10 @@ describe("revolving cards (integration on PGlite)", () => {
     // Purchases already seeded: 09-10 and 09-12 (anchor 09-25, closed) plus
     // one more after the cut → the trailing open cycle (anchor 10-25).
     await purchase(90_000, "2026-09-28");
-    const cycles = await listCardCycles(appDb, cardId);
+    // Fixed clock (same pattern as the accrual tests): the closed/open split
+    // compares against `now`, so the assertions must never depend on the
+    // wall-clock date the suite happens to run on.
+    const cycles = await listCardCycles(appDb, cardId, new Date("2026-09-26T12:00:00Z"));
     expect(cycles.length).toBeGreaterThanOrEqual(2);
     const [open, closed] = cycles;
     expect(closed.closed).toBe(true);

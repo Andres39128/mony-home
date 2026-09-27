@@ -1486,7 +1486,11 @@ export interface CardCycleView {
  * currently filling before paying). Returns [] when the card is missing,
  * not revolving, or has no statement_day configured.
  */
-export async function listCardCycles(db: Database, cardId: string): Promise<CardCycleView[]> {
+export async function listCardCycles(
+  db: Database,
+  cardId: string,
+  now: Date = new Date(),
+): Promise<CardCycleView[]> {
   const [card] = await db
     .select({
       amortizationMode: loans.amortizationMode,
@@ -1538,7 +1542,7 @@ export async function listCardCycles(db: Database, cardId: string): Promise<Card
     return `${anchorYear}-${String(anchorMonth).padStart(2, "0")}-${String(card.statementDay!).padStart(2, "0")}`;
   };
 
-  const today = todayIso();
+  const today = todayIso(now);
   const cycles: CardCycleView[] = [];
   let current: CardCycleView | null = null;
   let prevEndDay = Number.NaN;
