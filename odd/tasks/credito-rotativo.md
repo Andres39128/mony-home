@@ -47,6 +47,7 @@ ask-on-risk (default). Forecast ~1200-1500 líneas changed → superará 400: ap
 - [x] T5 (commit b8c445bf1187): form movimientos con toggle Efectivo|Tarjeta + select con cupo, badge en filas, filtro Medio de pago, CSV.
 - [x] T6 (commit 00c05c8d9e8f): categorías sistema de tarjetas + demo Visa Oro Galicia con ciclo completo.
 - [x] T7: npm run verify completo (lint 1 warning preexistente, typecheck, 451/451 tests, build OK). Barrido anti-huérfanos: todos los símbolos nuevos tienen consumidores. Helper espejo y matemática de cupo compartidos (cero duplicación).
+- [x] Post-T7 fix (commit 3d4d0c95616c): el reviewer T2 (5º intento capturado) marcó R3-001 — el test de ciclos dependía del reloj y rompería tras 2026-10-25. Corregido inyectando `now` en listCardCycles (patrón del repo). El lote de refutación nativo quedó bloqueado por error determinístico del provider del subagente refuter (`__managed_by`); el hallazgo se verificó manualmente con evidencia y se fixeó.
 
 ## Next step
-Entrega: decidir estrategia de PR con el usuario (presupuesto >400 líneas). Review T2 pendiente de colectar.
+Entrega: decidir estrategia de PR (presupuesto >400 líneas). Reviews: T1 acknowledged; T2 capturado+fixeado pero refutación nativa pendiente por defecto del runtime del subagente (lineage review-bedc52f87ad40cb6).
