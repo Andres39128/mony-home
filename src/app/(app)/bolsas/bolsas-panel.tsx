@@ -29,7 +29,12 @@ interface Props {
   goals: GoalView[];
   members: { id: string; name: string }[];
   isAdmin: boolean;
-  patrimony: { savingsCents: number; investmentsCents: number; totalCents: number };
+  patrimony: {
+    savingsCents: number;
+    investmentsCents: number;
+    propertiesCents: number;
+    totalCents: number;
+  };
   contributionsByGoal: Record<string, ContributionView[]>;
   pendingReviews: RateReviewView[];
   createAction: BolsaAction;
@@ -710,6 +715,9 @@ export default function BolsasPanel({
           { label: "Patrimonio neto", cents: patrimony.totalCents, accent: true },
           { label: "Ahorro", cents: patrimony.savingsCents, accent: false },
           { label: "Inversión", cents: patrimony.investmentsCents, accent: false },
+          ...(patrimony.propertiesCents > 0
+            ? [{ label: "Inmuebles", cents: patrimony.propertiesCents, accent: false }]
+            : []),
         ].map((item) => (
           <article
             key={item.label}

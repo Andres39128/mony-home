@@ -144,6 +144,7 @@ describe("assistant service (integration on PGlite, mocked llm)", () => {
       deudas: [],
       tarjetas: [],
       totalDebtCents: 0,
+      patrimonio: { ahorroCents: 0, inversionesCents: 0, inmueblesCents: 0, netoCents: 0 },
       trend: { months: 12, avgExpenseCents: 0, currentVsAvgPct: 0 },
       notes: [],
     };

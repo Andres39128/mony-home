@@ -25,7 +25,7 @@ import {
   expensesByCategory,
   monthlyTotals,
 } from "@/features/analytics/service";
-import { listGoals } from "@/features/savings/service";
+import { listGoals, getPatrimony } from "@/features/savings/service";
 import { formatRatePercent, investmentValueCents } from "@/features/savings/math";
 import { listLoans } from "@/features/loans/service";
 
@@ -149,6 +149,14 @@ export interface FinanceContext {
   tarjetas: ContextTarjeta[];
   /** Total household debt (every loan + card, outstanding clamped at 0). */
   totalDebtCents: number;
+  /** Net worth: savings + investments + mortgaged properties − debt. */
+  patrimonio: {
+    ahorroCents: number;
+    inversionesCents: number;
+    /** Mortgaged properties at their stated value (the mortgage's asset). */
+    inmueblesCents: number;
+    netoCents: number;
+  };
   trend: {
     months: number;
     avgExpenseCents: number;
@@ -300,6 +308,9 @@ export async function buildFinanceContext(
     (total, loan) => total + Math.max(loan.outstandingCents, 0),
     0,
   );
+  // Net worth reuses getPatrimony over the rows already fetched (no extra
+  // queries): ahorro + inversiones + inmuebles − deuda.
+  const patrimony = await getPatrimony(db, goals, loans);
 
   return {
     month,
@@ -347,6 +358,12 @@ export async function buildFinanceContext(
     deudas,
     tarjetas,
     totalDebtCents,
+    patrimonio: {
+      ahorroCents: patrimony.savingsCents,
+      inversionesCents: patrimony.investmentsCents,
+      inmueblesCents: patrimony.propertiesCents,
+      netoCents: patrimony.totalCents,
+    },
     trend: {
       months: trendTotals.length,
       avgExpenseCents,
@@ -515,6 +532,12 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
       estado: tarjeta.isActive ? "activa" : "inactiva",
     })),
     deuda_total: ar(ctx.totalDebtCents),
+    patrimonio: {
+      ahorro: ar(ctx.patrimonio.ahorroCents),
+      inversiones: ar(ctx.patrimonio.inversionesCents),
+      inmuebles: ar(ctx.patrimonio.inmueblesCents),
+      patrimonio_neto: ar(ctx.patrimonio.netoCents),
+    },
     tendencia: {
       meses_analizados: ctx.trend.months,
       gasto_promedio_mensual: ar(ctx.trend.avgExpenseCents),

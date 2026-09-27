@@ -47,6 +47,7 @@ export default async function BolsasPage() {
         patrimony={{
           savingsCents: patrimony.savingsCents,
           investmentsCents: patrimony.investmentsCents,
+          propertiesCents: patrimony.propertiesCents,
           totalCents: patrimony.totalCents,
         }}
         contributionsByGoal={contributionsByGoal}

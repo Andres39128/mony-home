@@ -373,6 +373,12 @@ export default async function DashboardPage({
           <p className="text-sm text-ink">
             Ahorro {formatCents(patrimony.savingsCents)} · Inversión{" "}
             {formatCents(patrimony.investmentsCents)}
+            {patrimony.propertiesCents > 0 && (
+              <>
+                {" · "}
+                Inmuebles {formatCents(patrimony.propertiesCents)}
+              </>
+            )}
             {patrimony.debtCents > 0 && (
               <>
                 {" · "}

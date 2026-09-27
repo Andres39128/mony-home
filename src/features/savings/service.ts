@@ -20,7 +20,7 @@ import { parseAmountToCents } from "@/lib/money";
 import { parseAmountCents } from "@/lib/money-errors";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/lib/date";
-import { getDebtCents } from "@/features/loans/service";
+import { listLoans, type LoanView } from "@/features/loans/service";
 import { catchUpAllInterest } from "./accrual";
 // Pure math lives in a client-safe module; re-exported here so the service
 // stays the single import surface for server-side callers and tests.
@@ -147,6 +147,12 @@ export interface PatrimonyBreakdown {
 export interface Patrimony {
   savingsCents: number;
   investmentsCents: number;
+  /**
+   * Mortgaged properties at their stated value (property_value_cents on the
+   * loans). The ASSET side of a mortgage: the debt still counts in full on
+   * debtCents, so net = ahorro + inversiones + inmuebles − deuda.
+   */
+  propertiesCents: number;
   /** Total outstanding debt across all loans (assets − debts = NET). */
   debtCents: number;
   totalCents: number;
@@ -699,15 +705,27 @@ export async function updateGoalValue(
  * goals — deactivating a tracker does not withdraw the money — and inactive
  * loans — deactivating a debt does not forgive it.
  *
- * `goals` accepts a precomputed listGoals() result so callers that already
- * ran the lazy catch-up (e.g. /bolsas) don't pay for a second goals query.
+ * `goals` accepts a precomputed listGoals() result and `loans` a precomputed
+ * listLoans() result, so callers that already ran the lazy catch-ups (e.g.
+ * /bolsas, the assistant context) don't pay for second queries.
  */
 export async function getPatrimony(
   db: Database,
   goals?: GoalView[],
+  loans?: LoanView[],
 ): Promise<Patrimony> {
   goals ??= await listGoals(db);
-  const debtCents = await getDebtCents(db);
+  loans ??= await listLoans(db);
+  // Same clamp as getDebtCents (a saldo a favor never subtracts) plus the
+  // property side — both computed over the rows we already hold.
+  const debtCents = loans.reduce(
+    (total, loan) => total + Math.max(loan.outstandingCents, 0),
+    0,
+  );
+  const propertiesCents = loans.reduce(
+    (total, loan) => total + (loan.propertyValueCents ?? 0),
+    0,
+  );
   const breakdown: PatrimonyBreakdown[] = goals.map((goal) => ({
     id: goal.id,
     name: goal.name,
@@ -726,8 +744,11 @@ export async function getPatrimony(
   return {
     savingsCents,
     investmentsCents,
+    propertiesCents,
     debtCents,
-    totalCents: savingsCents + investmentsCents - debtCents,
+    // The mortgaged property counts as an asset while its loan counts in
+    // full on the debt side — the net shows the real equity.
+    totalCents: savingsCents + investmentsCents + propertiesCents - debtCents,
     goals: breakdown,
   };
 }
