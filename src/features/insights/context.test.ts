@@ -265,6 +265,27 @@ describe("insights context (integration on PGlite)", () => {
     expect(monthLabel("2026-09")).toBe("septiembre 2026");
     expect(monthLabel("2026-01")).toBe("enero 2026");
   });
+
+  it("narrates investments at their valuation, never a bare ledger 0", async () => {
+    // Valuation-only investment: no contributions, manual current value —
+    // the contributions-ledger net alone would narrate $0.
+    await db.insert(savingsGoals).values({
+      name: "Cedear",
+      kind: "investment",
+      scope: "common",
+      currentValueCents: 1_200_000,
+      valueUpdatedAt: new Date("2026-09-20T12:00:00Z"),
+    });
+    const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
+    const cedear = ctx.bolsas.find((bolsa) => bolsa.name === "Cedear")!;
+    expect(cedear.kind).toBe("investment");
+    expect(cedear.netCents).toBe(1_200_000);
+    const prompt = toPromptContext(ctx) as ReturnType<typeof toPromptContext>;
+    const bolsas = prompt.bolsas as Array<Record<string, unknown>>;
+    expect(bolsas.find((bolsa) => bolsa.nombre === "Cedear")?.saldo_neto).toBe("$ 12.000,00");
+    // Savings bags keep the ledger net (Mercado stays at its deposits).
+    expect(ctx.bolsas.find((bolsa) => bolsa.name === "Mercado")?.netCents).toBe(60_000);
+  });
 });
 
 /** Prompt shape the debt/card assertions read (typed — no any). */

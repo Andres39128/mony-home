@@ -26,7 +26,7 @@ import {
   monthlyTotals,
 } from "@/features/analytics/service";
 import { listGoals } from "@/features/savings/service";
-import { formatRatePercent } from "@/features/savings/math";
+import { formatRatePercent, investmentValueCents } from "@/features/savings/math";
 import { listLoans } from "@/features/loans/service";
 
 /** Top spender categories detailed in the context; the rest roll into "otros". */
@@ -71,7 +71,12 @@ export interface ContextBolsa {
   institution: string | null;
   /** 'ahorro' (savings bag) vs 'inversión' (acciones). */
   kind: "savings" | "investment";
-  /** Net accumulated (deposits − withdrawals + interest), exact cents. */
+  /**
+   * Savings: net accumulated (deposits − withdrawals + interest).
+   * Investments: the manually updated current value (net fallback) — same
+   * rule as the UI and getPatrimony, so a valuation-only investment never
+   * narrates as $0.
+   */
   netCents: number;
   /** Annual rate in bp; null = no yield. */
   annualRateBp: number | null;
@@ -330,7 +335,12 @@ export async function buildFinanceContext(
       name: goal.name,
       institution: goal.institution,
       kind: goal.kind,
-      netCents: goal.netCents,
+      // Investments narrate their valuation (currentValue ?? net), not the
+      // contributions ledger — the same value the UI shows.
+      netCents:
+        goal.kind === "investment"
+          ? investmentValueCents(goal.netCents, goal.currentValueCents)
+          : goal.netCents,
       annualRateBp: goal.annualRateBp,
       accrualMode: goal.accrualMode,
     })),
