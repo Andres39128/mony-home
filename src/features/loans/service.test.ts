@@ -6,21 +6,27 @@ import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { categories, loanPayments, loans, transactions, users } from "@/db/schema";
 import {
+  addCardPayment,
   addLoanPayment,
+  CARD_FEE_NOTE,
+  CARD_INTEREST_NOTE,
   computeOutstanding,
   computePaidPct,
   createLoan,
   getDebtCents,
+  listCardCycles,
   loanPaymentSchema,
   loanSchema,
   listLoans,
   listLoanPeriods,
   listPayments,
   outstandingSchema,
+  removeLedgerEntry,
   removeLoan,
   toggleLoanActive,
   updateLoan,
   updateOutstanding,
+  type CardPaymentInput,
   type LoanInput,
   type LoanPaymentInput,
 } from "@/features/loans/service";
@@ -28,7 +34,7 @@ import { getPatrimony } from "@/features/savings/service";
 import { transactionTotals } from "@/features/transactions/service";
 import { todayIso } from "@/lib/date";
 import type { SessionUser } from "@/lib/auth";
-import { catchUpBankInterest } from "@/features/loans/accrual";
+import { catchUpAllLoanInterest, catchUpBankInterest } from "@/features/loans/accrual";
 import { allocateWaterfall } from "@/features/loans/amortization";
 import {
   COMPOUNDED_33_DAY_INTEREST_CENTS,
@@ -59,6 +65,9 @@ const emptyBank = {
   fireRatePerMillon: "",
   moraRate: "",
   otherCharges: "",
+  creditLimit: "",
+  managementFee: "",
+  statementDay: "",
 } as const;
 
 const cardInput: LoanInput = {
@@ -104,6 +113,9 @@ const bankInput: LoanInput = {
   fireRatePerMillon: "218,17",
   moraRate: "",
   otherCharges: "",
+  creditLimit: "",
+  managementFee: "",
+  statementDay: "",
 };
 
 /** Empty date mirrors the zod transform: "" → today. */
@@ -1004,5 +1016,335 @@ describe("golden reconciliation — period statement (R2 amendment, integration)
     ).toEqual({ ok: true });
     const after = (await listLoans(appDb)).find((l) => l.id === loanId)!;
     expect(after.outstandingCents).toBe(stated);
+  });
+});
+
+describe("revolving cards (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let admin: SessionUser;
+  let member: SessionUser;
+  let payerId: string;
+  let categoryId: string;
+  let cardId: string;
+  let otherLoanId: string;
+
+  /** Fresh revolving form input; per-test overrides layered on top. */
+  const revolvingInput = (over: Partial<LoanInput> = {}): LoanInput => ({
+    name: "Visa Oro",
+    kind: "credit_card",
+    entity: "Banco Nación",
+    scope: "common",
+    memberId: "",
+    principal: "0,00",
+    annualRate: "",
+    amortizationMode: "revolving",
+    chargedRate: "",
+    contractualRate: "",
+    termMonths: "",
+    fixedCuota: "",
+    cuotaDay: "",
+    propertyValue: "",
+    insuredBase: "",
+    lifeRatePerMillon: "",
+    fireRatePerMillon: "",
+    moraRate: "",
+    otherCharges: "",
+    creditLimit: "1.000.000,00",
+    managementFee: "50.000,00",
+    statementDay: "25",
+    ...over,
+  });
+
+  const cardPayment = (
+    amount: string,
+    over: Partial<CardPaymentInput> = {},
+  ): CardPaymentInput => ({
+    amount,
+    interest: "",
+    includeFee: "",
+    date: todayIso(),
+    note: "",
+    memberId: "",
+    ...over,
+  });
+
+  /** Direct card purchase (the transactions service writes these in T3). */
+  async function purchase(cents: number, date = "2026-09-10") {
+    await db.insert(transactions).values({
+      date,
+      amountCents: cents,
+      type: "expense",
+      categoryId,
+      memberId: payerId,
+      paymentMethod: "card",
+      cardLoanId: cardId,
+    });
+  }
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    await db.insert(categories).values([
+      { name: "Pago de préstamos", kind: "expense" },
+      { name: "Intereses de tarjetas", kind: "expense" },
+      { name: "Cuota de manejo de tarjetas", kind: "expense" },
+      { name: "Supermercado", kind: "expense" },
+    ]);
+    const [row] = await db
+      .insert(users)
+      .values({ username: "radmin", name: "RAdmin", passwordHash: "x", role: "admin" })
+      .returning();
+    const [mate] = await db
+      .insert(users)
+      .values({ username: "rmate", name: "RMate", passwordHash: "x", role: "member" })
+      .returning();
+    admin = { id: row.id, username: row.username, name: row.name, role: row.role };
+    member = { id: mate.id, username: mate.username, name: mate.name, role: mate.role };
+    payerId = mate.id;
+    const [cat] = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.name, "Supermercado"))
+      .limit(1);
+    categoryId = cat.id;
+
+    expect(await createLoan(appDb, admin, revolvingInput())).toEqual({ ok: true });
+    [cardId] = (
+      await db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Visa Oro"))
+    ).map((r) => r.id);
+    // A plain simple tracker, to prove the card payment path rejects it.
+    expect(
+      await createLoan(appDb, admin, {
+        ...revolvingInput({ name: "Préstamo personal" }),
+        amortizationMode: "",
+        principal: "500.000,00",
+        creditLimit: "",
+        managementFee: "",
+        statementDay: "",
+      }),
+    ).toEqual({ ok: true });
+    [otherLoanId] = (
+      await db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Préstamo personal"))
+    ).map((r) => r.id);
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("validates the revolving config at zod and service level", async () => {
+    // Missing cupo: zod refine fires on the field.
+    const noLimit = loanSchema.safeParse(revolvingInput({ creditLimit: "" }));
+    expect(noLimit.success).toBe(false);
+    // Rate on a revolving card: excluded (interest is manual).
+    const withRate = loanSchema.safeParse(revolvingInput({ annualRate: "45" }));
+    expect(withRate.success).toBe(false);
+    // Revolving fields on a bank loan: excluded.
+    const bankMixed = loanSchema.safeParse({
+      ...revolvingInput({ amortizationMode: "bank", chargedRate: "12,95", fixedCuota: "1.000", termMonths: "12", cuotaDay: "5" }),
+    });
+    expect(bankMixed.success).toBe(false);
+    // Bad statement day: typed service error on the field.
+    expect(
+      await createLoan(appDb, admin, revolvingInput({ name: "Mala", statementDay: "29" })),
+    ).toEqual({ ok: false, error: "invalid_revolving_config", field: "statementDay" });
+    // Bad fee: same shape.
+    expect(
+      await createLoan(appDb, admin, revolvingInput({ name: "Mala 2", managementFee: "-1" })),
+    ).toEqual({ ok: false, error: "invalid_revolving_config", field: "managementFee" });
+    // Members cannot manage cards.
+    expect(await createLoan(appDb, member, revolvingInput({ name: "Mala 3" }))).toEqual({
+      ok: false,
+      error: "forbidden",
+    });
+  });
+
+  it("starts a fresh card at zero debt with the full cupo available", async () => {
+    const card = (await listLoans(appDb)).find((l) => l.id === cardId)!;
+    expect(card).toMatchObject({
+      amortizationMode: "revolving",
+      principalCents: 0,
+      creditLimitCents: 100_000_000,
+      managementFeeCents: 5_000_000,
+      statementDay: 25,
+      purchasesCents: 0,
+      outstandingCents: 0,
+      availableCents: 100_000_000,
+    });
+  });
+
+  it("counts purchases as debt: outstanding grows, cupo shrinks", async () => {
+    await purchase(150_000, "2026-09-10");
+    await purchase(250_000, "2026-09-12");
+    // A pending quick-capture linked to the card is a placeholder, not debt.
+    await db.insert(transactions).values({
+      date: "2026-09-13",
+      amountCents: 0,
+      type: "expense",
+      categoryId: null,
+      memberId: payerId,
+      paymentMethod: "card",
+      cardLoanId: cardId,
+      needsDetails: true,
+      note: "Pendiente incluir detalles.",
+    });
+
+    const card = (await listLoans(appDb)).find((l) => l.id === cardId)!;
+    expect(card.purchasesCents).toBe(400_000);
+    expect(card.outstandingCents).toBe(400_000);
+    expect(card.availableCents).toBe(99_600_000);
+  });
+
+  it("registers a card payment with manual interest and cuota de manejo", async () => {
+    expect(
+      await addCardPayment(appDb, member, cardId, cardPayment("700.000,00", {
+        interest: "100.000,00",
+        includeFee: "1",
+      })),
+    ).toEqual({ ok: true });
+
+    const rows = await db
+      .select()
+      .from(loanPayments)
+      .where(eq(loanPayments.loanId, cardId));
+    const paymentRow = rows.find((r) => r.kind === "payment")!;
+    expect(paymentRow.amountCents).toBe(70_000_000);
+    expect(paymentRow.memberId).toBe(payerId);
+    const interestRow = rows.find((r) => r.kind === "interest")!;
+    expect(interestRow.amountCents).toBe(10_000_000);
+    expect(interestRow.note).toBe(CARD_INTEREST_NOTE);
+    expect(interestRow.memberId).toBeNull();
+    const feeRow = rows.find((r) => r.kind === "charge")!;
+    expect(feeRow.amountCents).toBe(5_000_000);
+    expect(feeRow.note).toBe(CARD_FEE_NOTE);
+
+    // ONLY the finance costs mirror — never the capital (the purchase was
+    // already the expense; mirroring again would double-count).
+    const mirrors = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.loanPaymentId, paymentRow.id));
+    expect(mirrors).toHaveLength(0);
+    const interestMirror = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.loanPaymentId, interestRow.id));
+    expect(interestMirror).toHaveLength(1);
+    expect(interestMirror[0]).toMatchObject({
+      amountCents: 10_000_000,
+      categoryId: (
+        await db.select({ id: categories.id }).from(categories).where(eq(categories.name, "Intereses de tarjetas"))
+      )[0].id,
+      memberId: payerId,
+      note: "Interés Visa Oro",
+    });
+    const feeMirror = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.loanPaymentId, feeRow.id));
+    expect(feeMirror).toHaveLength(1);
+
+    // outstanding = purchases + interest + fee − total paid → saldo a favor
+    // (paid beyond the debt); available clamps at the cupo, never above.
+    const card = (await listLoans(appDb)).find((l) => l.id === cardId)!;
+    expect(card.outstandingCents).toBe(400_000 + 10_000_000 + 5_000_000 - 70_000_000);
+    expect(card.availableCents).toBe(100_000_000);
+  });
+
+  it("rejects card payments with typed errors", async () => {
+    expect(
+      await addCardPayment(appDb, member, otherLoanId, cardPayment("1.000,00")),
+    ).toEqual({ ok: false, error: "loan_not_revolving" });
+    expect(
+      await addCardPayment(appDb, member, cardId, cardPayment("1.000,00", { interest: "abc" })),
+    ).toEqual({ ok: false, error: "invalid_interest" });
+    expect(
+      await addCardPayment(appDb, member, cardId, cardPayment("1.000,00", { interest: "0" })),
+    ).toEqual({ ok: false, error: "invalid_interest" });
+  });
+
+  it("suffixed same-day interest rows instead of a raw unique violation", async () => {
+    await addCardPayment(appDb, member, cardId, cardPayment("10.000,00", { interest: "1.000,00" }));
+    await addCardPayment(appDb, member, cardId, cardPayment("10.000,00", { interest: "2.000,00" }));
+    const interestRows = await db
+      .select()
+      .from(loanPayments)
+      .where(eq(loanPayments.loanId, cardId));
+    const notes = interestRows.filter((r) => r.kind === "interest").map((r) => r.note);
+    expect(notes).toContain(CARD_INTEREST_NOTE);
+    expect(notes).toContain(`${CARD_INTEREST_NOTE} (2)`);
+  });
+
+  it("lets an admin correct wrong ledger rows; mirrors fall by CASCADE", async () => {
+    const [wrong] = await db
+      .select()
+      .from(loanPayments)
+      .where(eq(loanPayments.note, `${CARD_INTEREST_NOTE} (2)`));
+    // Member: forbidden.
+    expect(await removeLedgerEntry(appDb, member, wrong.id)).toEqual({
+      ok: false,
+      error: "forbidden",
+    });
+    // The wrong row's mirror exists before the correction…
+    const [mirror] = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.loanPaymentId, wrong.id));
+    expect(mirror).toBeDefined();
+    expect(await removeLedgerEntry(appDb, admin, wrong.id)).toEqual({ ok: true });
+    // …and falls with it.
+    const [gone] = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.loanPaymentId, wrong.id));
+    expect(gone).toBeUndefined();
+    expect(await removeLedgerEntry(appDb, admin, wrong.id)).toEqual({
+      ok: false,
+      error: "entry_not_found",
+    });
+  });
+
+  it("never auto-accrues interest on a revolving card", async () => {
+    await catchUpAllLoanInterest(appDb);
+    const engineInterest = await db
+      .select()
+      .from(loanPayments)
+      .where(eq(loanPayments.loanId, cardId));
+    // Only the MANUAL rows survive — the catch-up added nothing.
+    expect(engineInterest.filter((r) => r.kind === "interest").length).toBe(2);
+  });
+
+  it("true-ups the card balance INCLUDING purchases", async () => {
+    // Stated absolute balance (positive: the true-up valve takes balances,
+    // not signed a-favor states). If updateOutstanding ignored purchases
+    // while listLoans counts them, the convergence below would diverge.
+    const stated = 1_234_567;
+    expect(
+      await updateOutstanding(appDb, admin, cardId, (stated / 100).toFixed(2).replace(".", ",")),
+    ).toEqual({ ok: true });
+    const after = (await listLoans(appDb)).find((l) => l.id === cardId)!;
+    expect(after.outstandingCents).toBe(stated);
+  });
+
+  it("groups the card history into billing cycles by statement day", async () => {
+    // Purchases already seeded: 09-10 and 09-12 (anchor 09-25, closed) plus
+    // one more after the cut → the trailing open cycle (anchor 10-25).
+    await purchase(90_000, "2026-09-28");
+    // Fixed clock (same pattern as the accrual tests): the closed/open split
+    // compares against `now`, so the assertions must never depend on the
+    // wall-clock date the suite happens to run on.
+    const cycles = await listCardCycles(appDb, cardId, new Date("2026-09-26T12:00:00Z"));
+    expect(cycles.length).toBeGreaterThanOrEqual(2);
+    const [open, closed] = cycles;
+    expect(closed.closed).toBe(true);
+    expect(closed.endDate).toBe("2026-09-25");
+    expect(closed.purchasesCents).toBe(400_000);
+    expect(open.endDate).toBe("2026-10-25");
+    expect(open.closed).toBe(false);
+    expect(open.purchasesCents).toBe(90_000);
+    // Non-revolving / unconfigured cards group nothing.
+    expect(await listCardCycles(appDb, otherLoanId)).toEqual([]);
   });
 });

@@ -15,6 +15,7 @@ const HEADER = [
   "Integrante",
   "Ámbito",
   "Grupo",
+  "Medio de pago",
   "Nota",
   "Comprobante",
 ] as const;
@@ -49,6 +50,7 @@ export function movementsToCsv(rows: TransactionView[]): string {
         row.memberName,
         row.scope === "common" ? "Común" : "Individual",
         row.groupName ?? "",
+        row.paymentMethod === "card" ? `Tarjeta (${row.cardName ?? "—"})` : "Efectivo",
         row.note ?? "",
         row.receiptId ? "sí" : "no",
       ]

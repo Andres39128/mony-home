@@ -37,6 +37,9 @@ function readMovementForm(formData: FormData) {
     groupId: formData.get("groupId") ?? "",
     scope: formData.get("scope") ?? "common",
     note: formData.get("note") ?? "",
+    // Medio de pago: "card" carries cardId (validated by the service).
+    paymentMethod: formData.get("paymentMethod") ?? "cash",
+    cardId: formData.get("cardId") ?? "",
     // Server actions receive File entries natively via FormData.
     receipt: formData.get("receipt"),
   };
@@ -81,6 +84,23 @@ function mapMovementError(error: string): FormState {
   if (error === "receipt_invalid_type") {
     return {
       fieldErrors: { receipt: "El archivo no es una imagen válida: usá JPG, PNG o WebP." },
+    };
+  }
+  if (error === "card_not_found") {
+    return { error: "La tarjeta seleccionada ya no existe. Recarga e intenta de nuevo." };
+  }
+  if (error === "card_inactive") {
+    return { fieldErrors: { cardId: "La tarjeta está inactiva." } };
+  }
+  if (error === "card_not_revolving") {
+    return { fieldErrors: { cardId: "El préstamo seleccionado no es una tarjeta de crédito." } };
+  }
+  if (error === "card_requires_expense") {
+    return { fieldErrors: { cardId: "Solo los gastos pueden pagarse con tarjeta." } };
+  }
+  if (error === "card_limit_exceeded") {
+    return {
+      fieldErrors: { cardId: "La compra supera el cupo disponible de la tarjeta." },
     };
   }
   if (error === "not_found") {

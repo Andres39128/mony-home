@@ -23,6 +23,9 @@ function row(overrides: Partial<TransactionView> = {}): TransactionView {
     groupName: null,
     needsDetails: false,
     receiptId: null,
+    paymentMethod: "cash",
+    cardId: null,
+    cardName: null,
     ...overrides,
   };
 }
@@ -44,13 +47,26 @@ describe("movementsToCsv", () => {
 
     expect(csv.charCodeAt(0)).toBe(0xfeff);
     const [header, first, second] = csv.slice(1).split("\r\n");
-    expect(header).toBe("Fecha,Tipo,Monto,Categoría,Integrante,Ámbito,Grupo,Nota,Comprobante");
+    expect(header).toBe(
+      "Fecha,Tipo,Monto,Categoría,Integrante,Ámbito,Grupo,Medio de pago,Nota,Comprobante",
+    );
     // The decimal comma forces quoting the amount (RFC 4180) so Excel
     // keeps it as ONE field instead of splitting at the comma.
-    expect(first).toBe('2026-09-10,Gasto,"1234,56",,Mate,Común,,,no');
+    expect(first).toBe('2026-09-10,Gasto,"1234,56",,Mate,Común,,Efectivo,,no');
     expect(second).toBe(
-      '2026-09-10,Ingreso,"10000,00",Sueldo,Mate,Individual,Vacaciones,Sueldo de septiembre,sí',
+      '2026-09-10,Ingreso,"10000,00",Sueldo,Mate,Individual,Vacaciones,Efectivo,Sueldo de septiembre,sí',
     );
+  });
+
+  it("names the card on card-paid rows", () => {
+    const csv = movementsToCsv([
+      row({ paymentMethod: "card", cardName: "Visa Oro", note: "Super" }),
+      row({ paymentMethod: "card", cardName: null }),
+    ]);
+    const [, cardRow, unnamedRow] = csv.slice(1).split("\r\n");
+    expect(cardRow).toContain("Tarjeta (Visa Oro)");
+    // A card row without a resolvable card keeps the em-dash placeholder.
+    expect(unnamedRow).toContain("Tarjeta (—)");
   });
 
   it("quotes fields containing separators, quotes or newlines", () => {

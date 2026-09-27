@@ -1,0 +1,23 @@
+CREATE TYPE "public"."payment_method" AS ENUM('cash', 'card');--> statement-breakpoint
+ALTER TYPE "public"."loan_amortization_mode" ADD VALUE 'revolving';--> statement-breakpoint
+ALTER TABLE "loans" DROP CONSTRAINT "loans_simple_mode_excludes_bank_config";--> statement-breakpoint
+ALTER TABLE "loans" DROP CONSTRAINT "loans_principal_positive";--> statement-breakpoint
+ALTER TABLE "loans" DROP CONSTRAINT "loans_bank_mode_requires_config";--> statement-breakpoint
+ALTER TABLE "loans" ADD COLUMN "credit_limit_cents" bigint;--> statement-breakpoint
+ALTER TABLE "loans" ADD COLUMN "management_fee_cents" bigint;--> statement-breakpoint
+ALTER TABLE "loans" ADD COLUMN "statement_day" integer;--> statement-breakpoint
+ALTER TABLE "transactions" ADD COLUMN "payment_method" "payment_method" DEFAULT 'cash' NOT NULL;--> statement-breakpoint
+ALTER TABLE "transactions" ADD COLUMN "card_loan_id" uuid;--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_card_loan_id_loans_id_fk" FOREIGN KEY ("card_loan_id") REFERENCES "public"."loans"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "transactions_card_loan_id_idx" ON "transactions" USING btree ("card_loan_id");--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_credit_limit_positive" CHECK ("loans"."credit_limit_cents" IS NULL OR "loans"."credit_limit_cents" > 0);--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_management_fee_non_negative" CHECK ("loans"."management_fee_cents" IS NULL OR "loans"."management_fee_cents" >= 0);--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_statement_day_bounds" CHECK ("loans"."statement_day" IS NULL OR ("loans"."statement_day" >= 1 AND "loans"."statement_day" <= 28));--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_bank_mode_excludes_revolving_config" CHECK ("loans"."amortization_mode" IS DISTINCT FROM 'bank' OR ("loans"."credit_limit_cents" IS NULL AND "loans"."management_fee_cents" IS NULL AND "loans"."statement_day" IS NULL));--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_revolving_requires_limit" CHECK ("loans"."amortization_mode" IS DISTINCT FROM 'revolving' OR ("loans"."credit_limit_cents" IS NOT NULL AND "loans"."credit_limit_cents" > 0));--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_revolving_excludes_bank_config" CHECK ("loans"."amortization_mode" IS DISTINCT FROM 'revolving' OR ("loans"."annual_rate_bp" IS NULL AND "loans"."charged_rate_bp" IS NULL AND "loans"."contractual_rate_bp" IS NULL AND "loans"."term_months" IS NULL AND "loans"."fixed_cuota_cents" IS NULL AND "loans"."cuota_day" IS NULL AND "loans"."property_value_cents" IS NULL AND "loans"."insured_base_cents" IS NULL AND "loans"."life_insurance_rate_per_millon_x100k" IS NULL AND "loans"."fire_insurance_rate_per_millon_x100k" IS NULL AND "loans"."extra_insurance_rate_per_millon_x100k" IS NULL AND "loans"."other_charges_cents" IS NULL AND "loans"."mora_rate_bp" IS NULL));--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_simple_mode_excludes_engine_config" CHECK ("loans"."amortization_mode" IS NOT NULL OR ("loans"."charged_rate_bp" IS NULL AND "loans"."contractual_rate_bp" IS NULL AND "loans"."term_months" IS NULL AND "loans"."fixed_cuota_cents" IS NULL AND "loans"."cuota_day" IS NULL AND "loans"."property_value_cents" IS NULL AND "loans"."insured_base_cents" IS NULL AND "loans"."life_insurance_rate_per_millon_x100k" IS NULL AND "loans"."fire_insurance_rate_per_millon_x100k" IS NULL AND "loans"."extra_insurance_rate_per_millon_x100k" IS NULL AND "loans"."other_charges_cents" IS NULL AND "loans"."mora_rate_bp" IS NULL AND "loans"."credit_limit_cents" IS NULL AND "loans"."management_fee_cents" IS NULL AND "loans"."statement_day" IS NULL));--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_principal_positive" CHECK ("loans"."principal_cents" > 0 OR ("loans"."amortization_mode" IS NOT DISTINCT FROM 'revolving' AND "loans"."principal_cents" >= 0));--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_bank_mode_requires_config" CHECK ("loans"."amortization_mode" IS DISTINCT FROM 'bank' OR ("loans"."charged_rate_bp" IS NOT NULL AND "loans"."fixed_cuota_cents" IS NOT NULL AND "loans"."term_months" IS NOT NULL AND "loans"."cuota_day" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_card_matches_loan" CHECK (("transactions"."payment_method" = 'card') = ("transactions"."card_loan_id" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_card_expense_only" CHECK ("transactions"."payment_method" = 'cash' OR "transactions"."type" = 'expense');

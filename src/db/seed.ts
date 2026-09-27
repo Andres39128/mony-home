@@ -95,6 +95,11 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     // SYSTEM category: the loans mirror writes it from pay() — a loan payment
     // is an expense. Production mode needs it too.
     ["Pago de préstamos", "#fb7185"],
+    // SYSTEM categories: revolving card finance costs (addCardPayment) —
+    // interest and cuota de manejo are real expenses; the purchase itself is
+    // already its own movement. Production mode needs them too.
+    ["Intereses de tarjetas", "#e879f9"],
+    ["Cuota de manejo de tarjetas", "#b45309"],
   ] as const;
   const incomeCategories = [
     ["Sueldo", "#22c55e"],
@@ -340,6 +345,104 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
       scope: "common",
       principalCents: 1_200_000_000, // $12.000.000
       // No rate: the demo also covers the rateless path (no accrual).
+    });
+  }
+
+  // --- Revolving card demo (demo only) ---
+  // A card with cupo + cuota de manejo: purchases link via card_loan_id and
+  // consume the cupo; the payment carries the manual interest and fee, each
+  // mirrored as its own finance-cost expense (same shapes addCardPayment
+  // writes — the seed keeps the service's ledger/mirror contract).
+  if (!loanRows.some((l) => l.name === "Visa Oro Galicia")) {
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa Oro Galicia",
+        kind: "credit_card",
+        entity: "Galicia",
+        scope: "common",
+        principalCents: 0, // fresh card: the cupo is the commitment
+        amortizationMode: "revolving",
+        creditLimitCents: 500_000_000, // $5.000.000
+        managementFeeCents: 2_500_000, // $25.000 cuota de manejo
+        statementDay: 25,
+      })
+      .returning();
+
+    // Card purchases: normal expenses that name their card.
+    await db.insert(transactions).values([
+      {
+        date: day(8),
+        amountCents: 12_500_000, // $125.000 supermercado
+        type: "expense",
+        categoryId: categoryId("Supermercado"),
+        memberId: userId("maria"),
+        paymentMethod: "card",
+        cardLoanId: card.id,
+        note: "Compra con tarjeta",
+      },
+      {
+        date: day(15),
+        amountCents: 4_800_000, // $48.000 online
+        type: "expense",
+        categoryId: categoryId("Ocio"),
+        memberId: userId("andres"),
+        paymentMethod: "card",
+        cardLoanId: card.id,
+      },
+    ]);
+
+    // Card payment: total + manual interest + cuota de manejo. The payment
+    // row itself mirrors NOTHING (the purchase was already the expense);
+    // interest and fee are member-less engine rows with their mirrors.
+    await db.insert(loanPayments).values({
+      loanId: card.id,
+      memberId: userId("andres"),
+      kind: "payment",
+      amountCents: 10_000_000, // $100.000 pago parcial
+      date: day(20),
+    });
+    const [interest] = await db
+      .insert(loanPayments)
+      .values({
+        loanId: card.id,
+        memberId: null,
+        kind: "interest",
+        amountCents: 320_000, // $3.200 interés del ciclo
+        date: day(20),
+        note: "Interés de ciclo",
+      })
+      .returning();
+    await db.insert(transactions).values({
+      date: day(20),
+      amountCents: 320_000,
+      type: "expense",
+      categoryId: categoryId("Intereses de tarjetas"),
+      memberId: userId("andres"),
+      scope: card.scope,
+      note: "Interés Visa Oro Galicia",
+      loanPaymentId: interest.id,
+    });
+    const [fee] = await db
+      .insert(loanPayments)
+      .values({
+        loanId: card.id,
+        memberId: null,
+        kind: "charge",
+        amountCents: 2_500_000, // the fixed cuota de manejo
+        date: day(20),
+        note: "Cuota de manejo",
+      })
+      .returning();
+    await db.insert(transactions).values({
+      date: day(20),
+      amountCents: 2_500_000,
+      type: "expense",
+      categoryId: categoryId("Cuota de manejo de tarjetas"),
+      memberId: userId("andres"),
+      scope: card.scope,
+      note: "Cuota de manejo Visa Oro Galicia",
+      loanPaymentId: fee.id,
     });
   }
 }

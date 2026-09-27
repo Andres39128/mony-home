@@ -24,6 +24,8 @@ interface MovementFormProps {
   categories: CategoryView[];
   members: { id: string; name: string; isActive: boolean }[];
   groups: ExpenseGroupView[];
+  /** Active revolving cards offered as payment method for expenses. */
+  cards: { id: string; name: string; availableCents: number }[];
   currentUser: { id: string; name: string; role: "admin" | "member" };
   /** SSR fallback for the date field; corrected to the client-local day on mount. */
   serverToday: string;
@@ -99,6 +101,7 @@ export default function MovementForm({
   categories,
   members,
   groups,
+  cards,
   currentUser,
   serverToday,
   createAction,
@@ -119,6 +122,11 @@ export default function MovementForm({
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? "");
   const [groupId, setGroupId] = useState(transaction?.groupId ?? "");
   const [memberId, setMemberId] = useState(transaction?.memberId ?? currentUser.id);
+  // Medio de pago: card only applies to expenses (refunds are out of V1).
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">(
+    transaction?.paymentMethod ?? "cash",
+  );
+  const [cardId, setCardId] = useState(transaction?.cardId ?? "");
   const [inlineOpen, setInlineOpen] = useState(false);
   const [inlineName, setInlineName] = useState("");
   const [inlineColor, setInlineColor] = useState(FALLBACK_COLOR);
@@ -270,6 +278,8 @@ export default function MovementForm({
     setType(next);
     setCategoryId("");
     setInlineOpen(false);
+    // Ingresos no van con tarjeta: volver a efectivo al cambiar el tipo.
+    if (next === "income") setPaymentMethod("cash");
   }
 
   // Active options only; an edited movement keeps its (possibly inactive)
@@ -605,6 +615,57 @@ export default function MovementForm({
           <FieldError message={state.fieldErrors?.groupId} />
         </label>
       </div>
+
+      {/* Medio de pago: card method only exists for expenses with cards
+          configured; otherwise the cash radios stay hidden defaults. */}
+      {type === "expense" && cards.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-muted">Medio de pago</span>
+            <Toggle
+              name="paymentMethod"
+              value={paymentMethod}
+              onChange={(value) => setPaymentMethod(value as "cash" | "card")}
+              options={[
+                { value: "cash", label: "Efectivo" },
+                { value: "card", label: "Tarjeta" },
+              ]}
+            />
+            <FieldError message={state.fieldErrors?.paymentMethod} />
+          </div>
+          {paymentMethod === "card" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Tarjeta de crédito</span>
+              <select
+                name="cardId"
+                value={cardId}
+                onChange={(event) => setCardId(event.target.value)}
+                className={inputClass}
+              >
+                <option value="" disabled>
+                  Selecciona una tarjeta…
+                </option>
+                {cards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.name} — disponible {formatCents(card.availableCents)}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-muted">
+                La compra consume el cupo y queda pendiente en la tarjeta.
+              </span>
+              <FieldError message={state.fieldErrors?.cardId} />
+            </label>
+          ) : (
+            <input type="hidden" name="cardId" value="" />
+          )}
+        </div>
+      ) : (
+        <>
+          <input type="hidden" name="paymentMethod" value="cash" />
+          <input type="hidden" name="cardId" value="" />
+        </>
+      )}
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-muted">Nota (opcional)</span>

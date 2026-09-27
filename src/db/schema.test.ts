@@ -942,3 +942,235 @@ describe("migration 0011 (bank-style loans invariants)", () => {
     );
   });
 });
+
+describe("migration 0012 (revolving cards invariants)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+  let memberId: string;
+  let categoryId: string;
+  let cardId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u12", passwordHash: "h", name: "U12" })
+      .returning();
+    memberId = user.id;
+    const [category] = await db
+      .insert(categories)
+      .values({ name: "C12", kind: "expense" })
+      .returning();
+    categoryId = category.id;
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa",
+        kind: "credit_card",
+        entity: "Banco Nación",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 5_000_000,
+        managementFeeCents: 25_000,
+        statementDay: 25,
+      })
+      .returning();
+    cardId = card.id;
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("round-trips a revolving card with zero principal", async () => {
+    const [readBack] = await db.select().from(loans).where(eq(loans.id, cardId));
+    expect(readBack.amortizationMode).toBe("revolving");
+    expect(readBack.principalCents).toBe(0);
+    expect(readBack.creditLimitCents).toBe(5_000_000);
+    expect(readBack.managementFeeCents).toBe(25_000);
+    expect(readBack.statementDay).toBe(25);
+    expect(readBack.annualRateBp).toBeNull();
+  });
+
+  it("defaults a movement to cash payment with no card", async () => {
+    const [tx] = await db
+      .insert(transactions)
+      .values({ amountCents: 1_000, type: "expense", categoryId, memberId })
+      .returning();
+    expect(tx.paymentMethod).toBe("cash");
+    expect(tx.cardLoanId).toBeNull();
+  });
+
+  it("accepts a card purchase and keeps cash ⇔ card coherent (CHECK both directions)", async () => {
+    await db.insert(transactions).values({
+      amountCents: 2_000,
+      type: "expense",
+      categoryId,
+      memberId,
+      paymentMethod: "card",
+      cardLoanId: cardId,
+    });
+    // card without loan id…
+    await expectPgError(
+      db.insert(transactions).values({
+        amountCents: 3_000,
+        type: "expense",
+        categoryId,
+        memberId,
+        paymentMethod: "card",
+        cardLoanId: null,
+      }),
+      "23514",
+    );
+    // …and loan id without card method.
+    await expectPgError(
+      db.insert(transactions).values({
+        amountCents: 3_000,
+        type: "expense",
+        categoryId,
+        memberId,
+        paymentMethod: "cash",
+        cardLoanId: cardId,
+      }),
+      "23514",
+    );
+  });
+
+  it("rejects card payments on income movements (expense-only CHECK)", async () => {
+    const [incomeCategory] = await db
+      .insert(categories)
+      .values({ name: "C12i", kind: "income" })
+      .returning();
+    await expectPgError(
+      db.insert(transactions).values({
+        amountCents: 500,
+        type: "income",
+        categoryId: incomeCategory.id,
+        memberId,
+        paymentMethod: "card",
+        cardLoanId: cardId,
+      }),
+      "23514",
+    );
+  });
+
+  it("RESTRICTs card deletion while purchases reference it", async () => {
+    await expectPgError(db.delete(loans).where(eq(loans.id, cardId)), "23001");
+  });
+
+  it("requires a positive credit limit on revolving via CHECK", async () => {
+    await expectPgError(
+      db.insert(loans).values({
+        name: "Sin cupo",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+      }),
+      "23514",
+    );
+    await expectPgError(
+      db.insert(loans).values({
+        name: "Cupo cero",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 0,
+      }),
+      "23514",
+    );
+  });
+
+  it("excludes bank/engine config from revolving via CHECK", async () => {
+    await expectPgError(
+      db.insert(loans).values({
+        name: "Híbrido",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000,
+        annualRateBp: 1000,
+      }),
+      "23514",
+    );
+    await expectPgError(
+      db.insert(loans).values({
+        name: "Híbrido 2",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000,
+        cuotaDay: 5,
+      }),
+      "23514",
+    );
+  });
+
+  it("excludes revolving config from simple trackers and bank loans via CHECK", async () => {
+    await expectPgError(
+      db.insert(loans).values({
+        name: "Simple con cupo",
+        kind: "other",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 100,
+        creditLimitCents: 1_000,
+      }),
+      "23514",
+    );
+    await expectPgError(
+      db.insert(loans).values({
+        name: "Bank con cupo",
+        kind: "mortgage",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 100,
+        amortizationMode: "bank",
+        chargedRateBp: 1295,
+        fixedCuotaCents: 262_800,
+        termMonths: 12,
+        cuotaDay: 5,
+        statementDay: 10,
+      }),
+      "23514",
+    );
+  });
+
+  it("bounds management fee and statement day via CHECK", async () => {
+    const base = {
+      kind: "credit_card" as const,
+      entity: "Banco",
+      scope: "common" as const,
+      principalCents: 0,
+      amortizationMode: "revolving" as const,
+      creditLimitCents: 1_000,
+    };
+    await expectPgError(
+      db.insert(loans).values({ ...base, name: "Fee negativo", managementFeeCents: -1 }),
+      "23514",
+    );
+    await expectPgError(
+      db.insert(loans).values({ ...base, name: "Día 29", statementDay: 29 }),
+      "23514",
+    );
+    // Fee 0 is the explicit "sin cuota de manejo" case — must be accepted.
+    const [free] = await db
+      .insert(loans)
+      .values({ ...base, name: "Sin cuota", managementFeeCents: 0 })
+      .returning();
+    expect(free.managementFeeCents).toBe(0);
+    // A revolving card never carries a negative initial balance.
+    await expectPgError(
+      db.insert(loans).values({ ...base, name: "Negativo", principalCents: -1 }),
+      "23514",
+    );
+  });
+});

@@ -55,8 +55,8 @@ export const loanSchema = z
     principal: z.string().trim().min(1, "El capital es obligatorio"),
     /** AR-tolerant annual percent ("35,5" = 35,5% TNA); empty string = no interest. */
     annualRate: optionalRate,
-    /** "" = simple tracker (monthly TNA engine); "bank" = bank-style engine. */
-    amortizationMode: z.union([z.literal(""), z.literal("bank")]),
+    /** "" = simple tracker (monthly TNA engine); "bank" = bank-style engine; "revolving" = card. */
+    amortizationMode: z.union([z.literal(""), z.literal("bank"), z.literal("revolving")]),
     /** Bank calibration (D4) — AR-formatted free text, parsed by the service. */
     chargedRate: optionalRate, // "12,95" % EA cobrada — THE accrual driver
     contractualRate: optionalRate, // "17,47" % pactada — display-only
@@ -69,6 +69,10 @@ export const loanSchema = z
     fireRatePerMillon: optionalText, // "218,17" pesos-per-millón
     moraRate: optionalRate, // "36,5" % EA over unpaid overdue lines
     otherCharges: optionalText, // fixed "Otros cargos" per period
+    /** Revolving config — AR free text, parsed by the service. */
+    creditLimit: optionalText.default(""), // "5.000.000,00" cupo total
+    managementFee: optionalText.default(""), // "25.000,00" cuota de manejo (0 or fixed)
+    statementDay: optionalText.default(""), // "25" (1..28, February-safe)
   })
   .refine((v) => v.scope !== "individual" || v.memberId !== "", {
     message: "Los préstamos individuales requieren un integrante.",
@@ -96,10 +100,49 @@ export const loanSchema = z
     message: "El día de cuota es obligatorio en modo bancario.",
     path: ["cuotaDay"],
   })
-  // …and a simple tracker must carry NO bank config (mirrors the DB CHECK).
+  // …revolving requires its cupo…
+  .refine((v) => v.amortizationMode !== "revolving" || v.creditLimit !== "", {
+    message: "El cupo es obligatorio en crédito rotativo.",
+    path: ["creditLimit"],
+  })
+  // …and every mode excludes the other modes' config (mirrors the DB CHECKs):
+  // revolving carries no rate (interest is manual at payment time)…
   .refine(
     (v) =>
-      v.amortizationMode === "bank" ||
+      v.amortizationMode !== "revolving" ||
+      (v.annualRate === "" &&
+        [
+          v.chargedRate,
+          v.contractualRate,
+          v.termMonths,
+          v.fixedCuota,
+          v.cuotaDay,
+          v.propertyValue,
+          v.insuredBase,
+          v.lifeRatePerMillon,
+          v.fireRatePerMillon,
+          v.moraRate,
+          v.otherCharges,
+        ].every((field) => field === "")),
+    {
+      message: "Los campos bancarios y la tasa no aplican al crédito rotativo.",
+      path: ["amortizationMode"],
+    },
+  )
+  // …bank carries no revolving config…
+  .refine(
+    (v) =>
+      v.amortizationMode !== "bank" ||
+      [v.creditLimit, v.managementFee, v.statementDay].every((field) => field === ""),
+    {
+      message: "Los campos de crédito rotativo solo aplican al modo rotativo.",
+      path: ["amortizationMode"],
+    },
+  )
+  // …and a simple tracker carries no engine config at all.
+  .refine(
+    (v) =>
+      v.amortizationMode !== "" ||
       [
         v.chargedRate,
         v.contractualRate,
@@ -112,6 +155,9 @@ export const loanSchema = z
         v.fireRatePerMillon,
         v.moraRate,
         v.otherCharges,
+        v.creditLimit,
+        v.managementFee,
+        v.statementDay,
       ].every((field) => field === ""),
     {
       message: "Los campos bancarios solo aplican al modo bancario.",
@@ -135,10 +181,122 @@ export const loanPaymentSchema = z.object({
 
 export type LoanPaymentInput = z.output<typeof loanPaymentSchema>;
 
+/**
+ * Card payment: the TOTAL amount paid plus the manual revolving extras —
+ * variable interest (asked at payment time) and the fixed cuota de manejo
+ * (checkbox, prefilled from the card config).
+ */
+export const cardPaymentSchema = z.object({
+  /** Free-text AR-formatted total paid ("1.234,56"); parsed to cents by the service. */
+  amount: z.string().trim().min(1, "El monto es obligatorio"),
+  /** "¿Generó intereses?" — AR-formatted interest amount; empty = none. */
+  interest: optionalText,
+  /** Checkbox "incluir cuota de manejo": "1" = include the card's fixed fee. */
+  includeFee: z.union([z.literal("1"), z.literal("")]).default(""),
+  date: z
+    .union([z.iso.date({ message: "La fecha no es válida" }), z.literal("")])
+    .transform((v) => (v === "" ? todayIso() : v)),
+  note: z.union([z.string().trim().max(200, "Máximo 200 caracteres"), z.literal("")]),
+  /** Empty string = the acting user; admins may attribute to any member. */
+  memberId: z.union([z.string().regex(UUID_RE, "Integrante inválido"), z.literal("")]),
+});
+
+export type CardPaymentInput = z.output<typeof cardPaymentSchema>;
+
 export const outstandingSchema = z
   .string()
   .trim()
   .min(1, "El saldo es obligatorio");
+
+// ---------------------------------------------------------------------------
+// Shared cupo math (single source of truth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ledger aggregates shared by listLoans and getCardPurchaseInfo — the
+ * outstanding/available formula must live in ONE place (no duplicated SQL).
+ */
+const PURCHASES_SUM = sql<string | null>`(select coalesce(sum(${transactions.amountCents}), 0) from ${transactions} where ${transactions.cardLoanId} = ${loans.id} and ${transactions.needsDetails} = false)`;
+const PAID_SUM = sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'payment' then ${loanPayments.amountCents} else 0 end), 0)`;
+const INTEREST_SUM = sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'interest' then ${loanPayments.amountCents} else 0 end), 0)`;
+const CHARGES_SUM = sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'charge' then ${loanPayments.amountCents} else 0 end), 0)`;
+
+/**
+ * Revolving outstanding + cupo disponible (pure). Outstanding adds the card
+ * purchases to the fixed-loan formula; available clamps to [0, limit] so a
+ * saldo a favor never frees credit beyond the cupo.
+ */
+export function revolvingCardMath(
+  principalCents: number,
+  purchasesCents: number,
+  interestCents: number,
+  chargesCents: number,
+  paidCents: number,
+  creditLimitCents: number | null,
+): { outstandingCents: number; availableCents: number | null } {
+  const outstandingCents = computeOutstanding(
+    principalCents + purchasesCents,
+    interestCents + chargesCents,
+    paidCents,
+  );
+  return {
+    outstandingCents,
+    availableCents:
+      creditLimitCents !== null
+        ? Math.max(0, Math.min(creditLimitCents, creditLimitCents - outstandingCents))
+        : null,
+  };
+}
+
+/**
+ * Card facts a card-purchase validation needs: whether the target loan is an
+ * active revolving card and how much cupo is left. The transactions service
+ * calls this inside its own write transaction (rule checks + insert share
+ * one TOCTOU-safe unit).
+ */
+export type CardPurchaseInfo =
+  | { ok: false; error: "card_not_found" }
+  | {
+      ok: true;
+      isActive: boolean;
+      isRevolving: boolean;
+      /** Cupo disponible; null when the loan is not a revolving card. */
+      availableCents: number | null;
+    };
+
+export async function getCardPurchaseInfo(
+  db: Pick<Database, "select">,
+  cardId: string,
+): Promise<CardPurchaseInfo> {
+  const [row] = await db
+    .select({
+      isActive: loans.isActive,
+      amortizationMode: loans.amortizationMode,
+      creditLimitCents: loans.creditLimitCents,
+      principalCents: loans.principalCents,
+      purchases: PURCHASES_SUM,
+      paid: PAID_SUM,
+      interest: INTEREST_SUM,
+      charges: CHARGES_SUM,
+    })
+    .from(loans)
+    .leftJoin(loanPayments, eq(loanPayments.loanId, loans.id))
+    .where(eq(loans.id, cardId))
+    .groupBy(loans.id);
+  if (!row) return { ok: false, error: "card_not_found" };
+  const isRevolving = row.amortizationMode === "revolving";
+  const { availableCents } = isRevolving
+    ? revolvingCardMath(
+        row.principalCents,
+        Number(row.purchases ?? 0),
+        Number(row.interest ?? 0),
+        Number(row.charges ?? 0),
+        Number(row.paid ?? 0),
+        row.creditLimitCents,
+      )
+    : { availableCents: null };
+  return { ok: true, isActive: row.isActive, isRevolving, availableCents };
+}
 
 // ---------------------------------------------------------------------------
 // Views
@@ -167,8 +325,8 @@ export interface LoanView {
   /** Share of the principal already paid (0..100+, 2 decimals). */
   paidPct: number;
   paymentCount: number;
-  /** Bank calibration block (D1) — null on simple tracker loans. */
-  amortizationMode: "bank" | null;
+  /** Engine mode block — null = simple tracker, 'bank'/'revolving' = engine config. */
+  amortizationMode: "bank" | "revolving" | null;
   chargedRateBp: number | null;
   contractualRateBp: number | null;
   termMonths: number | null;
@@ -180,6 +338,17 @@ export interface LoanView {
   fireInsuranceRatePerMillonX100k: number | null;
   otherChargesCents: number | null;
   moraRateBp: number | null;
+  /** Revolving block — null on every other mode. */
+  creditLimitCents: number | null;
+  managementFeeCents: number | null;
+  statementDay: number | null;
+  /** Sum of card purchases (linked transactions) — null on non-revolving. */
+  purchasesCents: number | null;
+  /**
+   * Cupo disponible = limit − outstanding, clamped to [0, limit] — the
+   * available credit a card purchase may consume; null on non-revolving.
+   */
+  availableCents: number | null;
 }
 
 export interface PaymentView {
@@ -228,10 +397,14 @@ export async function listLoans(db: Database): Promise<LoanView[]> {
       fireInsuranceRatePerMillonX100k: loans.fireInsuranceRatePerMillonX100k,
       otherChargesCents: loans.otherChargesCents,
       moraRateBp: loans.moraRateBp,
-      paid: sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'payment' then ${loanPayments.amountCents} else 0 end), 0)`,
-      interest: sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'interest' then ${loanPayments.amountCents} else 0 end), 0)`,
+      creditLimitCents: loans.creditLimitCents,
+      managementFeeCents: loans.managementFeeCents,
+      statementDay: loans.statementDay,
+      purchases: PURCHASES_SUM,
+      paid: PAID_SUM,
+      interest: INTEREST_SUM,
       // Unpaid bank cuota components are debt too (D5).
-      charges: sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'charge' then ${loanPayments.amountCents} else 0 end), 0)`,
+      charges: CHARGES_SUM,
       paymentCount: sql<string | null>`count(${loanPayments.id})`,
     })
     .from(loans)
@@ -248,13 +421,27 @@ export async function listLoans(db: Database): Promise<LoanView[]> {
     const paidCents = Number(row.paid ?? 0);
     const interestCents = Number(row.interest ?? 0);
     const chargesCents = Number(row.charges ?? 0);
+    const revolving = row.amortizationMode === "revolving";
+    // Revolving debt includes the card purchases (they live in transactions,
+    // not in this ledger); the shared helper owns the formula and the clamp.
+    const purchasesCents = revolving ? Number(row.purchases ?? 0) : 0;
+    const { outstandingCents, availableCents } = revolvingCardMath(
+      row.principalCents,
+      purchasesCents,
+      interestCents,
+      chargesCents,
+      paidCents,
+      revolving ? row.creditLimitCents : null,
+    );
     return {
       ...row,
       memberName: row.memberName ?? null,
       paidCents,
       interestCents,
       chargesCents,
-      outstandingCents: computeOutstanding(row.principalCents, interestCents + chargesCents, paidCents),
+      purchasesCents: revolving ? purchasesCents : null,
+      outstandingCents,
+      availableCents: revolving ? availableCents : null,
       paidPct: computePaidPct(row.principalCents, paidCents),
       paymentCount: Number(row.paymentCount ?? 0),
     };
@@ -317,6 +504,37 @@ type BankColumnValues = {
   moraRateBp: number | null;
 };
 
+/** Revolving form fields that can carry a typed error. */
+export type RevolvingConfigField = "creditLimit" | "managementFee" | "statementDay";
+
+/** Parsed revolving columns (all null unless mode is 'revolving'). */
+type RevolvingColumnValues = {
+  creditLimitCents: number | null;
+  managementFeeCents: number | null;
+  statementDay: number | null;
+};
+
+const NULL_BANK: BankColumnValues = {
+  amortizationMode: null,
+  chargedRateBp: null,
+  contractualRateBp: null,
+  termMonths: null,
+  fixedCuotaCents: null,
+  cuotaDay: null,
+  propertyValueCents: null,
+  insuredBaseCents: null,
+  lifeInsuranceRatePerMillonX100k: null,
+  fireInsuranceRatePerMillonX100k: null,
+  otherChargesCents: null,
+  moraRateBp: null,
+};
+
+const NULL_REVOLVING: RevolvingColumnValues = {
+  creditLimitCents: null,
+  managementFeeCents: null,
+  statementDay: null,
+};
+
 /**
  * Parses the bank calibration block (D4). Per-millón rates go through the
  * sanctioned money parser × 1000 ("467,90" → 46790 cents → 46.790.000 on
@@ -327,23 +545,7 @@ function parseBankConfig(
   input: LoanInput,
 ): { ok: true; values: BankColumnValues } | { ok: false; field: BankConfigField } {
   if (input.amortizationMode !== "bank") {
-    return {
-      ok: true,
-      values: {
-        amortizationMode: null,
-        chargedRateBp: null,
-        contractualRateBp: null,
-        termMonths: null,
-        fixedCuotaCents: null,
-        cuotaDay: null,
-        propertyValueCents: null,
-        insuredBaseCents: null,
-        lifeInsuranceRatePerMillonX100k: null,
-        fireInsuranceRatePerMillonX100k: null,
-        otherChargesCents: null,
-        moraRateBp: null,
-      },
-    };
+    return { ok: true, values: NULL_BANK };
   }
 
   /** AR amount → non-negative cents (positive when required); null = invalid. */
@@ -421,6 +623,43 @@ function parseBankConfig(
   };
 }
 
+/**
+ * Parses the revolving block: cupo required and positive; cuota de manejo
+ * optional and non-negative (0 = sin cuota); statement day optional 1..28.
+ * Returns the failing field instead of throwing so the caller maps it to a
+ * typed form error (same shape as parseBankConfig).
+ */
+function parseRevolvingConfig(
+  input: LoanInput,
+): { ok: true; values: RevolvingColumnValues } | { ok: false; field: RevolvingConfigField } {
+  if (input.amortizationMode !== "revolving") {
+    return { ok: true, values: NULL_REVOLVING };
+  }
+
+  const creditLimitCents = parseLenientCents(input.creditLimit);
+  if (creditLimitCents === null || creditLimitCents <= 0) {
+    return { ok: false, field: "creditLimit" };
+  }
+
+  let managementFeeCents: number | null = null;
+  if (input.managementFee !== "") {
+    managementFeeCents = parseLenientCents(input.managementFee);
+    if (managementFeeCents === null || managementFeeCents < 0) {
+      return { ok: false, field: "managementFee" };
+    }
+  }
+
+  let statementDay: number | null = null;
+  if (input.statementDay !== "") {
+    statementDay = Number.parseInt(input.statementDay, 10);
+    if (!Number.isInteger(statementDay) || statementDay < 1 || statementDay > 28) {
+      return { ok: false, field: "statementDay" };
+    }
+  }
+
+  return { ok: true, values: { creditLimitCents, managementFeeCents, statementDay } };
+}
+
 function loanValues(input: LoanInput, principalCents: number, rateBp: number | null) {
   return {
     name: input.name,
@@ -446,13 +685,28 @@ export type LoanResult =
         | "has_payments"
         | "forbidden";
     }
-  | { ok: false; error: "invalid_bank_config"; field: BankConfigField };
+  | { ok: false; error: "invalid_bank_config"; field: BankConfigField }
+  | { ok: false; error: "invalid_revolving_config"; field: RevolvingConfigField };
 
-/** Full insert/update values, or the typed bank-config field error. */
+/** Full insert/update values, or the typed mode-config field error. */
 function tryLoanValues(input: LoanInput, principalCents: number, rateBp: number | null) {
   const bank = parseBankConfig(input);
   if (!bank.ok) return { ok: false as const, error: "invalid_bank_config" as const, field: bank.field };
-  return { ok: true as const, values: { ...loanValues(input, principalCents, rateBp), ...bank.values } };
+  const revolving = parseRevolvingConfig(input);
+  if (!revolving.ok) {
+    return { ok: false as const, error: "invalid_revolving_config" as const, field: revolving.field };
+  }
+  return {
+    ok: true as const,
+    values: {
+      ...loanValues(input, principalCents, rateBp),
+      ...bank.values,
+      ...revolving.values,
+      // The mode itself comes from the input (NULL_BANK nulls it for
+      // non-bank modes; revolving must survive the spread).
+      amortizationMode: input.amortizationMode === "" ? null : input.amortizationMode,
+    },
+  };
 }
 
 export async function createLoan(
@@ -461,8 +715,15 @@ export async function createLoan(
   input: LoanInput,
 ): Promise<LoanResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
+  // Revolving cards may start at zero borrowed (the cupo is the commitment).
   const principal = parseLenientCents(input.principal);
-  if (principal === null || principal <= 0) return { ok: false, error: "invalid_principal" };
+  if (
+    principal === null ||
+    principal < 0 ||
+    (principal === 0 && input.amortizationMode !== "revolving")
+  ) {
+    return { ok: false, error: "invalid_principal" };
+  }
   const rate = parseOptionalRate(input.annualRate);
   if ("error" in rate) return { ok: false, error: "invalid_rate" };
   const bank = tryLoanValues(input, principal, rate.bp);
@@ -486,7 +747,13 @@ export async function updateLoan(
 ): Promise<LoanResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
   const principal = parseLenientCents(input.principal);
-  if (principal === null || principal <= 0) return { ok: false, error: "invalid_principal" };
+  if (
+    principal === null ||
+    principal < 0 ||
+    (principal === 0 && input.amortizationMode !== "revolving")
+  ) {
+    return { ok: false, error: "invalid_principal" };
+  }
   const rate = parseOptionalRate(input.annualRate);
   if ("error" in rate) return { ok: false, error: "invalid_rate" };
   const bank = tryLoanValues(input, principal, rate.bp);
@@ -576,6 +843,96 @@ function resolveMemberId(
 const MIRROR_PAYMENT_CATEGORY = "Pago de préstamos";
 
 /**
+ * System mirror categories for revolving finance costs (seeded in BOTH
+ * modes): card interest and the cuota de manejo are real expenses, while
+ * the purchase itself was already recorded as its own movement.
+ */
+const MIRROR_CARD_INTEREST_CATEGORY = "Intereses de tarjetas";
+const MIRROR_CARD_FEE_CATEGORY = "Cuota de manejo de tarjetas";
+
+/** Note-keys for the manual revolving engine rows (stable: the partial
+ * unique index on (loan_id, date, note) keys idempotency off them). */
+export const CARD_INTEREST_NOTE = "Interés de ciclo";
+export const CARD_FEE_NOTE = "Cuota de manejo";
+
+/** The transaction callback's client — shared by the mirror helpers. */
+type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * Inserts the expense transaction mirrored from ONE ledger row, linked via
+ * transactions.loan_payment_id (CASCADE delete keeps stats and ledger in
+ * lockstep). Shared by loan payments, card interest and card fee mirrors.
+ */
+async function insertMirrorExpense(
+  tx: Tx,
+  values: {
+    date: string;
+    amountCents: number;
+    categoryId: string;
+    memberId: string;
+    scope: "individual" | "common";
+    note: string;
+    ledgerRowId: string;
+  },
+): Promise<void> {
+  await tx.insert(transactions).values({
+    date: values.date,
+    amountCents: values.amountCents,
+    type: "expense",
+    categoryId: values.categoryId,
+    memberId: values.memberId,
+    scope: values.scope,
+    note: values.note,
+    loanPaymentId: values.ledgerRowId,
+  });
+}
+
+/**
+ * Inserts a note-keyed engine row ('interest'/'charge', member-less),
+ * retrying with a " (n)" note suffix when the same loan/day/note already
+ * exists (partial unique index) — two same-day card payments with interest
+ * stay fluid instead of surfacing a raw 23505. Each attempt runs in a
+ * NESTED transaction (a savepoint): the collision rolls back only the
+ * failed insert, keeping the surrounding payment transaction usable
+ * (same mechanism as the accrual engine's replay).
+ */
+async function insertEngineRow(
+  tx: Tx,
+  values: {
+    loanId: string;
+    kind: "interest" | "charge";
+    amountCents: number;
+    date: string;
+    note: string;
+  },
+): Promise<{ id: string }> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await tx.transaction(async (nested) => {
+        const [row] = await nested
+          .insert(loanPayments)
+          .values({ ...values, note: attempt === 1 ? values.note : `${values.note} (${attempt})` })
+          .returning({ id: loanPayments.id });
+        return row;
+      });
+    } catch (error) {
+      if (attempt < 20 && hasPgError(error, "23505")) continue;
+      throw error;
+    }
+  }
+}
+
+/** Looks up a system mirror category by name; null when the seed has not run. */
+async function findMirrorCategoryId(tx: Tx, name: string): Promise<string | null> {
+  const [category] = await tx
+    .select({ id: categories.id })
+    .from(categories)
+    .where(eq(categories.name, name))
+    .limit(1);
+  return category?.id ?? null;
+}
+
+/**
  * Registers a payment: one 'payment' ledger row plus ONE mirrored expense
  * transaction (same member, date, scope and amount as the payment, note
  * "Pago {loan.name}"), linked via transactions.loan_payment_id (CASCADE
@@ -606,13 +963,9 @@ export async function addLoanPayment(
     const member = resolveMemberId(user, input.memberId);
     if (!member.ok) return member;
 
-    const [category] = await tx
-      .select({ id: categories.id })
-      .from(categories)
-      .where(eq(categories.name, MIRROR_PAYMENT_CATEGORY))
-      .limit(1);
+    const categoryId = await findMirrorCategoryId(tx, MIRROR_PAYMENT_CATEGORY);
     // Run `npm run db:seed` after deploying: both modes create it.
-    if (!category) return { ok: false, error: "system_category_missing" };
+    if (!categoryId) return { ok: false, error: "system_category_missing" };
 
     try {
       const [payment] = await tx
@@ -627,15 +980,14 @@ export async function addLoanPayment(
         })
         .returning({ id: loanPayments.id });
 
-      await tx.insert(transactions).values({
+      await insertMirrorExpense(tx, {
         date: input.date,
         amountCents: cents,
-        type: "expense",
-        categoryId: category.id,
+        categoryId,
         memberId: member.memberId,
         scope: loan.scope,
         note: `Pago ${loan.name}`,
-        loanPaymentId: payment.id,
+        ledgerRowId: payment.id,
       });
       return { ok: true };
     } catch (error) {
@@ -643,6 +995,171 @@ export async function addLoanPayment(
       throw error;
     }
   });
+}
+
+export type CardPaymentResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error:
+        | "invalid_amount"
+        | "ambiguous_amount"
+        | "invalid_interest"
+        | "loan_not_found"
+        | "loan_inactive"
+        | "loan_not_revolving"
+        | "fee_not_available"
+        | "member_not_found"
+        | "system_category_missing"
+        | "forbidden";
+    };
+
+/**
+ * Registers a card payment on a REVOLVING loan. The total paid becomes one
+ * 'payment' row — but UNLIKE addLoanPayment it mirrors NO expense: the
+ * purchase was already recorded as its own movement, mirroring again would
+ * double-count the household spend. Only the finance costs mirror: the
+ * manually-entered interest and the included cuota de manejo become
+ * 'interest'/'charge' engine rows, each with its own expense mirror
+ * (real money the bank took, invisible otherwise).
+ *
+ * Outstanding effect: +interest +fee −total converges to the statement
+ * (paying the interest portion does not reduce capital).
+ */
+export async function addCardPayment(
+  db: Database,
+  user: SessionUser,
+  loanId: string,
+  input: CardPaymentInput,
+): Promise<CardPaymentResult> {
+  const cents = parseAmountCents(input.amount);
+  if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
+  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
+
+  let interestCents = 0;
+  if (input.interest !== "") {
+    const parsed = parseAmountCents(input.interest);
+    if (parsed === "invalid_amount" || parsed === "ambiguous_amount" || parsed <= 0) {
+      return { ok: false, error: "invalid_interest" };
+    }
+    interestCents = parsed;
+  }
+
+  return db.transaction(async (tx) => {
+    const [loan] = await tx
+      .select({
+        name: loans.name,
+        scope: loans.scope,
+        isActive: loans.isActive,
+        amortizationMode: loans.amortizationMode,
+        managementFeeCents: loans.managementFeeCents,
+      })
+      .from(loans)
+      .where(eq(loans.id, loanId))
+      .limit(1);
+    if (!loan) return { ok: false, error: "loan_not_found" };
+    if (!loan.isActive) return { ok: false, error: "loan_inactive" };
+    if (loan.amortizationMode !== "revolving") {
+      return { ok: false, error: "loan_not_revolving" };
+    }
+
+    const member = resolveMemberId(user, input.memberId);
+    if (!member.ok) return member;
+
+    let feeCents = 0;
+    if (input.includeFee === "1") {
+      if (!loan.managementFeeCents || loan.managementFeeCents <= 0) {
+        return { ok: false, error: "fee_not_available" };
+      }
+      feeCents = loan.managementFeeCents;
+    }
+
+    // Both mirror categories are needed whenever a finance cost rides along.
+    const interestCategoryId =
+      interestCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_INTEREST_CATEGORY) : null;
+    const feeCategoryId =
+      feeCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_FEE_CATEGORY) : null;
+    if ((interestCents > 0 && !interestCategoryId) || (feeCents > 0 && !feeCategoryId)) {
+      return { ok: false, error: "system_category_missing" };
+    }
+
+    try {
+      await tx.insert(loanPayments).values({
+        loanId,
+        memberId: member.memberId,
+        kind: "payment",
+        amountCents: cents,
+        date: input.date,
+        note: input.note ? input.note : null,
+      });
+
+      if (interestCents > 0) {
+        const row = await insertEngineRow(tx, {
+          loanId,
+          kind: "interest",
+          amountCents: interestCents,
+          date: input.date,
+          note: CARD_INTEREST_NOTE,
+        });
+        await insertMirrorExpense(tx, {
+          date: input.date,
+          amountCents: interestCents,
+          categoryId: interestCategoryId!,
+          memberId: member.memberId,
+          scope: loan.scope,
+          note: `Interés ${loan.name}`,
+          ledgerRowId: row.id,
+        });
+      }
+
+      if (feeCents > 0) {
+        const row = await insertEngineRow(tx, {
+          loanId,
+          kind: "charge",
+          amountCents: feeCents,
+          date: input.date,
+          note: CARD_FEE_NOTE,
+        });
+        await insertMirrorExpense(tx, {
+          date: input.date,
+          amountCents: feeCents,
+          categoryId: feeCategoryId!,
+          memberId: member.memberId,
+          scope: loan.scope,
+          note: `Cuota de manejo ${loan.name}`,
+          ledgerRowId: row.id,
+        });
+      }
+      return { ok: true };
+    } catch (error) {
+      if (hasPgError(error, "23503")) return { ok: false, error: "member_not_found" };
+      throw error;
+    }
+  });
+}
+
+export type LedgerEntryResult =
+  | { ok: true }
+  | { ok: false; error: "entry_not_found" | "forbidden" };
+
+/**
+ * Admin-only error correction: deletes one loan_payments row (a wrong
+ * payment, interest or charge). Mirrored expense transactions fall with it
+ * via transactions.loan_payment_id ON DELETE CASCADE — the correction
+ * leaves no orphan stats behind.
+ */
+export async function removeLedgerEntry(
+  db: Database,
+  user: SessionUser,
+  entryId: string,
+): Promise<LedgerEntryResult> {
+  if (user.role !== "admin") return { ok: false, error: "forbidden" };
+  const deleted = await db
+    .delete(loanPayments)
+    .where(eq(loanPayments.id, entryId))
+    .returning({ id: loanPayments.id });
+  if (deleted.length === 0) return { ok: false, error: "entry_not_found" };
+  return { ok: true };
 }
 
 /** Full history (optionally one loan's), newest first. Feeds the /prestamos cards. */
@@ -704,7 +1221,10 @@ export async function updateOutstanding(
 
   await db.transaction(async (tx) => {
     const [loan] = await tx
-      .select({ principalCents: loans.principalCents })
+      .select({
+        amortizationMode: loans.amortizationMode,
+        principalCents: loans.principalCents,
+      })
       .from(loans)
       .where(eq(loans.id, loanId))
       .limit(1)
@@ -735,8 +1255,26 @@ export async function updateOutstanding(
       })
       .from(loanPayments)
       .where(eq(loanPayments.loanId, loanId));
+
+    // Revolving debt includes the card purchases (they live in transactions);
+    // without them the true-up would converge to a purchases-less balance.
+    let purchases = 0;
+    if (loan.amortizationMode === "revolving") {
+      const [purchaseAgg] = await tx
+        .select({ total: sql<number>`coalesce(sum(${transactions.amountCents}), 0)` })
+        .from(transactions)
+        .where(
+          and(eq(transactions.cardLoanId, loanId), eq(transactions.needsDetails, false)),
+        );
+      purchases = Number(purchaseAgg?.total ?? 0);
+    }
+
     const outstanding =
-      loan.principalCents + Number(agg?.interest ?? 0) + Number(agg?.charges ?? 0) - Number(agg?.paid ?? 0);
+      loan.principalCents +
+      purchases +
+      Number(agg?.interest ?? 0) +
+      Number(agg?.charges ?? 0) -
+      Number(agg?.paid ?? 0);
 
     const delta = cents - outstanding;
     if (delta !== 0) {
@@ -917,4 +1455,123 @@ export async function listLoanPeriods(db: Database, loanId: string): Promise<Loa
   }
   // Newest cuota first — the same order the history list uses.
   return periods.reverse();
+}
+
+// ---------------------------------------------------------------------------
+// Revolving card cycles (statement grouping)
+// ---------------------------------------------------------------------------
+
+/** One billing cycle of a revolving card: (previous anchor, anchor]. */
+export interface CardCycleView {
+  /** Day after the previous cycle's closing day (loan creation for the first). */
+  startDate: string;
+  /** The closing anchor: the statement_day this cycle settled on. */
+  endDate: string;
+  /** Card purchases inside the window (linked transactions, not pending). */
+  purchasesCents: number;
+  /** Manual interest rows inside the window. */
+  interestCents: number;
+  /** Cuota de manejo (and any other charge) rows inside the window. */
+  feesCents: number;
+  /** Payments inside the window. */
+  paymentsCents: number;
+  /** false for the trailing open cycle (statement not yet closed). */
+  closed: boolean;
+}
+
+/**
+ * Statement breakdown for a revolving card, grouped cycle by cycle using
+ * statement_day — the same anchor math as listLoanPeriods. Unlike the bank
+ * statement, the trailing OPEN cycle is INCLUDED (it is the one the user is
+ * currently filling before paying). Returns [] when the card is missing,
+ * not revolving, or has no statement_day configured.
+ */
+export async function listCardCycles(
+  db: Database,
+  cardId: string,
+  now: Date = new Date(),
+): Promise<CardCycleView[]> {
+  const [card] = await db
+    .select({
+      amortizationMode: loans.amortizationMode,
+      statementDay: loans.statementDay,
+      createdAt: loans.createdAt,
+    })
+    .from(loans)
+    .where(eq(loans.id, cardId))
+    .limit(1);
+  if (!card || card.amortizationMode !== "revolving" || card.statementDay === null) return [];
+
+  const [ledgerRows, purchaseRows] = await Promise.all([
+    db
+      .select({
+        kind: loanPayments.kind,
+        amountCents: loanPayments.amountCents,
+        date: loanPayments.date,
+      })
+      .from(loanPayments)
+      .where(eq(loanPayments.loanId, cardId))
+      .orderBy(asc(loanPayments.date)),
+    db
+      .select({
+        amountCents: transactions.amountCents,
+        date: transactions.date,
+      })
+      .from(transactions)
+      .where(and(eq(transactions.cardLoanId, cardId), eq(transactions.needsDetails, false)))
+      .orderBy(asc(transactions.date)),
+  ]);
+
+  type Event = {
+    date: string;
+    amountCents: number;
+    kind: "purchase" | "payment" | "interest" | "charge";
+  };
+  const events: Event[] = [
+    ...purchaseRows.map((row) => ({ ...row, kind: "purchase" as const })),
+    ...ledgerRows,
+  ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (events.length === 0) return [];
+
+  /** Closing anchor (next day-of-month == statementDay, today included). */
+  const closingAnchor = (iso: string): string => {
+    const [year, month, day] = iso.split("-").map(Number);
+    const monthShift = day <= card.statementDay! ? month - 1 : month; // this month's anchor…
+    const anchorMonth = (monthShift % 12) + 1; // …or next month's
+    const anchorYear = year + Math.floor(monthShift / 12);
+    return `${anchorYear}-${String(anchorMonth).padStart(2, "0")}-${String(card.statementDay!).padStart(2, "0")}`;
+  };
+
+  const today = todayIso(now);
+  const cycles: CardCycleView[] = [];
+  let current: CardCycleView | null = null;
+  let prevEndDay = Number.NaN;
+
+  for (const event of events) {
+    const endDate = closingAnchor(event.date);
+    if (current === null || endDate !== current.endDate) {
+      if (current !== null) cycles.push(current);
+      const startDay = Number.isNaN(prevEndDay)
+        ? dayIndexOfIso(todayIso(card.createdAt))
+        : prevEndDay + 1;
+      current = {
+        startDate: isoOfDayIndex(startDay),
+        endDate,
+        purchasesCents: 0,
+        interestCents: 0,
+        feesCents: 0,
+        paymentsCents: 0,
+        closed: endDate <= today,
+      };
+      prevEndDay = dayIndexOfIso(endDate);
+    }
+    if (event.kind === "purchase") current.purchasesCents += event.amountCents;
+    else if (event.kind === "payment") current.paymentsCents += event.amountCents;
+    else if (event.kind === "interest") current.interestCents += event.amountCents;
+    else current.feesCents += event.amountCents;
+  }
+  if (current !== null) cycles.push(current);
+
+  // Newest cycle first — the same order the history list uses.
+  return cycles.reverse();
 }

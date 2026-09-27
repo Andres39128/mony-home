@@ -30,6 +30,7 @@ export default async function NuevoMovimientoPage() {
           categories={options.categories}
           members={options.members}
           groups={options.groups}
+          cards={options.cards}
           currentUser={user}
           serverToday={todayIso()}
           createAction={createMovementAndRedirectAction}

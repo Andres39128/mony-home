@@ -42,6 +42,16 @@ function scopeChipClass(scope: TransactionView["scope"]): string {
 /** Pending quick-capture chip: honey soft tint + ink text (both themes). */
 const PENDING_CHIP_CLASS = "rounded-full bg-honey-soft px-2 py-0.5 text-xs font-medium text-ink";
 
+/** Payment-method chip: card purchases name their revolving card. */
+function PaymentMethodChip({ row }: { row: TransactionView }) {
+  if (row.paymentMethod !== "card") return null;
+  return (
+    <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
+      Tarjeta{row.cardName ? ` · ${row.cardName}` : ""}
+    </span>
+  );
+}
+
 /** Category cell/line content: pending rows have no category yet. */
 function CategoryCell({ row, className }: { row: TransactionView; className?: string }) {
   if (row.needsDetails) {
@@ -129,6 +139,7 @@ export default function MovementsTable({
   categories,
   members,
   groups,
+  cards,
   serverToday,
   updateAction,
   deleteAction,
@@ -191,6 +202,7 @@ export default function MovementsTable({
                     >
                       {row.scope === "individual" ? "Individual" : "Común"}
                     </span>
+                    <PaymentMethodChip row={row} />
                     {row.needsDetails && (
                       <span className={PENDING_CHIP_CLASS}>Pendiente</span>
                     )}
@@ -252,6 +264,7 @@ export default function MovementsTable({
                       >
                         {row.scope === "individual" ? "Individual" : "Común"}
                       </span>
+                      <PaymentMethodChip row={row} />
                     </td>
                     <td
                       className={`whitespace-nowrap rounded-lg px-2 py-1 text-right font-medium tabular-nums ${amountChipClass(row.type)}`}
@@ -278,6 +291,7 @@ export default function MovementsTable({
             categories={categories}
             members={members}
             groups={groups}
+            cards={cards}
             currentUser={currentUser}
             serverToday={serverToday}
             createAction={updateAction}

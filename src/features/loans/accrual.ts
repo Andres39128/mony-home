@@ -131,6 +131,10 @@ export async function catchUpAllLoanInterest(db: Database, now: Date = new Date(
   for (const row of rows) {
     if (row.amortizationMode === "bank") {
       await catchUpBankInterest(db, row.id, now);
+    } else if (row.amortizationMode === "revolving") {
+      // Revolving cards accrue NOTHING automatically: interest is variable
+      // and entered manually at payment time (addCardPayment).
+      continue;
     } else {
       await catchUpInterest(db, row.id, now);
     }

@@ -50,6 +50,7 @@ export function parseTransactionFilters(params: RawParams | URLSearchParams): Li
   const month = rawMonth && /^\d{4}-\d{2}$/.test(rawMonth) ? rawMonth : todayIso().slice(0, 7);
   const type = single(raw, "type");
   const scope = single(raw, "scope");
+  const paymentMethod = single(raw, "paymentMethod");
 
   return {
     filters: {
@@ -59,6 +60,8 @@ export function parseTransactionFilters(params: RawParams | URLSearchParams): Li
       groupId: single(raw, "groupId"),
       type: type === "income" || type === "expense" ? type : undefined,
       scope: scope === "individual" || scope === "common" ? scope : undefined,
+      paymentMethod:
+        paymentMethod === "cash" || paymentMethod === "card" ? paymentMethod : undefined,
       q: single(raw, "q")?.trim() || undefined,
     },
     page: Math.max(1, Number.parseInt(single(raw, "page") ?? "1", 10) || 1),

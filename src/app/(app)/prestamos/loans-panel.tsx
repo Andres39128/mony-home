@@ -1,7 +1,12 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
-import type { LoanPeriodView, LoanView, PaymentView } from "@/features/loans/service";
+import type {
+  CardCycleView,
+  LoanPeriodView,
+  LoanView,
+  PaymentView,
+} from "@/features/loans/service";
 import { formatCents } from "@/lib/money";
 import type { FormState } from "@/lib/form-state";
 import { formatRatePercent } from "@/features/savings/math";
@@ -27,12 +32,18 @@ interface Props {
   paymentsByLoan: Record<string, PaymentView[]>;
   /** Closed-cuota statement breakdowns for bank loans (D5), newest first. */
   periodsByLoan: Record<string, LoanPeriodView[]>;
+  /** Billing-cycle breakdowns for revolving cards, newest first. */
+  cyclesByLoan: Record<string, CardCycleView[]>;
   createAction: LoanAction;
   updateAction: LoanAction;
   toggleAction: LoanAction;
   deleteAction: LoanAction;
   outstandingAction: LoanAction;
   paymentAction: LoanAction;
+  /** Card payment (total + interest + cuota de manejo) for revolving loans. */
+  cardPaymentAction: LoanAction;
+  /** Admin correction: delete one wrong ledger row (mirrors fall by CASCADE). */
+  removeEntryAction: LoanAction;
 }
 
 const KIND_LABELS = {
@@ -85,12 +96,45 @@ function DebtLine({ loan }: { loan: LoanView }) {  return (
   );
 }
 
+/** Admin correction: deletes one wrong ledger row (its mirror falls too). */
+function RemoveEntryButton({
+  entryId,
+  removeAction,
+}: {
+  entryId: string;
+  removeAction: LoanAction;
+}) {
+  const [state, formAction, pending] = useActionState(removeAction, {});
+  return (
+    <form action={formAction} className="ml-1">
+      <input type="hidden" name="id" value={entryId} />
+      <button
+        type="submit"
+        disabled={pending}
+        aria-label="Eliminar registro incorrecto"
+        title="Eliminar registro incorrecto (admin)"
+        className="rounded-full px-2 py-0.5 text-xs text-muted transition-colors hover:bg-danger-fill hover:text-danger-text disabled:opacity-50"
+      >
+        ✕
+      </button>
+      <FormError state={state} />
+    </form>
+  );
+}
+
 /**
  * Per-loan collapsible history of every ledger entry. Interest rows carry
  * the "Interés" badge and no member attribution; payment mirrors are NOT
- * listed here — those live in /movimientos.
+ * listed here — those live in /movimientos. Admins get a per-row ✕ to
+ * correct wrong entries (manual card interest invites mistakes).
  */
-function PaymentHistory({ entries }: { entries: PaymentView[] }) {
+function PaymentHistory({
+  entries,
+  removeAction,
+}: {
+  entries: PaymentView[];
+  removeAction?: LoanAction;
+}) {
   if (entries.length === 0) {
     return <p className="text-xs text-muted">Sin pagos registrados todavía.</p>;
   }
@@ -129,6 +173,7 @@ function PaymentHistory({ entries }: { entries: PaymentView[] }) {
           <span className="w-full text-xs text-muted sm:w-auto">
             {entry.memberName ?? entry.note ?? ""}
           </span>
+          {removeAction && <RemoveEntryButton entryId={entry.id} removeAction={removeAction} />}
         </li>
       ))}
     </ul>
@@ -139,9 +184,11 @@ function PaymentHistory({ entries }: { entries: PaymentView[] }) {
 function HistoryDetails({
   entries,
   tourId,
+  removeAction,
 }: {
   entries: PaymentView[];
   tourId?: string;
+  removeAction?: LoanAction;
 }) {
   return (
     <details className="group border-t border-line pt-3" data-tour={tourId}>
@@ -155,7 +202,7 @@ function HistoryDetails({
         Historial ({entries.length})
       </summary>
       <div className="pt-2">
-        <PaymentHistory entries={entries} />
+        <PaymentHistory entries={entries} removeAction={removeAction} />
       </div>
     </details>
   );
@@ -297,6 +344,237 @@ function QuickPaymentForm({
       <FormError state={state} />
       <OkMessage state={state} text="Pago registrado." />
     </form>
+  );
+}
+
+/** Billing-cycle breakdown for a revolving card (statement_day grouping). */
+function CardCycles({ cycles }: { cycles: CardCycleView[] }) {
+  if (cycles.length === 0) return null;
+  return (
+    <details className="group border-t border-line pt-3">
+      <summary className="cursor-pointer list-none text-xs font-medium text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span
+          aria-hidden
+          className="mr-1 inline-block transition-transform group-open:rotate-90"
+        >
+          ▸
+        </span>
+        Ciclos de corte ({cycles.length})
+      </summary>
+      <div className="pt-1">
+        {cycles.map((cycle) => (
+          <details key={cycle.endDate} className="group border-b border-line py-2 last:border-b-0">
+            <summary className="cursor-pointer list-none text-sm text-ink hover:text-ink [&::-webkit-details-marker]:hidden">
+              <span
+                aria-hidden
+                className="mr-1 inline-block text-muted transition-transform group-open:rotate-90"
+              >
+                ▸
+              </span>
+              Corte {PERIOD_DATE.format(asLocalDate(cycle.endDate))}
+              <span className="ml-2 text-xs text-muted tabular-nums">
+                compras {formatCents(cycle.purchasesCents)}
+              </span>
+              {!cycle.closed && (
+                <span className="ml-2 rounded-full bg-honey px-2 py-0.5 text-[11px] font-medium text-on-accent">
+                  ciclo abierto
+                </span>
+              )}
+            </summary>
+            <div className="flex flex-col gap-1 pt-2">
+              {(
+                [
+                  ["Compras", cycle.purchasesCents],
+                  ["Intereses", cycle.interestCents],
+                  ["Cuota de manejo y cargos", cycle.feesCents],
+                ] as Array<[string, number]>
+              ).map(([label, cents]) => (
+                <div key={label} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-muted">{label}</span>
+                  <span className="tabular-nums text-ink">{formatCents(cents)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted">Pagos del ciclo</span>
+                <span className="tabular-nums text-ink">−{formatCents(cycle.paymentsCents)}</span>
+              </div>
+            </div>
+          </details>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * Card payment: TOTAL paid (prefilled with the saldo pendiente) plus the
+ * manual revolving extras — variable interest asked at payment time and the
+ * fixed cuota de manejo checkbox (only when the card has one configured).
+ */
+function CardPaymentForm({
+  card,
+  action,
+  autoFocus,
+}: {
+  card: LoanView;
+  action: LoanAction;
+  autoFocus: boolean;
+}) {
+  const amountRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (autoFocus) amountRef.current?.focus();
+  }, [autoFocus]);
+
+  const [state, formAction, pending] = useActionState(action, {});
+  const hasFee = (card.managementFeeCents ?? 0) > 0;
+
+  return (
+    <form action={formAction} className="flex flex-col gap-2 border-t border-line pt-3">
+      <input type="hidden" name="id" value={card.id} />
+      <p className="text-xs font-medium text-muted">Pagar esta tarjeta</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={amountRef}
+          name="amount"
+          inputMode="decimal"
+          placeholder="Total pagado"
+          required
+          aria-label={`Total pagado de ${card.name}`}
+          defaultValue={formatCents(Math.max(card.outstandingCents, 0))}
+          className={`${inputClass} w-32 flex-1`}
+        />
+        <SubmitButton pending={pending}>Pagar</SubmitButton>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex flex-1 flex-col gap-0.5 text-xs text-muted">
+          <span>¿Generó intereses? (opcional)</span>
+          <input
+            name="interest"
+            inputMode="decimal"
+            placeholder="0,00"
+            aria-label={`Interés generado por ${card.name}`}
+            className={`${inputClass} w-32 flex-1`}
+          />
+        </label>
+        {hasFee && (
+          <label className="flex items-center gap-2 pt-4 text-xs text-muted">
+            <input type="checkbox" name="includeFee" value="1" className="size-4" />
+            <span>
+              Incluir cuota de manejo{" "}
+              <span className="tabular-nums">({formatCents(card.managementFeeCents ?? 0)})</span>
+            </span>
+          </label>
+        )}
+      </div>
+      <FieldError message={state.fieldErrors?.interest ?? state.fieldErrors?.includeFee} />
+      <FormError state={state} />
+      <OkMessage state={state} text="Pago de tarjeta registrado." />
+    </form>
+  );
+}
+
+/** A revolving credit card: cupo bar, saldo, cycles and the card payment. */
+function RevolvingCard({
+  card,
+  entries,
+  cycles,
+  cardPaymentAction,
+  removeEntryAction,
+  isAdmin,
+}: {
+  card: LoanView;
+  entries: PaymentView[];
+  cycles: CardCycleView[];
+  cardPaymentAction: LoanAction;
+  removeEntryAction: LoanAction;
+  isAdmin: boolean;
+}) {
+  const limit = card.creditLimitCents ?? 0;
+  // available is already clamped to [0, limit]; used mirrors the statement.
+  const used = limit - (card.availableCents ?? 0);
+  const usedPct = limit > 0 ? Math.round((used / limit) * 100) : 0;
+  const saldoAFavor = card.outstandingCents < 0;
+
+  return (
+    <li
+      className={`flex flex-col gap-3 rounded-2xl border border-line bg-surface px-6 py-4 shadow-sm ${
+        card.isActive ? "" : "opacity-60"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-ink">{card.name}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <ScopeBadge scope={card.scope} memberName={card.memberName} />
+          {saldoAFavor && (
+            <span className="rounded-full bg-sage px-2 py-0.5 text-xs font-medium text-on-accent">
+              Saldo a favor
+            </span>
+          )}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs text-muted">Saldo pendiente</p>
+        <p className="text-xl font-semibold tabular-nums text-danger-text">
+          {formatCents(Math.max(card.outstandingCents, 0))}
+        </p>
+        {saldoAFavor && (
+          <p className="text-xs tabular-nums text-muted">
+            Saldo a favor: {formatCents(-card.outstandingCents)}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-2 text-xs text-muted">
+          <span>
+            Cupo usado {formatCents(used)} de {formatCents(limit)}
+          </span>
+          <span className="tabular-nums">
+            Disponible {formatCents(card.availableCents ?? 0)}
+          </span>
+        </div>
+        {/* Cupo usage: unlike a loan, MORE usage is the risk state. */}
+        <ProgressBar
+          pct={usedPct}
+          status={usedPct >= 90 ? "over" : usedPct >= 70 ? "warn" : "ok"}
+        />
+      </div>
+      <p className="text-xs text-muted">
+        <span>Entidad: {card.entity}</span>
+        {card.purchasesCents !== null && (
+          <>
+            {" · "}
+            <span>Compras: {formatCents(card.purchasesCents)}</span>
+          </>
+        )}
+        {card.interestCents > 0 && (
+          <>
+            {" · "}
+            <span>
+              Intereses:{" "}
+              <span className="font-medium tabular-nums text-danger-text">
+                {formatCents(card.interestCents)}
+              </span>
+            </span>
+          </>
+        )}
+        {card.managementFeeCents !== null && card.managementFeeCents > 0 && (
+          <>
+            {" · "}
+            <span>Cuota de manejo {formatCents(card.managementFeeCents)}</span>
+          </>
+        )}
+        {card.statementDay !== null && (
+          <>
+            {" · "}
+            <span>Corte día {card.statementDay}</span>
+          </>
+        )}
+      </p>
+      <CardCycles cycles={cycles} />
+      <HistoryDetails entries={entries} removeAction={isAdmin ? removeEntryAction : undefined} />
+      {card.isActive && <CardPaymentForm card={card} action={cardPaymentAction} autoFocus={false} />}
+    </li>
   );
 }
 
@@ -518,6 +796,58 @@ function BankFields({ state, loan }: { state: FormState; loan?: LoanView }) {
   );
 }
 
+/** Revolving config: cupo, cuota de manejo and the billing-cycle close day. */
+function RevolvingFields({ state, loan }: { state: FormState; loan?: LoanView }) {
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-line bg-line/30 p-4">
+      <p className="text-xs text-muted">
+        Crédito rotativo: las compras con tarjeta consumen el cupo; el interés se
+        carga manual al pagar y la cuota de manejo es fija.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Cupo total</span>
+          <input
+            name="creditLimit"
+            inputMode="decimal"
+            placeholder="5.000.000,00"
+            required
+            defaultValue={
+              loan?.creditLimitCents != null ? formatCents(loan.creditLimitCents) : undefined
+            }
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.creditLimit} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Cuota de manejo (0 o fija)</span>
+          <input
+            name="managementFee"
+            inputMode="decimal"
+            placeholder="25.000,00"
+            defaultValue={
+              loan?.managementFeeCents != null ? formatCents(loan.managementFeeCents) : undefined
+            }
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.managementFee} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Día de cierre (1–28)</span>
+          <input
+            name="statementDay"
+            inputMode="numeric"
+            placeholder="25"
+            defaultValue={loan?.statementDay ?? undefined}
+            className={inputClass}
+          />
+          <FieldError message={state.fieldErrors?.statementDay} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function LoanFields({
   state,
   members,
@@ -527,10 +857,10 @@ function LoanFields({
   members: { id: string; name: string }[];
   loan?: LoanView;
 }) {
-  // Amortization mode drives the bank section; stateful because the form is
-  // otherwise uncontrolled (defaultValue) and the toggle must re-render it.
-  const [mode, setMode] = useState<"simple" | "bank">(
-    loan?.amortizationMode === "bank" ? "bank" : "simple",
+  // Amortization mode drives the config sections; stateful because the form
+  // is otherwise uncontrolled (defaultValue) and the toggle must re-render.
+  const [mode, setMode] = useState<"simple" | "bank" | "revolving">(
+    loan?.amortizationMode ?? "simple",
   );
   return (
     <div className="flex flex-col gap-4">
@@ -589,22 +919,28 @@ function LoanFields({
           <select
             name="amortizationMode"
             value={mode}
-            onChange={(event) => setMode(event.target.value === "bank" ? "bank" : "simple")}
+            onChange={(event) => {
+              const next = event.target.value;
+              setMode(next === "bank" ? "bank" : next === "revolving" ? "revolving" : "simple");
+            }}
             className={inputClass}
           >
             <option value="">Rastreador simple (TNA mensual)</option>
             <option value="bank">Bancario (EA diaria + cuota)</option>
+            <option value="revolving">Crédito rotativo (tarjeta)</option>
           </select>
           <FieldError message={state.fieldErrors?.amortizationMode} />
         </label>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-muted">Capital</span>
+          <span className="font-medium text-muted">
+            {mode === "revolving" ? "Saldo inicial (0 para tarjeta nueva)" : "Capital"}
+          </span>
           <input
             name="principal"
             inputMode="decimal"
-            placeholder="1.234,56"
+            placeholder={mode === "revolving" ? "0,00" : "1.234,56"}
             required
             defaultValue={loan?.principalCents != null ? formatCents(loan.principalCents) : undefined}
             className={inputClass}
@@ -626,6 +962,7 @@ function LoanFields({
         </label>
       </div>
       {mode === "bank" && <BankFields state={state} loan={loan} />}
+      {mode === "revolving" && <RevolvingFields state={state} loan={loan} />}
     </div>
   );
 }
@@ -747,15 +1084,21 @@ export default function LoansPanel({
   summary,
   paymentsByLoan,
   periodsByLoan,
+  cyclesByLoan,
   createAction,
   updateAction,
   toggleAction,
   deleteAction,
   outstandingAction,
   paymentAction,
+  cardPaymentAction,
+  removeEntryAction,
 }: Props) {
-  // One autoFocus + tour anchors across all cards: the first active loan wins.
-  const firstActiveId = loans.find((loan) => loan.isActive)?.id;
+  // Revolving cards live in their own section; fixed loans keep the classic
+  // list. One autoFocus + tour anchors across all cards: first active wins.
+  const cards = loans.filter((loan) => loan.amortizationMode === "revolving");
+  const fixedLoans = loans.filter((loan) => loan.amortizationMode !== "revolving");
+  const firstActiveId = fixedLoans.find((loan) => loan.isActive)?.id;
 
   return (
     <div className="flex flex-col gap-6">
@@ -774,9 +1117,31 @@ export default function LoansPanel({
         </article>
       </div>
 
+      {cards.length > 0 && (
+        <div data-tour="prestamos-rotativo" className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">Crédito rotativo</h2>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {cards.map((card) => (
+              <RevolvingCard
+                key={card.id}
+                card={card}
+                entries={paymentsByLoan[card.id] ?? []}
+                cycles={cyclesByLoan[card.id] ?? []}
+                cardPaymentAction={cardPaymentAction}
+                removeEntryAction={removeEntryAction}
+                isAdmin={isAdmin}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div data-tour="prestamos-lista" className="flex flex-col gap-3">
+        {fixedLoans.length > 0 && (
+          <h2 className="text-lg font-semibold tracking-tight text-ink">Préstamos</h2>
+        )}
         <ul className="grid gap-3 sm:grid-cols-2">
-          {loans.map((loan) => (
+          {fixedLoans.map((loan) => (
             <LoanCard
               key={loan.id}
               loan={loan}
