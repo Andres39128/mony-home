@@ -27,6 +27,7 @@ import {
 } from "@/features/analytics/service";
 import { listGoals } from "@/features/savings/service";
 import { formatRatePercent } from "@/features/savings/math";
+import { listLoans } from "@/features/loans/service";
 
 /** Top spender categories detailed in the context; the rest roll into "otros". */
 export const TOP_CATEGORIES_LIMIT = 5;
@@ -78,6 +79,39 @@ export interface ContextBolsa {
   accrualMode: "simple" | "compound" | null;
 }
 
+/** A fixed (non-revolving) debt: mortgage, investment line, simple tracker. */
+export interface ContextDeuda {
+  name: string;
+  entity: string;
+  kind: "credit_card" | "investment_line" | "mortgage" | "other";
+  /** Computed outstanding (principal + interest + charges − payments). */
+  outstandingCents: number;
+  isActive: boolean;
+}
+
+/** A revolving credit card: cupo usage plus the card's finance facts. */
+export interface ContextTarjeta {
+  name: string;
+  entity: string;
+  /** Total credit limit (cupo). */
+  creditLimitCents: number;
+  /** Credit already consumed = limit − available. */
+  usedCents: number;
+  /** Cupo disponible, clamped to [0, limit]. */
+  availableCents: number;
+  /** Pending balance; negative = saldo a favor. */
+  outstandingCents: number;
+  /** Card purchases accumulated so far (they live in transactions). */
+  purchasesCents: number;
+  /** Manual interest entered at payment time, accumulated. */
+  interestCents: number;
+  /** Fixed cuota de manejo; null = sin cuota. */
+  managementFeeCents: number | null;
+  /** Billing-cycle close day; null = unconfigured. */
+  statementDay: number | null;
+  isActive: boolean;
+}
+
 export interface FinanceContext {
   /** 'YYYY-MM'. */
   month: string;
@@ -100,8 +134,16 @@ export interface FinanceContext {
   /** Rollup of everything outside the top N; null when there is nothing left. */
   otherCategories: { name: string; cents: number; pct: number } | null;
   categoryChanges: ContextCategoryChange[];
+  /** Month expenses split by payment method (the movement's medio de pago). */
+  paymentSplit: { cashCents: number; cardCents: number };
   /** Savings bags (goals + investments) summary — net balances and rates. */
   bolsas: ContextBolsa[];
+  /** Fixed debts; revolving cards live in `tarjetas` instead. */
+  deudas: ContextDeuda[];
+  /** Revolving credit cards — cupo, saldo and card finance facts. */
+  tarjetas: ContextTarjeta[];
+  /** Total household debt (every loan + card, outstanding clamped at 0). */
+  totalDebtCents: number;
   trend: {
     months: number;
     avgExpenseCents: number;
@@ -145,13 +187,20 @@ export async function buildFinanceContext(
   const bounds = monthBounds(month);
   if (!bounds) throw new Error(`buildFinanceContext: invalid month "${month}"`);
 
-  const [budgetView, currentSlices, previousSlices, trendTotals, goals] = await Promise.all([
-    getMonth(db, month),
-    expensesByCategory(db, { month }),
-    expensesByCategory(db, { month: previousMonth(month) }),
-    monthlyTotals(db, month, TREND_MONTHS),
-    listGoals(db),
-  ]);
+  const [budgetView, currentSlices, previousSlices, trendTotals, goals, loans, cashTotals, cardTotals] =
+    await Promise.all([
+      getMonth(db, month),
+      expensesByCategory(db, { month }),
+      expensesByCategory(db, { month: previousMonth(month) }),
+      monthlyTotals(db, month, TREND_MONTHS),
+      listGoals(db),
+      // Single source of debt/cupo math (also runs the lazy interest
+      // catch-up, so the figures the model narrates are current).
+      listLoans(db),
+      // Medio de pago split: the month's expenses by how they were paid.
+      transactionTotals(db, { month, paymentMethod: "cash" }),
+      transactionTotals(db, { month, paymentMethod: "card" }),
+    ]);
   if (!budgetView) throw new Error(`buildFinanceContext: invalid month "${month}"`);
 
   // Household totals ride along with getMonth (it already reuses
@@ -212,6 +261,41 @@ export async function buildFinanceContext(
   const trendExpenseTotal = trendTotals.reduce((total, row) => total + row.expenseCents, 0);
   const avgExpenseCents = Math.round(trendExpenseTotal / trendTotals.length);
 
+  // Debts split by engine: revolving cards get their own section (cupo),
+  // every other loan lands in `deudas`.
+  const tarjetas = loans
+    .filter((loan) => loan.amortizationMode === "revolving")
+    .map((card) => ({
+      name: card.name,
+      entity: card.entity,
+      creditLimitCents: card.creditLimitCents ?? 0,
+      usedCents: card.creditLimitCents !== null
+        ? card.creditLimitCents - (card.availableCents ?? 0)
+        : 0,
+      availableCents: card.availableCents ?? 0,
+      outstandingCents: card.outstandingCents,
+      purchasesCents: card.purchasesCents ?? 0,
+      interestCents: card.interestCents,
+      managementFeeCents: card.managementFeeCents,
+      statementDay: card.statementDay,
+      isActive: card.isActive,
+    }));
+  const deudas = loans
+    .filter((loan) => loan.amortizationMode !== "revolving")
+    .map((loan) => ({
+      name: loan.name,
+      entity: loan.entity,
+      kind: loan.kind,
+      outstandingCents: loan.outstandingCents,
+      isActive: loan.isActive,
+    }));
+  // Same clamp as getDebtCents, computed over the rows we already hold (a
+  // saldo a favor on a card never subtracts from the household debt).
+  const totalDebtCents = loans.reduce(
+    (total, loan) => total + Math.max(loan.outstandingCents, 0),
+    0,
+  );
+
   return {
     month,
     monthLabel: monthLabel(month),
@@ -238,6 +322,10 @@ export async function buildFinanceContext(
         ? { name: "Otros", cents: restCents, pct: percentage(restCents, expenseCents) }
         : null,
     categoryChanges,
+    paymentSplit: {
+      cashCents: cashTotals.expenseCents,
+      cardCents: cardTotals.expenseCents,
+    },
     bolsas: goals.map((goal) => ({
       name: goal.name,
       institution: goal.institution,
@@ -246,6 +334,9 @@ export async function buildFinanceContext(
       annualRateBp: goal.annualRateBp,
       accrualMode: goal.accrualMode,
     })),
+    deudas,
+    tarjetas,
+    totalDebtCents,
     trend: {
       months: trendTotals.length,
       avgExpenseCents,
@@ -305,6 +396,14 @@ const STATUS_LABELS: Record<ProgressStatus, string> = {
   ok: "bien",
   warn: "en riesgo",
   over: "excedido",
+};
+
+/** Prompt-facing debt kind labels (neutral Spanish). */
+const DEBT_KIND_LABELS: Record<ContextDeuda["kind"], string> = {
+  credit_card: "tarjeta (rastreador simple)",
+  investment_line: "libre inversión",
+  mortgage: "hipoteca",
+  other: "otro",
 };
 
 /** es-AR amount for prompt text; NBSP after the sign swapped for a plain space. */
@@ -378,6 +477,34 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
               bolsa.accrualMode === "compound" ? "TEA (compuesto)" : "TNA (simple)"
             }`,
     })),
+    medios_de_pago: {
+      gastos_en_efectivo: ar(ctx.paymentSplit.cashCents),
+      gastos_con_tarjeta: ar(ctx.paymentSplit.cardCents),
+    },
+    deudas: ctx.deudas.map((deuda) => ({
+      nombre: deuda.name,
+      entidad: deuda.entity,
+      tipo: DEBT_KIND_LABELS[deuda.kind],
+      saldo_pendiente: ar(deuda.outstandingCents),
+      estado: deuda.isActive ? "activa" : "inactiva",
+    })),
+    tarjetas: ctx.tarjetas.map((tarjeta) => ({
+      nombre: tarjeta.name,
+      entidad: tarjeta.entity,
+      cupo_total: ar(tarjeta.creditLimitCents),
+      cupo_usado: ar(tarjeta.usedCents),
+      cupo_disponible: ar(tarjeta.availableCents),
+      // Negative outstanding = the bank owes the household (saldo a favor).
+      saldo_pendiente: ar(Math.max(tarjeta.outstandingCents, 0)),
+      saldo_a_favor:
+        tarjeta.outstandingCents < 0 ? ar(-tarjeta.outstandingCents) : undefined,
+      compras_con_tarjeta: ar(tarjeta.purchasesCents),
+      intereses_generados: ar(tarjeta.interestCents),
+      cuota_de_manejo: tarjeta.managementFeeCents !== null ? ar(tarjeta.managementFeeCents) : undefined,
+      dia_de_corte: tarjeta.statementDay ?? undefined,
+      estado: tarjeta.isActive ? "activa" : "inactiva",
+    })),
+    deuda_total: ar(ctx.totalDebtCents),
     tendencia: {
       meses_analizados: ctx.trend.months,
       gasto_promedio_mensual: ar(ctx.trend.avgExpenseCents),

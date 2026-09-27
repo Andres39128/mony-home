@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
+import { budgets, categories, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import {
   buildFinanceContext,
   monthLabel,
@@ -264,5 +264,162 @@ describe("insights context (integration on PGlite)", () => {
   it("labels months in neutral Spanish", () => {
     expect(monthLabel("2026-09")).toBe("septiembre 2026");
     expect(monthLabel("2026-01")).toBe("enero 2026");
+  });
+});
+
+/** Prompt shape the debt/card assertions read (typed — no any). */
+const promptOf = (ctx: Awaited<ReturnType<typeof buildFinanceContext>>) =>
+  toPromptContext(ctx) as {
+    medios_de_pago: unknown;
+    deudas: Record<string, unknown>[];
+    tarjetas: Record<string, unknown>[];
+    deuda_total: string;
+  };
+
+/**
+ * Debts / cards / payment-method section: isolated fixture so the classic
+ * figures above stay untouched. One revolving card (cupo 1.000.000, cuota de
+ * manejo 25.000, corte día 25) with two September purchases (50.000), manual
+ * interest 5.000 and a payment 40.000 → saldo 15.000, disponible 985.000;
+ * one fixed mortgage (500.000) → deuda total 515.000.
+ */
+describe("insights context — deudas, tarjetas y medios de pago", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let memberId: string;
+  let categoryId: string;
+  let cardId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [user] = await db
+      .insert(users)
+      .values({ username: "andres", name: "Andrés", passwordHash: "x" })
+      .returning();
+    memberId = user.id;
+    const [cat] = await db
+      .insert(categories)
+      .values({ name: "Supermercado", kind: "expense" })
+      .returning();
+    categoryId = cat.id;
+
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa Oro",
+        kind: "credit_card",
+        entity: "Galicia",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000_000,
+        managementFeeCents: 25_000,
+        statementDay: 25,
+      })
+      .returning();
+    cardId = card.id;
+    await db.insert(loans).values({
+      name: "Hipoteca",
+      kind: "mortgage",
+      entity: "Banco Nación",
+      scope: "common",
+      principalCents: 500_000,
+    });
+
+    await db.insert(transactions).values([
+      // Cash expense 10.000 + card purchases 50.000 → split del mes.
+      { date: "2026-09-05", amountCents: 10_000, type: "expense", categoryId, memberId },
+      {
+        date: "2026-09-14", amountCents: 30_000, type: "expense", categoryId, memberId,
+        paymentMethod: "card", cardLoanId: cardId,
+      },
+      {
+        date: "2026-09-16", amountCents: 20_000, type: "expense", categoryId, memberId,
+        paymentMethod: "card", cardLoanId: cardId,
+      },
+    ]);
+    await db.insert(loanPayments).values([
+      { loanId: cardId, memberId: null, kind: "interest", amountCents: 5_000, date: "2026-09-20", note: "Interés de ciclo" },
+      { loanId: cardId, memberId, kind: "payment", amountCents: 40_000, date: "2026-09-20" },
+    ]);
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("splits the month expenses by payment method", async () => {
+    const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
+    expect(ctx.paymentSplit).toEqual({ cashCents: 10_000, cardCents: 50_000 });
+  });
+
+  it("separates fixed debts from revolving cards with the full cupo facts", async () => {
+    const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
+    expect(ctx.deudas).toEqual([
+      { name: "Hipoteca", entity: "Banco Nación", kind: "mortgage", outstandingCents: 500_000, isActive: true },
+    ]);
+    expect(ctx.tarjetas).toHaveLength(1);
+    expect(ctx.tarjetas[0]).toMatchObject({
+      name: "Visa Oro",
+      creditLimitCents: 1_000_000,
+      usedCents: 15_000,
+      availableCents: 985_000,
+      outstandingCents: 15_000,
+      purchasesCents: 50_000,
+      interestCents: 5_000,
+      managementFeeCents: 25_000,
+      statementDay: 25,
+    });
+    // Card outstanding + mortgage, saldos a favor never subtract.
+    expect(ctx.totalDebtCents).toBe(515_000);
+  });
+
+  it("renders deudas, tarjetas, medios de pago and deuda total for the prompt", async () => {
+    const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
+    const prompt = promptOf(ctx);
+    expect(prompt.medios_de_pago).toEqual({
+      gastos_en_efectivo: "$ 100,00",
+      gastos_con_tarjeta: "$ 500,00",
+    });
+    expect(prompt.deudas).toEqual([
+      expect.objectContaining({
+        nombre: "Hipoteca",
+        tipo: "hipoteca",
+        saldo_pendiente: "$ 5.000,00",
+        estado: "activa",
+      }),
+    ]);
+    expect(prompt.tarjetas[0]).toMatchObject({
+      nombre: "Visa Oro",
+      cupo_total: "$ 10.000,00",
+      cupo_usado: "$ 150,00",
+      cupo_disponible: "$ 9.850,00",
+      saldo_pendiente: "$ 150,00",
+      compras_con_tarjeta: "$ 500,00",
+      intereses_generados: "$ 50,00",
+      cuota_de_manejo: "$ 250,00",
+      dia_de_corte: 25,
+      estado: "activa",
+    });
+    expect(prompt.tarjetas[0].saldo_a_favor).toBeUndefined();
+    expect(prompt.deuda_total).toBe("$ 5.150,00");
+  });
+
+  it("reports a saldo a favor instead of a negative pending balance", async () => {
+    // Overpay the card: 50.000 pago extra → outstanding −35.000 (a favor).
+    await db
+      .insert(loanPayments)
+      .values({ loanId: cardId, memberId, kind: "payment", amountCents: 50_000, date: "2026-09-21" });
+    const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
+    expect(ctx.tarjetas[0].outstandingCents).toBe(-35_000);
+    // A favor: saldo_pendiente floors at 0, saldo_a_favor shows the credit,
+    // disponible caps at the cupo and the debt total ignores the favor.
+    const prompt = promptOf(ctx);
+    expect(prompt.tarjetas[0].saldo_pendiente).toBe("$ 0,00");
+    expect(prompt.tarjetas[0].saldo_a_favor).toBe("$ 350,00");
+    expect(prompt.tarjetas[0].cupo_disponible).toBe("$ 10.000,00");
+    expect(prompt.deuda_total).toBe("$ 5.000,00");
   });
 });
