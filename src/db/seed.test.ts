@@ -60,20 +60,39 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users.map((u) => u.username).sort()).toEqual(["admin", "andres", "maria"]);
-    expect(counts.categories).toHaveLength(16);
+    expect(counts.categories).toHaveLength(18);
     expect(counts.groups).toHaveLength(1);
-    expect(counts.transactions).toHaveLength(10);
+    expect(counts.transactions).toHaveLength(14);
     expect(counts.budgets).toHaveLength(2);
     expect(counts.goals).toHaveLength(2);
     expect(counts.contributions).toHaveLength(4);
-    expect(counts.loans).toHaveLength(2);
-    expect(counts.loanPayments).toHaveLength(2);
+    expect(counts.loans).toHaveLength(3);
+    expect(counts.loanPayments).toHaveLength(5);
 
     // Both daily accrual modes are exercised by the demo bolsas.
     const fondo = counts.goals.find((g) => g.name === "Fondo de emergencia");
     expect(fondo).toMatchObject({ kind: "savings", annualRateBp: 3650, accrualMode: "simple" });
     const plazo = counts.goals.find((g) => g.name === "Plazo fijo");
     expect(plazo).toMatchObject({ kind: "investment", annualRateBp: 7000, accrualMode: "compound" });
+
+    // The revolving card demo exercises the full card contract: cupo config,
+    // two linked purchases, a payment with manual interest + cuota de manejo
+    // and ONLY the finance-cost mirrors (never the capital).
+    const visa = counts.loans.find((l) => l.name === "Visa Oro Galicia");
+    expect(visa).toMatchObject({
+      amortizationMode: "revolving",
+      principalCents: 0,
+      creditLimitCents: 500_000_000,
+      managementFeeCents: 2_500_000,
+      statementDay: 25,
+    });
+    const cardPurchases = counts.transactions.filter((t) => t.cardLoanId === visa?.id);
+    expect(cardPurchases).toHaveLength(2);
+    expect(cardPurchases.every((t) => t.paymentMethod === "card")).toBe(true);
+    const interestMirror = counts.transactions.find((t) => t.note === "Interés Visa Oro Galicia");
+    expect(interestMirror).toMatchObject({ amountCents: 320_000, loanPaymentId: expect.any(String) });
+    const feeMirror = counts.transactions.find((t) => t.note === "Cuota de manejo Visa Oro Galicia");
+    expect(feeMirror).toMatchObject({ amountCents: 2_500_000 });
   });
 
   it("is idempotent in demo mode (re-run does not duplicate rows)", async () => {
@@ -82,14 +101,14 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(3);
-    expect(counts.categories).toHaveLength(16);
+    expect(counts.categories).toHaveLength(18);
     expect(counts.groups).toHaveLength(1);
-    expect(counts.transactions).toHaveLength(10);
+    expect(counts.transactions).toHaveLength(14);
     expect(counts.budgets).toHaveLength(2);
     expect(counts.goals).toHaveLength(2);
     expect(counts.contributions).toHaveLength(4);
-    expect(counts.loans).toHaveLength(2);
-    expect(counts.loanPayments).toHaveLength(2);
+    expect(counts.loans).toHaveLength(3);
+    expect(counts.loanPayments).toHaveLength(5);
   });
 
   it("seeds only categories + admin in production mode (SEED_DEMO_DATA=false)", async () => {
@@ -99,7 +118,7 @@ describe("seedDatabase", () => {
     expect(counts.users).toHaveLength(1);
     expect(counts.users[0]?.username).toBe("admin");
     expect(counts.users[0]?.role).toBe("admin");
-    expect(counts.categories).toHaveLength(16);
+    expect(counts.categories).toHaveLength(18);
     expect(counts.groups).toHaveLength(0);
     expect(counts.transactions).toHaveLength(0);
     expect(counts.budgets).toHaveLength(0);
@@ -115,7 +134,7 @@ describe("seedDatabase", () => {
 
     const counts = await tableCounts();
     expect(counts.users).toHaveLength(1);
-    expect(counts.categories).toHaveLength(16);
+    expect(counts.categories).toHaveLength(18);
     expect(counts.loans).toHaveLength(0);
   });
 
