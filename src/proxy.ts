@@ -25,7 +25,16 @@ function buildCsp(nonce: string) {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' ${themeScriptHash} 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
+    // Production splits style-src: ELEMENTS (<style>, <link>) are restricted
+    // to same-origin sheets (verified: app, driver.js and recharts inject no
+    // <style> at runtime — the only createElement("style") in the bundle is
+    // React's unused <style precedence> branch), while inline style=""
+    // ATTRIBUTES stay allowed: recharts positions and theme CSS vars need
+    // them, and attributes cannot introduce selectors or load remote CSS.
+    // Dev keeps the blanket source because Turbopack HMR injects <style>.
+    ...(isDev
+      ? ["style-src 'self' 'unsafe-inline'"]
+      : ["style-src-elem 'self'", "style-src-attr 'unsafe-inline'"]),
     "img-src 'self' data: blob:",
     "font-src 'self'",
     "connect-src 'self'",
