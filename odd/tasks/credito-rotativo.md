@@ -41,7 +41,7 @@ ask-on-risk (default). Forecast ~1200-1500 líneas changed → superará 400: ap
 
 ## Progress / evidence
 - [x] T1 (commit feat db): schema + migración 0012 + 11 tests schema. 53/53 schema suite. RDD: assessed medium, review granted+acknowledged (lineage review-193469cc0ab1a751); 3 WARNING informativos (FK target solo-revolving → lo cubre el servicio T3; doc SET NULL desactualizado → corregido acá; falso positivo ADD VALUE con precedente 0011). Boundary: commit T1.
-- [x] T2 (este commit): loanSchema revolving (gates 3 modos), parseRevolvingConfig, listLoans con compras (subquery correlacionada) + disponible clamp, addCardPayment (sin espejo capital, espejo interés/fee, savepoint suffix retry), removeLedgerEntry CASCADE, updateOutstanding con compras, listCardCycles, accrual skip, helper espejo compartido. 72/72 loans suite.
+- [x] T2 (commit b1c8cd02eea8): loanSchema revolving (gates 3 modos), parseRevolvingConfig, listLoans con compras (subquery correlacionada) + disponible clamp, addCardPayment (sin espejo capital, espejo interés/fee, savepoint suffix retry), removeLedgerEntry CASCADE, updateOutstanding con compras, listCardCycles, accrual skip, helper espejo compartido. 72/72 loans suite. RDD: consent granted, reviewer T2 PENDIENTE DE COLECTAR (transporte del subagente devolvió vacío 4 veces — decisión del usuario: continuar e reintentar más tarde; lineage review-bedc52f87ad40cb6 queda en estado collect).
 - [ ] T3: Transactions: method/cardId + validaciones (activa, revolving, expense, cupo create/edit) + view/filters + tests.
 - [ ] T4: UI /prestamos: sección crédito rotativo, form tarjeta, pago con prompt interés/fee, ciclos, corrección admin.
 - [ ] T5: UI /movimientos: toggle medio de pago, select con cupo, badge, filtro, CSV.

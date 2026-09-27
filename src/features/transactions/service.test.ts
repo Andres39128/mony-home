@@ -727,3 +727,263 @@ describe("todayIso (app timezone)", () => {
     expect(todayIso(new Date("2026-09-22T03:00:00Z"))).toBe("2026-09-22");
   });
 });
+
+describe("card purchases (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let admin: SessionUser;
+  let mate: SessionUser;
+  let expenseCat: { id: string };
+  let incomeCat: { id: string };
+  let cardId: string;
+  let plainLoanId: string;
+  let inactiveCardId: string;
+
+  const MONTH = "2026-09";
+
+  function cardInput(overrides: Record<string, unknown> = {}) {
+    return movementSchema.parse({
+      date: "2026-09-10",
+      amount: "300,00",
+      type: "expense",
+      categoryId: expenseCat.id,
+      memberId: "",
+      groupId: "",
+      scope: "common",
+      note: "",
+      paymentMethod: "card",
+      cardId,
+      ...overrides,
+    });
+  }
+
+  /** Cupo disponible reported by the loans side (single source of truth). */
+  async function availableCents(): Promise<number> {
+    const { listLoans } = await import("@/features/loans/service");
+    const card = (await listLoans(appDb)).find((loan) => loan.id === cardId)!;
+    return card.availableCents!;
+  }
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [row] = await db
+      .insert(users)
+      .values({ username: "cadmin", name: "CAdmin", passwordHash: "x", role: "admin" })
+      .returning();
+    const [mateRow] = await db
+      .insert(users)
+      .values({ username: "cmate", name: "CMate", passwordHash: "x", role: "member" })
+      .returning();
+    admin = { id: row.id, username: row.username, name: row.name, role: row.role };
+    mate = { id: mateRow.id, username: mateRow.username, name: mateRow.name, role: mateRow.role };
+    [expenseCat] = await db
+      .insert(categories)
+      .values({ name: "CSuper", kind: "expense" })
+      .returning();
+    [incomeCat] = await db
+      .insert(categories)
+      .values({ name: "CSueldo", kind: "income" })
+      .returning();
+
+    const { createLoan, toggleLoanActive } = await import("@/features/loans/service");
+    const emptyEngine = {
+      chargedRate: "",
+      contractualRate: "",
+      termMonths: "",
+      fixedCuota: "",
+      cuotaDay: "",
+      propertyValue: "",
+      insuredBase: "",
+      lifeRatePerMillon: "",
+      fireRatePerMillon: "",
+      moraRate: "",
+      otherCharges: "",
+    } as const;
+    const revolving = {
+      name: "Visa Compra",
+      kind: "credit_card" as const,
+      entity: "Banco Nación",
+      scope: "common" as const,
+      memberId: "",
+      principal: "0,00",
+      annualRate: "",
+      amortizationMode: "revolving" as const,
+      ...emptyEngine,
+      creditLimit: "1.000,00",
+      managementFee: "",
+      statementDay: "",
+    };
+    expect(await createLoan(appDb, admin, revolving)).toEqual({ ok: true });
+    const { loans } = await import("@/db/schema");
+    [cardId] = (
+      await db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Visa Compra"))
+    ).map((r) => r.id);
+
+    expect(
+      await createLoan(appDb, admin, {
+        ...revolving,
+        name: "Préstamo simple",
+        kind: "other",
+        amortizationMode: "" as unknown as "",
+        principal: "500,00",
+        creditLimit: "",
+        managementFee: "",
+        statementDay: "",
+      }),
+    ).toEqual({ ok: true });
+    [plainLoanId] = (
+      await db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Préstamo simple"))
+    ).map((r) => r.id);
+
+    expect(
+      await createLoan(appDb, admin, { ...revolving, name: "Visa Vieja" }),
+    ).toEqual({ ok: true });
+    const [inactiveCard] = (
+      await db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Visa Vieja"))
+    ).map((r) => r.id);
+    await toggleLoanActive(appDb, admin, inactiveCard);
+    inactiveCardId = inactiveCard;
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("keeps method/card coherence at the zod level", async () => {
+    const raw = {
+      date: "2026-09-10",
+      amount: "300,00",
+      type: "expense",
+      categoryId: expenseCat.id,
+      memberId: "",
+      groupId: "",
+      scope: "common",
+      note: "",
+      cardId,
+    };
+    // Card without card id…
+    expect(movementSchema.safeParse({ ...raw, paymentMethod: "card", cardId: "" }).success).toBe(
+      false,
+    );
+    // …and card id on a cash movement.
+    expect(movementSchema.safeParse({ ...raw, paymentMethod: "cash" }).success).toBe(false);
+  });
+
+  it("creates a card purchase, consumes cupo and exposes the card name", async () => {
+    expect(await createTransaction(appDb, mate, cardInput())).toEqual({ ok: true });
+    expect(await availableCents()).toBe(70_000); // 100.000 − 30.000
+
+    const rows = await listTransactions(appDb, { month: MONTH, paymentMethod: "card" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      paymentMethod: "card",
+      cardId,
+      cardName: "Visa Compra",
+      amountCents: 30_000,
+    });
+    const cashRows = await listTransactions(appDb, { month: MONTH, paymentMethod: "cash" });
+    expect(cashRows).toHaveLength(0);
+  });
+
+  it("blocks purchases beyond the cupo with a typed error", async () => {
+    expect(
+      await createTransaction(appDb, mate, cardInput({ amount: "80.000,00" })),
+    ).toEqual({ ok: false, error: "card_limit_exceeded" });
+  });
+
+  it("rejects invalid card targets with typed errors", async () => {
+    const ghost = "00000000-0000-4000-8000-000000000000";
+    expect(await createTransaction(appDb, mate, cardInput({ cardId: ghost }))).toEqual({
+      ok: false,
+      error: "card_not_found",
+    });
+    expect(
+      await createTransaction(appDb, mate, cardInput({ cardId: plainLoanId })),
+    ).toEqual({ ok: false, error: "card_not_revolving" });
+    expect(
+      await createTransaction(appDb, mate, cardInput({ cardId: inactiveCardId })),
+    ).toEqual({ ok: false, error: "card_inactive" });
+  });
+
+  it("only expenses may ride a card (service mirror of the DB CHECK)", async () => {
+    expect(
+      await createTransaction(
+        appDb,
+        mate,
+        cardInput({ type: "income", categoryId: incomeCat.id }),
+      ),
+    ).toEqual({ ok: false, error: "card_requires_expense" });
+  });
+
+  it("edit validates the cupo DELTA on the same card, full amount on a switch", async () => {
+    const [purchase] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(eq(transactions.cardLoanId, cardId))
+      .limit(1);
+
+    // Delta +20.000 over a 70.000 available cupo: fits.
+    expect(
+      await updateTransaction(appDb, mate, purchase.id, cardInput({ amount: "500,00" })),
+    ).toEqual({ ok: true });
+    expect(await availableCents()).toBe(50_000);
+
+    // Delta +70.000 over 50.000 available: blocked.
+    expect(
+      await updateTransaction(appDb, mate, purchase.id, cardInput({ amount: "1.200,00" })),
+    ).toEqual({ ok: false, error: "card_limit_exceeded" });
+
+    // Reducing frees cupo immediately (recomputed, never stored).
+    expect(
+      await updateTransaction(appDb, mate, purchase.id, cardInput({ amount: "200,00" })),
+    ).toEqual({ ok: true });
+    expect(await availableCents()).toBe(80_000);
+
+    // Switching to cash releases the whole purchase from the card.
+    expect(
+      await updateTransaction(
+        appDb,
+        mate,
+        purchase.id,
+        cardInput({ amount: "200,00", paymentMethod: "cash", cardId: "" }),
+      ),
+    ).toEqual({ ok: true });
+    expect(await availableCents()).toBe(100_000);
+  });
+
+  it("completes a pending quick-capture as a card purchase inside the cupo", async () => {
+    const { createQuickTransaction } = await import("@/features/transactions/service");
+    const receipt = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "r.png", {
+      type: "image/png",
+    });
+    expect(
+      await createQuickTransaction(appDb, mate, {
+        date: "2026-09-15",
+        memberId: "",
+        type: "expense",
+        receipt: receipt as unknown as globalThis.File,
+      }),
+    ).toEqual({ ok: true });
+    const [pending] = await db
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(eq(transactions.needsDetails, true))
+      .limit(1);
+
+    // Completing with a card over the cupo: blocked like any create.
+    expect(
+      await updateTransaction(
+        appDb,
+        mate,
+        pending.id,
+        cardInput({ amount: "999.999,00", date: "2026-09-15" }),
+      ),
+    ).toEqual({ ok: false, error: "card_limit_exceeded" });
+    expect(
+      await updateTransaction(appDb, mate, pending.id, cardInput({ date: "2026-09-15" })),
+    ).toEqual({ ok: true });
+    expect(await availableCents()).toBe(70_000);
+  });
+});

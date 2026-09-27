@@ -18,6 +18,7 @@ import { z } from "zod";
 import {
   categories,
   expenseGroups,
+  loans,
   movementReceipts,
   transactions,
   users,
@@ -27,6 +28,7 @@ import { hasPgError } from "@/db/pg-errors";
 import type { SessionUser } from "@/lib/auth";
 import { parseAmountCents } from "@/lib/money-errors";
 import { todayIso } from "@/lib/date";
+import { getCardPurchaseInfo } from "@/features/loans/service";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,23 +46,32 @@ const optionalReceiptSchema = z
   .optional()
   .transform((file) => (file && file.size > 0 ? file : undefined));
 
-export const movementSchema = z.object({
-  /** Empty string = today (quick-entry forms always send a date; API tolerance). */
-  date: z
-    .union([z.iso.date({ message: "La fecha no es válida" }), z.literal("")])
-    .transform((v) => (v === "" ? todayIso() : v)),
-  /** Free-text AR-formatted amount ("1.234,56"); parsed to cents by the service. */
-  amount: z.string().trim().min(1, "El monto es obligatorio"),
-  type: z.enum(["income", "expense"]),
-  categoryId: z.string().regex(UUID_RE, "Categoría inválida"),
-  /** Empty string = the acting user (create default); admins may target anyone. */
-  memberId: z.union([z.string().regex(UUID_RE, "Integrante inválido"), z.literal("")]),
-  groupId: z.union([z.string().regex(UUID_RE, "Grupo inválido"), z.literal("")]),
-  scope: z.enum(["individual", "common"]).default("common"),
-  note: z.union([z.string().trim().max(200, "Máximo 200 caracteres"), z.literal("")]),
-  /** Optional attached receipt image. */
-  receipt: optionalReceiptSchema,
-});
+export const movementSchema = z
+  .object({
+    /** Empty string = today (quick-entry forms always send a date; API tolerance). */
+    date: z
+      .union([z.iso.date({ message: "La fecha no es válida" }), z.literal("")])
+      .transform((v) => (v === "" ? todayIso() : v)),
+    /** Free-text AR-formatted amount ("1.234,56"); parsed to cents by the service. */
+    amount: z.string().trim().min(1, "El monto es obligatorio"),
+    type: z.enum(["income", "expense"]),
+    categoryId: z.string().regex(UUID_RE, "Categoría inválida"),
+    /** Empty string = the acting user (create default); admins may target anyone. */
+    memberId: z.union([z.string().regex(UUID_RE, "Integrante inválido"), z.literal("")]),
+    groupId: z.union([z.string().regex(UUID_RE, "Grupo inválido"), z.literal("")]),
+    scope: z.enum(["individual", "common"]).default("common"),
+    note: z.union([z.string().trim().max(200, "Máximo 200 caracteres"), z.literal("")]),
+    /** How the movement was paid; card requires cardId (coherence refined below). */
+    paymentMethod: z.enum(["cash", "card"]).default("cash"),
+    /** The revolving card that funded this expense; empty = cash. */
+    cardId: z.union([z.string().regex(UUID_RE, "Tarjeta inválida"), z.literal("")]).default(""),
+    /** Optional attached receipt image. */
+    receipt: optionalReceiptSchema,
+  })
+  .refine((v) => (v.paymentMethod === "card") === (v.cardId !== ""), {
+    message: "Los pagos con tarjeta requieren elegir la tarjeta.",
+    path: ["cardId"],
+  });
 
 /** Captura rápida: the receipt IS the movement; everything else is optional. */
 export const quickMovementSchema = z.object({
@@ -85,6 +96,11 @@ export type MovementMutationError =
   | "group_closed"
   | "receipt_too_large"
   | "receipt_invalid_type"
+  | "card_not_found"
+  | "card_inactive"
+  | "card_not_revolving"
+  | "card_requires_expense"
+  | "card_limit_exceeded"
   | "not_found"
   | "forbidden";
 
@@ -109,6 +125,10 @@ export interface TransactionView {
   groupName: string | null;
   needsDetails: boolean;
   receiptId: string | null;
+  /** How the movement was paid; 'card' rows carry cardId/cardName. */
+  paymentMethod: "cash" | "card";
+  cardId: string | null;
+  cardName: string | null;
 }
 
 export interface TransactionFilters {
@@ -120,6 +140,8 @@ export interface TransactionFilters {
   type?: "income" | "expense";
   /** Ámbito: household-wide or personal movements (dashboard filter). */
   scope?: "individual" | "common";
+  /** Medio de pago: cash movements or card purchases. */
+  paymentMethod?: "cash" | "card";
   /** Case-insensitive substring match on the note (%/_ are literal). */
   q?: string;
 }
@@ -140,6 +162,9 @@ const viewColumns = {
   groupName: expenseGroups.name,
   needsDetails: transactions.needsDetails,
   receiptId: movementReceipts.id,
+  paymentMethod: transactions.paymentMethod,
+  cardId: transactions.cardLoanId,
+  cardName: loans.name,
 };
 
 function baseQuery(db: Database) {
@@ -152,7 +177,9 @@ function baseQuery(db: Database) {
     .innerJoin(users, eq(transactions.memberId, users.id))
     .leftJoin(expenseGroups, eq(transactions.groupId, expenseGroups.id))
     // At most one receipt per movement (service replaces by delete+insert).
-    .leftJoin(movementReceipts, eq(movementReceipts.transactionId, transactions.id));
+    .leftJoin(movementReceipts, eq(movementReceipts.transactionId, transactions.id))
+    // Card purchases name their revolving card (unique id → no row fan-out).
+    .leftJoin(loans, eq(transactions.cardLoanId, loans.id));
 }
 
 /** Inclusive [firstDay, lastDay] of 'YYYY-MM', or null for malformed input. */
@@ -182,6 +209,7 @@ export function filtersWhere(filters: TransactionFilters): SQL | undefined {
   if (filters.groupId) conds.push(eq(transactions.groupId, filters.groupId));
   if (filters.type) conds.push(eq(transactions.type, filters.type));
   if (filters.scope) conds.push(eq(transactions.scope, filters.scope));
+  if (filters.paymentMethod) conds.push(eq(transactions.paymentMethod, filters.paymentMethod));
   if (filters.q) {
     // Escape LIKE wildcards so user input is always a literal substring.
     const pattern = `%${filters.q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -400,10 +428,33 @@ function movementValues(input: MovementInput, memberId: string, cents: number) {
     groupId: input.groupId ? input.groupId : null,
     scope: input.scope,
     note: input.note ? input.note : null,
+    paymentMethod: input.paymentMethod,
+    cardLoanId: input.paymentMethod === "card" ? input.cardId : null,
     // Full-form movements are never pending; updating a pending row with
     // full data completes it (needsDetails flips to false).
     needsDetails: false,
   };
+}
+
+/**
+ * Card-side of the movement rules (trust boundary — the DB CHECKs back it
+ * up, but typed errors beat raw 23514s): the target must be an ACTIVE
+ * REVOLVING card, only expenses may ride a card, and the purchase must fit
+ * the cupo. `addedCents` is what THIS movement adds to the card's debt
+ * (full amount on create or a card switch; the delta on a same-card edit).
+ */
+function checkCardRules(
+  input: MovementInput,
+  card: Extract<Awaited<ReturnType<typeof getCardPurchaseInfo>>, { ok: true }>,
+  addedCents: number,
+): MovementMutationError | null {
+  if (input.type !== "expense") return "card_requires_expense";
+  if (!card.isActive) return "card_inactive";
+  if (!card.isRevolving) return "card_not_revolving";
+  if (card.availableCents !== null && addedCents > card.availableCents) {
+    return "card_limit_exceeded";
+  }
+  return null;
 }
 
 /** The transaction callback's client — shared by the receipt helpers. */
@@ -461,6 +512,12 @@ export async function createTransaction(
       const rows = await loadReferencedRows(tx, member.memberId, input);
       const ruleError = checkReferencedRows(rows, input);
       if (ruleError) return { ok: false, error: ruleError };
+      if (input.paymentMethod === "card") {
+        const card = await getCardPurchaseInfo(tx, input.cardId);
+        if (!card.ok) return { ok: false, error: "card_not_found" };
+        const cardError = checkCardRules(input, card, cents);
+        if (cardError) return { ok: false, error: cardError };
+      }
       if (input.receipt) {
         const receiptError = await validateReceipt(input.receipt);
         if (receiptError) return { ok: false, error: receiptError };
@@ -545,7 +602,11 @@ export async function updateTransaction(
   try {
     return await db.transaction<MovementResult>(async (tx) => {
       const [existing] = await tx
-        .select({ memberId: transactions.memberId })
+        .select({
+          memberId: transactions.memberId,
+          amountCents: transactions.amountCents,
+          cardLoanId: transactions.cardLoanId,
+        })
         .from(transactions)
         .where(eq(transactions.id, id))
         .limit(1)
@@ -559,6 +620,16 @@ export async function updateTransaction(
       const rows = await loadReferencedRows(tx, member.memberId, input);
       const ruleError = checkReferencedRows(rows, input);
       if (ruleError) return { ok: false, error: ruleError };
+      if (input.paymentMethod === "card") {
+        const card = await getCardPurchaseInfo(tx, input.cardId);
+        if (!card.ok) return { ok: false, error: "card_not_found" };
+        // Same card edit: only the DELTA consumes (or frees) cupo; a card
+        // switch consumes the full new amount on the new card.
+        const sameCard = existing.cardLoanId === input.cardId;
+        const addedCents = sameCard ? cents - existing.amountCents : cents;
+        const cardError = checkCardRules(input, card, Math.max(addedCents, 0));
+        if (cardError) return { ok: false, error: cardError };
+      }
       if (input.receipt) {
         const receiptError = await validateReceipt(input.receipt);
         if (receiptError) return { ok: false, error: receiptError };

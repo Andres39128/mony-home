@@ -209,6 +209,96 @@ export const outstandingSchema = z
   .min(1, "El saldo es obligatorio");
 
 // ---------------------------------------------------------------------------
+// Shared cupo math (single source of truth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ledger aggregates shared by listLoans and getCardPurchaseInfo — the
+ * outstanding/available formula must live in ONE place (no duplicated SQL).
+ */
+const PURCHASES_SUM = sql<string | null>`(select coalesce(sum(${transactions.amountCents}), 0) from ${transactions} where ${transactions.cardLoanId} = ${loans.id} and ${transactions.needsDetails} = false)`;
+const PAID_SUM = sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'payment' then ${loanPayments.amountCents} else 0 end), 0)`;
+const INTEREST_SUM = sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'interest' then ${loanPayments.amountCents} else 0 end), 0)`;
+const CHARGES_SUM = sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'charge' then ${loanPayments.amountCents} else 0 end), 0)`;
+
+/**
+ * Revolving outstanding + cupo disponible (pure). Outstanding adds the card
+ * purchases to the fixed-loan formula; available clamps to [0, limit] so a
+ * saldo a favor never frees credit beyond the cupo.
+ */
+export function revolvingCardMath(
+  principalCents: number,
+  purchasesCents: number,
+  interestCents: number,
+  chargesCents: number,
+  paidCents: number,
+  creditLimitCents: number | null,
+): { outstandingCents: number; availableCents: number | null } {
+  const outstandingCents = computeOutstanding(
+    principalCents + purchasesCents,
+    interestCents + chargesCents,
+    paidCents,
+  );
+  return {
+    outstandingCents,
+    availableCents:
+      creditLimitCents !== null
+        ? Math.max(0, Math.min(creditLimitCents, creditLimitCents - outstandingCents))
+        : null,
+  };
+}
+
+/**
+ * Card facts a card-purchase validation needs: whether the target loan is an
+ * active revolving card and how much cupo is left. The transactions service
+ * calls this inside its own write transaction (rule checks + insert share
+ * one TOCTOU-safe unit).
+ */
+export type CardPurchaseInfo =
+  | { ok: false; error: "card_not_found" }
+  | {
+      ok: true;
+      isActive: boolean;
+      isRevolving: boolean;
+      /** Cupo disponible; null when the loan is not a revolving card. */
+      availableCents: number | null;
+    };
+
+export async function getCardPurchaseInfo(
+  db: Pick<Database, "select">,
+  cardId: string,
+): Promise<CardPurchaseInfo> {
+  const [row] = await db
+    .select({
+      isActive: loans.isActive,
+      amortizationMode: loans.amortizationMode,
+      creditLimitCents: loans.creditLimitCents,
+      principalCents: loans.principalCents,
+      purchases: PURCHASES_SUM,
+      paid: PAID_SUM,
+      interest: INTEREST_SUM,
+      charges: CHARGES_SUM,
+    })
+    .from(loans)
+    .leftJoin(loanPayments, eq(loanPayments.loanId, loans.id))
+    .where(eq(loans.id, cardId))
+    .groupBy(loans.id);
+  if (!row) return { ok: false, error: "card_not_found" };
+  const isRevolving = row.amortizationMode === "revolving";
+  const { availableCents } = isRevolving
+    ? revolvingCardMath(
+        row.principalCents,
+        Number(row.purchases ?? 0),
+        Number(row.interest ?? 0),
+        Number(row.charges ?? 0),
+        Number(row.paid ?? 0),
+        row.creditLimitCents,
+      )
+    : { availableCents: null };
+  return { ok: true, isActive: row.isActive, isRevolving, availableCents };
+}
+
+// ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
 
@@ -310,14 +400,11 @@ export async function listLoans(db: Database): Promise<LoanView[]> {
       creditLimitCents: loans.creditLimitCents,
       managementFeeCents: loans.managementFeeCents,
       statementDay: loans.statementDay,
-      // Correlated scalar subquery (NOT a join: a second leftJoin over
-      // loan_payments would multiply rows) — purchases are the transactions
-      // linked to this card; pending quick-captures are placeholders, not debt.
-      purchases: sql<string | null>`(select coalesce(sum(${transactions.amountCents}), 0) from ${transactions} where ${transactions.cardLoanId} = ${loans.id} and ${transactions.needsDetails} = false)`,
-      paid: sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'payment' then ${loanPayments.amountCents} else 0 end), 0)`,
-      interest: sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'interest' then ${loanPayments.amountCents} else 0 end), 0)`,
+      purchases: PURCHASES_SUM,
+      paid: PAID_SUM,
+      interest: INTEREST_SUM,
       // Unpaid bank cuota components are debt too (D5).
-      charges: sql<string | null>`coalesce(sum(case when ${loanPayments.kind} = 'charge' then ${loanPayments.amountCents} else 0 end), 0)`,
+      charges: CHARGES_SUM,
       paymentCount: sql<string | null>`count(${loanPayments.id})`,
     })
     .from(loans)
@@ -336,12 +423,15 @@ export async function listLoans(db: Database): Promise<LoanView[]> {
     const chargesCents = Number(row.charges ?? 0);
     const revolving = row.amortizationMode === "revolving";
     // Revolving debt includes the card purchases (they live in transactions,
-    // not in this ledger); the base formula stays shared with fixed loans.
+    // not in this ledger); the shared helper owns the formula and the clamp.
     const purchasesCents = revolving ? Number(row.purchases ?? 0) : 0;
-    const outstandingCents = computeOutstanding(
-      row.principalCents + purchasesCents,
-      interestCents + chargesCents,
+    const { outstandingCents, availableCents } = revolvingCardMath(
+      row.principalCents,
+      purchasesCents,
+      interestCents,
+      chargesCents,
       paidCents,
+      revolving ? row.creditLimitCents : null,
     );
     return {
       ...row,
@@ -351,12 +441,7 @@ export async function listLoans(db: Database): Promise<LoanView[]> {
       chargesCents,
       purchasesCents: revolving ? purchasesCents : null,
       outstandingCents,
-      // Clamped to [0, limit]: a saldo a favor (negative outstanding) never
-      // frees credit beyond the cupo, and adjustments never go below zero.
-      availableCents:
-        revolving && row.creditLimitCents !== null
-          ? Math.max(0, Math.min(row.creditLimitCents, row.creditLimitCents - outstandingCents))
-          : null,
+      availableCents: revolving ? availableCents : null,
       paidPct: computePaidPct(row.principalCents, paidCents),
       paymentCount: Number(row.paymentCount ?? 0),
     };
