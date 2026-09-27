@@ -104,6 +104,13 @@ export default async function MovimientosPage({
       href: hrefWith(params, { type: null, page: null }),
     });
   }
+  if (filters.paymentMethod) {
+    activeFilters.push({
+      param: "paymentMethod",
+      label: `Medio de pago: ${filters.paymentMethod === "card" ? "Tarjeta" : "Efectivo"}`,
+      href: hrefWith(params, { paymentMethod: null, page: null }),
+    });
+  }
   if (filters.q) {
     activeFilters.push({
       param: "q",
@@ -147,6 +154,7 @@ export default async function MovimientosPage({
             categories={options.categories}
             members={options.members}
             groups={options.groups}
+            cards={options.cards}
             serverToday={today}
             createAction={createMovementAction}
             createCategoryAction={createCategoryInlineAction}
@@ -221,6 +229,18 @@ export default async function MovimientosPage({
             <option value="expense">Gasto</option>
           </select>
         </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Medio de pago</span>
+          <select
+            name="paymentMethod"
+            defaultValue={filters.paymentMethod ?? ""}
+            className={inputClass}
+          >
+            <option value="">—</option>
+            <option value="cash">Efectivo</option>
+            <option value="card">Tarjeta</option>
+          </select>
+        </label>
       </FiltersSheet>
 
       <div data-tour="movimientos-totales" className="grid gap-4 sm:grid-cols-3">
@@ -251,6 +271,7 @@ export default async function MovimientosPage({
           categories={options.categories}
           members={options.members}
           groups={options.groups}
+          cards={options.cards}
           serverToday={today}
           updateAction={updateMovementAction}
           deleteAction={deleteMovementAction}

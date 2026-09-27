@@ -47,6 +47,7 @@ export default function NewMovementFab({
   categories,
   members,
   groups,
+  cards,
   serverToday,
   tourId,
   desktopButton = false,
@@ -114,6 +115,7 @@ export default function NewMovementFab({
           categories={categories}
           members={members}
           groups={groups}
+          cards={cards}
           currentUser={currentUser}
           serverToday={serverToday}
           createAction={createAction}

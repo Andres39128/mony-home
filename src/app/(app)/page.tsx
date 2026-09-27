@@ -394,6 +394,7 @@ export default async function DashboardPage({
           categories={options.categories}
           members={options.members}
           groups={options.groups}
+          cards={options.cards}
           serverToday={today}
           createAction={createMovementAction}
           createCategoryAction={createCategoryInlineAction}
