@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
 import {
@@ -53,6 +55,7 @@ export async function createCategoryAction(
 
   const result = await createCategory(getDb(), parsed.data);
   if (!result.ok) return mapCategoryError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -71,6 +74,7 @@ export async function updateCategoryAction(
 
   const result = await updateCategory(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapCategoryError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -86,6 +90,7 @@ export async function toggleCategoryAction(
 
   const result = await toggleCategoryActive(getDb(), guard.user, id);
   if (!result.ok) return mapCategoryError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -101,5 +106,6 @@ export async function deleteCategoryAction(
 
   const result = await removeCategory(getDb(), guard.user, id);
   if (!result.ok) return mapCategoryError(result.error);
+  refresh();
   return { ok: true };
 }

@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
 import {
@@ -130,6 +132,7 @@ export async function createLoanAction(
 
   const result = await createLoan(getDb(), guard.user, parsed.data);
   if (!result.ok) return mapLoanError(result);
+  refresh();
   return { ok: true };
 }
 
@@ -148,6 +151,7 @@ export async function updateLoanAction(
 
   const result = await updateLoan(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapLoanError(result);
+  refresh();
   return { ok: true };
 }
 
@@ -163,6 +167,7 @@ export async function toggleLoanAction(
 
   const result = await toggleLoanActive(getDb(), guard.user, id);
   if (!result.ok) return mapLoanError(result);
+  refresh();
   return { ok: true };
 }
 
@@ -178,6 +183,7 @@ export async function deleteLoanAction(
 
   const result = await removeLoan(getDb(), guard.user, id);
   if (!result.ok) return mapLoanError(result);
+  refresh();
   return { ok: true };
 }
 
@@ -198,6 +204,7 @@ export async function updateOutstandingAction(
 
   const result = await updateOutstanding(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapLoanError(result);
+  refresh();
   return { ok: true };
 }
 
@@ -240,6 +247,7 @@ export async function addLoanPaymentAction(
     }
     return { error: "No tenés permiso para registrar ese pago." };
   }
+  refresh();
   return { ok: true };
 }
 
@@ -292,6 +300,7 @@ export async function addCardPaymentAction(
     }
     return { error: "No tenés permiso para registrar ese pago." };
   }
+  refresh();
   return { ok: true };
 }
 
@@ -310,5 +319,6 @@ export async function removeLedgerEntryAction(
     if (result.error === "entry_not_found") return { error: "El registro no existe." };
     return { error: ADMIN_REQUIRED_MESSAGE };
   }
+  refresh();
   return { ok: true };
 }

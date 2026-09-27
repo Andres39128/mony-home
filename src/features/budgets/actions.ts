@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { getDb } from "@/db";
 import { adminGuard } from "@/features/auth/session";
 import { copyFromPreviousMonth, setForMonth } from "@/features/budgets/service";
@@ -43,6 +45,7 @@ export async function setBudgetsAction(_prev: FormState, formData: FormData): Pr
 
   const result = await setForMonth(getDb(), guard.user, parsed.month, parsed.entries);
   if (!result.ok) return budgetErrorMessage(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -60,5 +63,6 @@ export async function copyPreviousBudgetAction(
 
   const result = await copyFromPreviousMonth(getDb(), guard.user, parsed.month);
   if (!result.ok) return budgetErrorMessage(result.error);
+  refresh();
   return { ok: true };
 }

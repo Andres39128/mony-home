@@ -1117,22 +1117,30 @@ export default function LoansPanel({
         </article>
       </div>
 
-      {cards.length > 0 && (
+      {(cards.length > 0 || isAdmin) && (
         <div data-tour="prestamos-rotativo" className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold tracking-tight text-ink">Crédito rotativo</h2>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {cards.map((card) => (
-              <RevolvingCard
-                key={card.id}
-                card={card}
-                entries={paymentsByLoan[card.id] ?? []}
-                cycles={cyclesByLoan[card.id] ?? []}
-                cardPaymentAction={cardPaymentAction}
-                removeEntryAction={removeEntryAction}
-                isAdmin={isAdmin}
-              />
-            ))}
-          </ul>
+          {cards.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-line px-6 py-8 text-center text-sm text-muted">
+              Todavía no hay tarjetas de crédito. Creá la primera abajo en{" "}
+              <span className="font-medium text-ink">Nuevo préstamo</span> con modo{" "}
+              <span className="font-medium text-ink">“Crédito rotativo (tarjeta)”</span>.
+            </p>
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {cards.map((card) => (
+                <RevolvingCard
+                  key={card.id}
+                  card={card}
+                  entries={paymentsByLoan[card.id] ?? []}
+                  cycles={cyclesByLoan[card.id] ?? []}
+                  cardPaymentAction={cardPaymentAction}
+                  removeEntryAction={removeEntryAction}
+                  isAdmin={isAdmin}
+                />
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

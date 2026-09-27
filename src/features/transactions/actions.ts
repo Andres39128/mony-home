@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
@@ -112,10 +114,12 @@ function mapMovementError(error: string): FormState {
   return { error: "No se pudo guardar el movimiento." };
 }
 
-// NOTE: pages render dynamically (auth reads cookies() on every request), so
-// every mutation is already reflected on the next render — revalidatePath was
-// a no-op and all such calls were removed app-wide. If caching (use cache /
-// PPR) lands, reintroduce a centralized revalidation surface map then.
+// NOTE: pages render dynamically (auth reads cookies() on every request),
+// but Next 16 moved post-action UI updates from automatic to
+// stale-while-revalidate: without an explicit refresh() the client router
+// keeps serving the pre-action RSC payload until a manual navigation.
+// Every mutating action therefore calls refresh() (Server-Action-only API,
+// docs: upgrading/version-16#refresh) to restore read-your-writes.
 
 export async function createMovementAction(
   _prev: FormState,
@@ -132,6 +136,8 @@ export async function createMovementAction(
     const result = await createQuickTransaction(getDb(), user, parsed.data);
     if (!result.ok) return mapMovementError(result.error);
 
+    refresh();
+
     return { ok: true };
   }
 
@@ -140,6 +146,7 @@ export async function createMovementAction(
 
   const result = await createTransaction(getDb(), user, parsed.data);
   if (!result.ok) return mapMovementError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -157,6 +164,7 @@ export async function updateMovementAction(
 
   const result = await updateTransaction(getDb(), user, id, parsed.data);
   if (!result.ok) return mapMovementError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -188,6 +196,7 @@ export async function deleteMovementAction(
       ? { error: "El movimiento ya no existe." }
       : mapMovementError(result.error);
   }
+  refresh();
   return { ok: true };
 }
 
@@ -216,6 +225,8 @@ export async function createCategoryInlineAction(
       ? { fieldErrors: { name: "Ya existe una categoría con ese nombre." } }
       : { error: "No se pudo crear la categoría." };
   }
+
+  refresh();
 
   return { ok: true, categoryId: result.id, categoryName: parsed.data.name };
 }

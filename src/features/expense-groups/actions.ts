@@ -1,5 +1,7 @@
 "use server";
 
+import { refresh } from "next/cache";
+
 import { z } from "zod";
 import { getDb } from "@/db";
 import { adminGuard, requireUser } from "@/features/auth/session";
@@ -43,6 +45,7 @@ export async function createExpenseGroupAction(
 
   const result = await createExpenseGroup(getDb(), parsed.data);
   if (!result.ok) return mapGroupError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -61,6 +64,7 @@ export async function updateExpenseGroupAction(
 
   const result = await updateExpenseGroup(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapGroupError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -81,6 +85,7 @@ export async function setExpenseGroupStatusAction(
 
   const result = await setExpenseGroupStatus(getDb(), guard.user, id, parsed.data);
   if (!result.ok) return mapGroupError(result.error);
+  refresh();
   return { ok: true };
 }
 
@@ -96,5 +101,6 @@ export async function deleteExpenseGroupAction(
 
   const result = await removeExpenseGroup(getDb(), guard.user, id);
   if (!result.ok) return mapGroupError(result.error);
+  refresh();
   return { ok: true };
 }
