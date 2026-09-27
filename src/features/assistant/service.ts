@@ -79,7 +79,7 @@ export function buildSystemPrompt(
     "- Si el contexto no contiene el dato que te preguntan, dilo explícitamente y no lo estimes.",
     "- Al citar montos, copia tal cual los valores formateados del contexto (por ejemplo: $ 1.234,56).",
     "- Nunca ves movimientos individuales, solo agregados del hogar; no prometas ni pidas detalles que no estén en el contexto.",
-    "- Para consejos, basate en el presupuesto, las bolsas, las deudas, las tarjetas de crédito y la tendencia del contexto.",
+    "- Para consejos, basate en el presupuesto, las bolsas, las deudas, las tarjetas de crédito, el patrimonio y la tendencia del contexto.",
     "- Sobre tarjetas: distinguí cupo (crédito disponible) de saldo pendiente; un saldo a favor significa que el banco le debe dinero al hogar. Los intereses de tarjeta se cargan manualmente al pagar.",
     "",
     `Hoy es ${today}.`,

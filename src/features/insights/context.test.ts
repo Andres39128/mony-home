@@ -295,6 +295,7 @@ const promptOf = (ctx: Awaited<ReturnType<typeof buildFinanceContext>>) =>
     deudas: Record<string, unknown>[];
     tarjetas: Record<string, unknown>[];
     deuda_total: string;
+    patrimonio: Record<string, string>;
   };
 
 /**
@@ -348,6 +349,22 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
       scope: "common",
       principalCents: 500_000,
     });
+    // The mortgaged apartment: bank-style loan carrying the property value.
+    // Created "now" → the daily accrual has no elapsed days → no interest
+    // rows, outstanding stays at the principal (deterministic).
+    await db.insert(loans).values({
+      name: "Apartamento",
+      kind: "mortgage",
+      entity: "Davivienda",
+      scope: "common",
+      principalCents: 200_000,
+      amortizationMode: "bank",
+      chargedRateBp: 1295,
+      fixedCuotaCents: 20_000,
+      termMonths: 240,
+      cuotaDay: 5,
+      propertyValueCents: 800_000,
+    });
 
     await db.insert(transactions).values([
       // Cash expense 10.000 + card purchases 50.000 → split del mes.
@@ -379,6 +396,7 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
   it("separates fixed debts from revolving cards with the full cupo facts", async () => {
     const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
     expect(ctx.deudas).toEqual([
+      { name: "Apartamento", entity: "Davivienda", kind: "mortgage", outstandingCents: 200_000, isActive: true },
       { name: "Hipoteca", entity: "Banco Nación", kind: "mortgage", outstandingCents: 500_000, isActive: true },
     ]);
     expect(ctx.tarjetas).toHaveLength(1);
@@ -394,7 +412,8 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
       statementDay: 25,
     });
     // Card outstanding + mortgage, saldos a favor never subtract.
-    expect(ctx.totalDebtCents).toBe(515_000);
+    // Card 15.000 + Hipoteca 500.000 + Apartamento 200.000.
+    expect(ctx.totalDebtCents).toBe(715_000);
   });
 
   it("renders deudas, tarjetas, medios de pago and deuda total for the prompt", async () => {
@@ -405,6 +424,12 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
       gastos_con_tarjeta: "$ 500,00",
     });
     expect(prompt.deudas).toEqual([
+      expect.objectContaining({
+        nombre: "Apartamento",
+        tipo: "hipoteca",
+        saldo_pendiente: "$ 2.000,00",
+        estado: "activa",
+      }),
       expect.objectContaining({
         nombre: "Hipoteca",
         tipo: "hipoteca",
@@ -425,7 +450,7 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
       estado: "activa",
     });
     expect(prompt.tarjetas[0].saldo_a_favor).toBeUndefined();
-    expect(prompt.deuda_total).toBe("$ 5.150,00");
+    expect(prompt.deuda_total).toBe("$ 7.150,00");
   });
 
   it("reports a saldo a favor instead of a negative pending balance", async () => {
@@ -441,6 +466,6 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
     expect(prompt.tarjetas[0].saldo_pendiente).toBe("$ 0,00");
     expect(prompt.tarjetas[0].saldo_a_favor).toBe("$ 350,00");
     expect(prompt.tarjetas[0].cupo_disponible).toBe("$ 10.000,00");
-    expect(prompt.deuda_total).toBe("$ 5.000,00");
+    expect(prompt.deuda_total).toBe("$ 7.000,00");
   });
 });

@@ -4,7 +4,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { categories, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
+import { categories, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import {
   addContribution,
   computeGoalProgress,
@@ -510,6 +510,7 @@ describe("investments, valuation and patrimony (integration on PGlite)", () => {
     // Savings: 34975 (Ahorro) + 0 (AhorroSinMeta); Investments: 21500 valued.
     expect(patrimony.savingsCents).toBe(34_975);
     expect(patrimony.investmentsCents).toBe(21_500);
+    expect(patrimony.propertiesCents).toBe(0);
     expect(patrimony.totalCents).toBe(56_475);
     expect(patrimony.goals).toHaveLength(3);
     expect(patrimony.goals.find((g) => g.name === "Ahorro")).toMatchObject({
@@ -724,5 +725,58 @@ describe("mirror without system categories (isolated DB)", () => {
       .from(savingsContributions)
       .where(eq(savingsContributions.goalId, fresh.id));
     expect(leftovers).toHaveLength(0); // nothing half-written
+  });
+});
+
+describe("patrimony with mortgaged property (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let memberId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [user] = await db
+      .insert(users)
+      .values({ username: "pat", name: "Pat", passwordHash: "x" })
+      .returning();
+    memberId = user.id;
+    // Savings bag 100.000 + mortgaged apartment: bank loan 200.000 over a
+    // property worth 800.000. Created "now" → no accrual days → deterministic.
+    await db.insert(savingsGoals).values({ name: "Fondo", kind: "savings", scope: "common" });
+    await db.insert(savingsContributions).values({
+      goalId: (await db.select({ id: savingsGoals.id }).from(savingsGoals))[0].id,
+      memberId,
+      kind: "deposit",
+      amountCents: 100_000,
+      date: "2026-09-01",
+    });
+    await db.insert(loans).values({
+      name: "Apartamento",
+      kind: "mortgage",
+      entity: "Davivienda",
+      scope: "common",
+      principalCents: 200_000,
+      amortizationMode: "bank",
+      chargedRateBp: 1295,
+      fixedCuotaCents: 20_000,
+      termMonths: 240,
+      cuotaDay: 5,
+      propertyValueCents: 800_000,
+    });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("counts the property as an asset while the debt counts in full", async () => {
+    const patrimony = await getPatrimony(appDb);
+    expect(patrimony.savingsCents).toBe(100_000);
+    expect(patrimony.propertiesCents).toBe(800_000);
+    expect(patrimony.debtCents).toBe(200_000);
+    // The apartment's equity (800k − 200k) is the household's real capital.
+    expect(patrimony.totalCents).toBe(700_000);
   });
 });
