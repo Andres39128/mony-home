@@ -13,7 +13,7 @@
  * 1. Category kind must match the transaction type.
  * 2. Only active expense groups can be attached to new/updated movements.
  */
-import { and, count, desc, eq, gte, lte, sql, sum, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, lte, sql, sum, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   categories,
@@ -328,16 +328,45 @@ export async function transactionTotals(
   db: Database,
   filters: TransactionFilters = {},
 ): Promise<TransactionTotals> {
+  const { incomeCents, expenseCents } = await sumIncomeExpense(
+    db,
+    completedOnly(filtersWhere(filters)),
+  );
+  return { incomeCents, expenseCents, balanceCents: incomeCents - expenseCents };
+}
+
+/** Income/expense aggregation shared by the month totals and the opening balance. */
+async function sumIncomeExpense(
+  db: Database,
+  where: SQL | undefined,
+): Promise<{ incomeCents: number; expenseCents: number }> {
   const [row] = await db
     .select({
       income: sum(sql`case when ${transactions.type} = 'income' then ${transactions.amountCents} end`),
       expense: sum(sql`case when ${transactions.type} = 'expense' then ${transactions.amountCents} end`),
     })
     .from(transactions)
-    .where(completedOnly(filtersWhere(filters)));
-  const incomeCents = Number(row?.income ?? 0);
-  const expenseCents = Number(row?.expense ?? 0);
-  return { incomeCents, expenseCents, balanceCents: incomeCents - expenseCents };
+    .where(where);
+  return { incomeCents: Number(row?.income ?? 0), expenseCents: Number(row?.expense ?? 0) };
+}
+
+/**
+ * Saldo de arrastre: net (income − expense) of every completed movement
+ * STRICTLY BEFORE the filtered month, under the same non-month filters.
+ * Money is cumulative — a month does not start at zero, it starts at
+ * whatever the previous months left (positive or negative).
+ */
+export async function openingBalanceCents(
+  db: Database,
+  filters: TransactionFilters,
+): Promise<number> {
+  const range = filters.month ? monthRange(filters.month) : null;
+  if (!range) return 0;
+  const where = completedOnly(
+    and(filtersWhere({ ...filters, month: undefined }), lt(transactions.date, range.start)),
+  );
+  const { incomeCents, expenseCents } = await sumIncomeExpense(db, where);
+  return incomeCents - expenseCents;
 }
 
 /**
