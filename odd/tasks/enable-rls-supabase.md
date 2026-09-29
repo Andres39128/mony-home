@@ -25,24 +25,28 @@ ask-on-risk (default). This is a single-file migration + journal entry (~50 line
 
 ## Tasks
 - [x] T1: Cut branch `fix/rls-supabase-rls-public` from current feature.
-- [x] T2: Create migration `src/db/migrations/0013_enable_rls_public.sql` with 14 `ENABLE ROW LEVEL SECURITY` statements + header comment explaining the rationale.
-- [x] T3: Register migration 0013 in `src/db/migrations/meta/_journal.json` (idx 13, timestamp via `Date.now()`).
-- [x] T4: Run `npm run verify` — 53/53 schema tests pass, lint/typecheck/build green.
-- [x] T5: Work-unit commit `d117c8e45c06` on the feature branch.
-- [x] T6: Merged `fix/rls-supabase-rls-public` into `main` via `--no-ff` (merge commit `9a95b641be23`). NOTE: the branch was cut from `feat/transactions-opening-balance`, so the merge also pulled in `33fddb767f34 feat(transactions): opening balance carried across months` — that commit is now in main too. User accepted ("todo lo podemos hacer en main").
-- [x] T7: Pushed `main` to `origin/main` (`f244276d38b9..9a95b641be23`).
-- [x] T8: Deleted local branches: `fix/rls-supabase-rls-public`, `feat/transactions-opening-balance`, `security/csp-style-split-hsts-preload`, `feat/credito-rotativo`. Repo is now just `main` locally.
-- [ ] T9 (user): Manual apply in Supabase production DB — paste `0013_enable_rls_public.sql` into SQL Editor (autocommit) and insert hash into `__drizzle_migrations`. Refresh Security Advisor → should drop 14 → 0.
+- [x] T2: Create migration `0013_enable_rls_public.sql` — 14 `ENABLE ROW LEVEL SECURITY` statements.
+- [x] T3: Register migration 0013 in `_journal.json` (idx 13).
+- [x] T4: `npm run verify` green (53/53 schema tests).
+- [x] T5: Merged `fix/rls-supabase-rls-public` → `main` (merge `9a95b641be23`) and pushed.
+- [x] T6: User applied migration 0013 manually in Supabase. Errors dropped 14 → 0, but 15 "RLS Enabled No Policy" suggestions remained (the Postgres default deny satisfies SECURITY but the Advisor wants explicit `CREATE POLICY`).
+- [x] T7: Create migration `0014_rls_policies_public.sql` with explicit `app_deny_api` deny policy on each of the 15 tables. Block on `__drizzle_migrations` is wrapped in a `DO $$ ... IF EXISTS (SELECT 1 FROM pg_tables ...) ... END $$` so the migration also runs on PGlite tests (where the PGlite migrator does NOT auto-create `__drizzle_migrations`, unlike the postgres-js migrator used in production).
+- [x] T8: Update `src/db/test-utils.ts` to `CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;` before applying migrations — PGlite is single-tenant and does not auto-create the Supabase API roles. The test connection itself stays as PGlite superuser, so RLS bypass continues to apply in test code.
+- [x] T9: `npm run verify` — 459/459 tests green, lint/typecheck/build clean.
+- [x] T10: Register 0014 in `_journal.json` (idx 14). Commit `1d54f681a31b`. Pushed to `origin/main`.
+- [ ] T11 (user): Manual apply of 0014 in Supabase SQL Editor + insert hash into `__drizzle_migrations`. Refresh Security Advisor → should drop 15 suggestions → 0.
 
 ## Progress / evidence
-- Commits on `main` since this session: `33fddb767f34` (opening-balance), `d117c8e45c06` (RLS migration), `8872c23f7219` (RLS docs), `9a95b641be23` (merge commit).
-- Migration sha256: `601e354377af3bb54fdd715c86f89303e978adc9d699d6e17c30695f2f974fc9` (insert into `__drizzle_migrations.hash` after applying).
-- `npm run verify` green at the time of merge.
+- Commit chain on `main`: `33fddb767f34` → `d117c8e45c06` → `8872c23f7219` → `9a95b641be23` → `7c170613a863` → `1d54f681a31b`.
+- Migration 0013 sha256: `601e354377af3bb54fdd715c86f89303e978adc9d699d6e17c30695f2f974fc9` (already applied).
+- Migration 0014 sha256: `b2bf3e1590cf29687ffb996aeb0164e6edd3b952eb1af568882ed722167bc692` (apply next).
+- Local + remote: only `main`.
 
 ## Next step
-T9: user applies migration manually in Supabase SQL Editor and refreshes the Security Advisor.
+T11: paste migration 0014 in Supabase SQL Editor and insert its hash into `__drizzle_migrations`. Refresh Security Advisor.
 
 ## Relevant Files
-- src/db/migrations/0013_enable_rls_public.sql — new; 14 `ENABLE ROW LEVEL SECURITY` + rationale comment.
-- src/db/migrations/meta/_journal.json — entry for idx 13 added.
-- src/db/schema.ts — unchanged; cross-reference for table list.
+- src/db/migrations/0013_enable_rls_public.sql — new; 14 `ENABLE ROW LEVEL SECURITY`.
+- src/db/migrations/0014_rls_policies_public.sql — new; 15 explicit `app_deny_api` policies (one per table, `__drizzle_migrations` block conditional via DO/IF EXISTS).
+- src/db/migrations/meta/_journal.json — entries for idx 13 and 14 added.
+- src/db/test-utils.ts — creates `anon` and `authenticated` roles before running migrations.
