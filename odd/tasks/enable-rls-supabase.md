@@ -34,19 +34,20 @@ ask-on-risk (default). This is a single-file migration + journal entry (~50 line
 - [x] T8: Update `src/db/test-utils.ts` to `CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;` before applying migrations — PGlite is single-tenant and does not auto-create the Supabase API roles. The test connection itself stays as PGlite superuser, so RLS bypass continues to apply in test code.
 - [x] T9: `npm run verify` — 459/459 tests green, lint/typecheck/build clean.
 - [x] T10: Register 0014 in `_journal.json` (idx 14). Commit `1d54f681a31b`. Pushed to `origin/main`.
-- [ ] T11 (user): Manual apply of 0014 in Supabase SQL Editor + insert hash into `__drizzle_migrations`. Refresh Security Advisor → should drop 15 suggestions → 0.
+- [x] T11 (user): User applied 0014 manually in Supabase SQL Editor and confirmed the Security Advisor dropped 15 → 0. **TASK CLOSED.**
 
 ## Progress / evidence
-- Commit chain on `main`: `33fddb767f34` → `d117c8e45c06` → `8872c23f7219` → `9a95b641be23` → `7c170613a863` → `1d54f681a31b`.
-- Migration 0013 sha256: `601e354377af3bb54fdd715c86f89303e978adc9d699d6e17c30695f2f974fc9` (already applied).
-- Migration 0014 sha256: `b2bf3e1590cf29687ffb996aeb0164e6edd3b952eb1af568882ed722167bc692` (apply next).
+- Commit chain on `main`: `33fddb767f34` → `d117c8e45c06` → `8872c23f7219` → `9a95b641be23` → `7c170613a863` → `1d54f681a31b` → `82d35b1e8f0e`.
+- Migration 0013 sha256: `601e354377af3bb54fdd715c86f89303e978adc9d699d6e17c30695f2f974fc9` (applied).
+- Migration 0014 sha256: `b2bf3e1590cf29687ffb996aeb0164e6edd3b952eb1af568882ed722167bc692` (applied).
+- Supabase Security Advisor: 14 errors → 0 errors, 15 suggestions → 0 suggestions.
 - Local + remote: only `main`.
 
 ## Next step
-T11: paste migration 0014 in Supabase SQL Editor and insert its hash into `__drizzle_migrations`. Refresh Security Advisor.
+None — closed. Optional follow-up (separate session): backfill `__drizzle_migrations` with sha256 hashes of 0000..0012 so `npm run db:migrate` becomes usable again.
 
 ## Relevant Files
-- src/db/migrations/0013_enable_rls_public.sql — new; 14 `ENABLE ROW LEVEL SECURITY`.
-- src/db/migrations/0014_rls_policies_public.sql — new; 15 explicit `app_deny_api` policies (one per table, `__drizzle_migrations` block conditional via DO/IF EXISTS).
+- src/db/migrations/0013_enable_rls_public.sql — 14 `ENABLE ROW LEVEL SECURITY`.
+- src/db/migrations/0014_rls_policies_public.sql — 15 explicit `app_deny_api` policies (one per table, `__drizzle_migrations` block conditional via DO/IF EXISTS).
 - src/db/migrations/meta/_journal.json — entries for idx 13 and 14 added.
 - src/db/test-utils.ts — creates `anon` and `authenticated` roles before running migrations.
