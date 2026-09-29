@@ -27,15 +27,17 @@ ask-on-risk (default). This is a single-file migration + journal entry (~50 line
 - [x] T1: Cut branch `fix/rls-supabase-rls-public` from current feature.
 - [x] T2: Create migration `src/db/migrations/0013_enable_rls_public.sql` with 14 `ENABLE ROW LEVEL SECURITY` statements + header comment explaining the rationale.
 - [x] T3: Register migration 0013 in `src/db/migrations/meta/_journal.json` (idx 13, timestamp via `Date.now()`).
-- [ ] T4: Run `npm run verify` to confirm schema tests + lint + typecheck + build still pass with the migration applied via PGlite.
-- [ ] T5: Work-unit commit on the feature branch.
+- [x] T4: Run `npm run verify` — 53/53 schema tests pass, lint/typecheck/build green.
+- [x] T5: Work-unit commit `d117c8e45c06` on the feature branch.
 - [ ] T6: Manual apply in Supabase (SQL Editor) — per the `0012` gotcha in `odd/tasks/credito-rotativo.md`, `npm run db:migrate` is a no-op in this network and the Drizzle migrator wraps the file in one transaction that real Postgres rejects for unrelated reasons. Use Supabase SQL Editor (autocommit per statement); then insert the migration hash into `__drizzle_migrations` to keep state consistent.
 
 ## Progress / evidence
-- T1-T3 done in this session.
+- T1-T5 done in this session.
+- Commit: `d117c8e45c06` on `fix/rls-supabase-rls-public` (3 files, +87 lines).
+- Migration sha256: `601e354377af3bb54fdd715c86f89303e978adc9d699d6e17c30695f2f974fc9` (insert into `__drizzle_migrations.hash` after applying).
 
 ## Next step
-T4: `npm run verify`. T5: commit. T6: hand the SQL + hash-insert snippet to the user to run in Supabase SQL Editor (production DB out of my reach from this session).
+T6: hand the SQL + hash-insert snippet to the user to run in Supabase SQL Editor (production DB out of my reach from this session). Refresh the Supabase Security Advisor after applying — should drop from 14 errors to 0.
 
 ## Relevant Files
 - src/db/migrations/0013_enable_rls_public.sql — new; 14 `ENABLE ROW LEVEL SECURITY` + rationale comment.
