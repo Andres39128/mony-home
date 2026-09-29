@@ -29,15 +29,18 @@ ask-on-risk (default). This is a single-file migration + journal entry (~50 line
 - [x] T3: Register migration 0013 in `src/db/migrations/meta/_journal.json` (idx 13, timestamp via `Date.now()`).
 - [x] T4: Run `npm run verify` — 53/53 schema tests pass, lint/typecheck/build green.
 - [x] T5: Work-unit commit `d117c8e45c06` on the feature branch.
-- [ ] T6: Manual apply in Supabase (SQL Editor) — per the `0012` gotcha in `odd/tasks/credito-rotativo.md`, `npm run db:migrate` is a no-op in this network and the Drizzle migrator wraps the file in one transaction that real Postgres rejects for unrelated reasons. Use Supabase SQL Editor (autocommit per statement); then insert the migration hash into `__drizzle_migrations` to keep state consistent.
+- [x] T6: Merged `fix/rls-supabase-rls-public` into `main` via `--no-ff` (merge commit `9a95b641be23`). NOTE: the branch was cut from `feat/transactions-opening-balance`, so the merge also pulled in `33fddb767f34 feat(transactions): opening balance carried across months` — that commit is now in main too. User accepted ("todo lo podemos hacer en main").
+- [x] T7: Pushed `main` to `origin/main` (`f244276d38b9..9a95b641be23`).
+- [x] T8: Deleted local branches: `fix/rls-supabase-rls-public`, `feat/transactions-opening-balance`, `security/csp-style-split-hsts-preload`, `feat/credito-rotativo`. Repo is now just `main` locally.
+- [ ] T9 (user): Manual apply in Supabase production DB — paste `0013_enable_rls_public.sql` into SQL Editor (autocommit) and insert hash into `__drizzle_migrations`. Refresh Security Advisor → should drop 14 → 0.
 
 ## Progress / evidence
-- T1-T5 done in this session.
-- Commit: `d117c8e45c06` on `fix/rls-supabase-rls-public` (3 files, +87 lines).
+- Commits on `main` since this session: `33fddb767f34` (opening-balance), `d117c8e45c06` (RLS migration), `8872c23f7219` (RLS docs), `9a95b641be23` (merge commit).
 - Migration sha256: `601e354377af3bb54fdd715c86f89303e978adc9d699d6e17c30695f2f974fc9` (insert into `__drizzle_migrations.hash` after applying).
+- `npm run verify` green at the time of merge.
 
 ## Next step
-T6: hand the SQL + hash-insert snippet to the user to run in Supabase SQL Editor (production DB out of my reach from this session). Refresh the Supabase Security Advisor after applying — should drop from 14 errors to 0.
+T9: user applies migration manually in Supabase SQL Editor and refreshes the Security Advisor.
 
 ## Relevant Files
 - src/db/migrations/0013_enable_rls_public.sql — new; 14 `ENABLE ROW LEVEL SECURITY` + rationale comment.
