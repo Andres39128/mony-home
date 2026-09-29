@@ -2,6 +2,7 @@ import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import {
   listTransactionsPage,
+  openingBalanceCents,
   transactionTotals,
 } from "@/features/transactions/service";
 import { PAGE_SIZE, parseTransactionFilters } from "@/features/transactions/filters";
@@ -62,9 +63,10 @@ export default async function MovimientosPage({
   // Cold-gated: steady state pays one cheap SELECT.
   await catchUpRecurringMovements(getDb());
 
-  const [result, totals, options] = await Promise.all([
+  const [result, totals, openingBalance, options] = await Promise.all([
     listTransactionsPage(getDb(), filters, page, PAGE_SIZE),
     transactionTotals(getDb(), filters),
+    openingBalanceCents(getDb(), filters),
     movementFormOptions(getDb()),
   ]);
   const { rows, total, page: safePage } = result;
@@ -119,10 +121,14 @@ export default async function MovimientosPage({
     });
   }
 
+  // Saldo real: what the month opened with (arrastre) plus this month's net.
+  // A month never starts at zero — previous months left positive or negative.
+  const saldoAcumulado = openingBalance + totals.balanceCents;
+
   const balanceClass =
-    totals.balanceCents > 0
+    saldoAcumulado > 0
       ? CHIP_WEALTH
-      : totals.balanceCents < 0
+      : saldoAcumulado < 0
         ? CHIP_EXPENSE
         : "text-ink";
 
@@ -259,7 +265,10 @@ export default async function MovimientosPage({
         <Card className="p-5">
           <h2 className="text-sm font-medium text-muted">Saldo</h2>
           <p className={`mt-1 text-2xl font-semibold tabular-nums ${balanceClass}`}>
-            {formatCents(totals.balanceCents)}
+            {formatCents(saldoAcumulado)}
+          </p>
+          <p className="mt-1 text-xs tabular-nums text-muted">
+            Inicia el mes: {formatCents(openingBalance)}
           </p>
         </Card>
       </div>

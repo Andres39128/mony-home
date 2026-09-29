@@ -23,6 +23,7 @@ import {
   listTransactions,
   quickMovementSchema,
   removeTransaction,
+  openingBalanceCents,
   transactionTotals,
   updateTransaction,
 } from "@/features/transactions/service";
@@ -206,6 +207,19 @@ describe("transactions service (integration on PGlite)", () => {
       expenseCents: 5_500,
       balanceCents: -5_500,
     });
+  });
+
+  it("carries the opening balance from previous months", async () => {
+    // Nothing before September → September opens at zero.
+    expect(await openingBalanceCents(appDb, { month: MONTH })).toBe(0);
+    // October opens with September's net: 100_000 − 30_500 = 69_500.
+    // The 2026-10-01 movement itself is NOT part of the opening (strictly before).
+    expect(await openingBalanceCents(appDb, { month: "2026-10" })).toBe(69_500);
+    // Same non-month filters apply: Ana's history before October is −5_500.
+    expect(await openingBalanceCents(appDb, { month: "2026-10", memberId: anaId })).toBe(-5_500);
+    // No month (or malformed) → no opening concept, 0.
+    expect(await openingBalanceCents(appDb, {})).toBe(0);
+    expect(await openingBalanceCents(appDb, { month: "nope" })).toBe(0);
   });
 
   it("matches a note substring case-insensitively (q filter)", async () => {
