@@ -10,6 +10,16 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 export async function createTestDb(): Promise<{ db: PgliteDatabase; client: PGlite }> {
   const client = new PGlite();
   const db = drizzle(client);
+  // PGlite is single-tenant and does NOT auto-create the Supabase API roles
+  // (anon, authenticated, authenticator). Migration 0014 references them in
+  // CREATE POLICY ... TO anon, authenticated, so we materialize them here
+  // before applying migrations — keeps the test env representative of the
+  // production Supabase role layout. The app still connects as the PGlite
+  // superuser, so RLS bypass continues to apply inside the test.
+  await client.exec(`
+    CREATE ROLE anon NOLOGIN;
+    CREATE ROLE authenticated NOLOGIN;
+  `);
   await migrate(db, {
     migrationsFolder: fileURLToPath(new URL("./migrations", import.meta.url)),
   });

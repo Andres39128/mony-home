@@ -99,6 +99,13 @@
       "when": 1790719245191,
       "tag": "0013_enable_rls_public",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790720464508,
+      "tag": "0014_rls_policies_public",
+      "breakpoints": true
     }
   ]
 }
