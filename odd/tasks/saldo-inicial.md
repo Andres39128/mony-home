@@ -35,15 +35,17 @@ El arrastre (`openingBalanceCents`) deriva del neto de TODA la historia previa: 
 ask-on-risk. Forecast ~150–250 líneas → un PR solo, bajo presupuesto.
 
 ## Tasks
-- [ ] T1: Seed categoría "Saldo inicial" + service `setOpeningBalance` + action + tests (service.test.ts: forbidden member, insert positive/negative, upsert update (incl. flip de signo → cambia type), fecha futura rechazada, categoría faltante, fila cuenta en transactionTotals/openingBalanceCents). Ruta: delegated (writer).
-- [ ] T2: UI /perfil (admin-only) con form + estado vigente + wiring de action. Ruta: delegated (mismo writer).
-- [ ] T3: Higiene + `npm run verify` completo. Ruta: delegated (mismo writer).
+- [x] T1 (commit 2833fedd2c38): seed categoría "Saldo inicial" + `setOpeningBalance` (admin-only, monto firmado, upsert de UNA fila, `now` inyectable) + action + 8 tests (forbidden, missing category, insert ±, flip de signo, fecha futura, inválidos). Ruta: delegated.
+- [x] T2 (commit 25abd3f32193): /perfil admin-only con OpeningBalanceCard (useActionState, date default/max serverToday). Ruta: delegated.
+- [x] T3: verify completo EXIT=0 (470/470, lint, typecheck, build). Sin huérfanos. Ruta: delegated.
+- [x] R3-001 fix (commit dccca5f7b587): advisory xact lock serializa el gap de primera inserción concurrente. 54/54. Assess: medium 8 líneas, review_due false (under_budget).
 
 ## Progress / evidence
-(vacío)
+- [x] RDD: assess medium 515 → consent granted → lineage review-9b8608ff3c9894ab, lens review-reliability → **approved + acknowledged**. Advisory R3-001 (raza de inserción) fixeado arriba.
+- Writer hallazgos: parseAmountCents soporta `-` nativo (sin stripping); "1.000" es ambiguous por diseño (compartido, no special-case); revalidación vía refresh() (convención Next 16 del repo).
 
 ## Next step
-Delegar T1–T3 a un writer; al volver: spot check + RDD assess + PR único.
+PR: 523 líneas > 400 → ask-on-risk activo (pregunta single+exception vs encadenado).
 
 ## Route declaration
 T1–T3 delegated (writer trigger: 2+ archivos no triviales).
