@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { loadConfig } from "@/lib/config";
 import { PLACEHOLDER_SEED_PASSWORD, seedDatabase } from "@/db/seed";
-import { budgets, categories, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
+import { appConfig, budgets, categories, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
 import { createTestDb } from "@/db/test-utils";
 
 /**
@@ -179,5 +179,35 @@ describe("seedDatabase", () => {
       /SEED_ADMIN_PASSWORD/,
     );
     expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("seeds app_config with the env currency/locale defaults (COP/es-CO)", async () => {
+    await seedDatabase(db, seedConfig());
+
+    const rows = await db.select().from(appConfig);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.key === "currencyCode")?.value).toBe("COP");
+    expect(rows.find((r) => r.key === "locale")?.value).toBe("es-CO");
+    expect(rows.every((r) => r.updatedAt instanceof Date)).toBe(true);
+  });
+
+  it("seeds app_config in production mode too (config is not demo data)", async () => {
+    await seedDatabase(db, loadConfig({ SEED_DEMO_DATA: "false", SEED_ADMIN_PASSWORD: SEED_PASSWORD }));
+
+    const rows = await db.select().from(appConfig);
+    expect(rows).toHaveLength(2);
+  });
+
+  it("upserts app_config on re-seed: env overrides win, keys never duplicate", async () => {
+    await seedDatabase(db, seedConfig());
+    await seedDatabase(
+      db,
+      loadConfig({ SEED_ADMIN_PASSWORD: SEED_PASSWORD, APP_CURRENCY: "ARS", APP_LOCALE: "es-AR" }),
+    );
+
+    const rows = await db.select().from(appConfig);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.key === "currencyCode")?.value).toBe("ARS");
+    expect(rows.find((r) => r.key === "locale")?.value).toBe("es-AR");
   });
 });

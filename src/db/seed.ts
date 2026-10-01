@@ -18,6 +18,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type AppConfig } from "../lib/config.ts";
+import { upsertAppConfig } from "../lib/app-settings.ts";
 import { budgets, categories, expenseGroups, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "./schema.ts";
 
 /** Any Postgres drizzle database — postgres-js in the CLI, PGlite in tests. */
@@ -67,6 +68,11 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     );
   }
   const password = config.SEED_ADMIN_PASSWORD;
+
+  // --- App config (always, both modes): currency/locale from env ---
+  // Upsert on purpose: re-running the seed re-asserts the env values, the
+  // same idempotent contract as the admin user below.
+  await upsertAppConfig(db, { currencyCode: config.APP_CURRENCY, locale: config.APP_LOCALE });
 
   // --- Admin user (always; username is unique; conflicts skipped) ---
   const passwordHash = await hash(password);

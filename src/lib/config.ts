@@ -25,6 +25,20 @@ const envSchema = z.object({
   /** Human-readable app name; later sent to OpenRouter as the X-Title attribution header. */
   APP_NAME: z.string().min(1).default("mony-home"),
   /**
+   * Currency the household's instance runs in (ISO 4217, 3 letters). Seeded
+   * into app_config by `npm run db:seed`; the admin Configuración page can
+   * change it afterwards. This is a seed-time default only — the DB row wins.
+   */
+  APP_CURRENCY: z
+    .string()
+    .regex(/^[A-Z]{3}$/, "Usá el código ISO de 3 letras (ej: COP)")
+    .default("COP"),
+  /** BCP-47 locale used to format amounts/dates alongside APP_CURRENCY. */
+  APP_LOCALE: z
+    .string()
+    .regex(/^[a-z]{2}-[A-Z]{2}$/, "Usá el formato idioma-PAÍS (ej: es-CO)")
+    .default("es-CO"),
+  /**
    * Password (pre-hash) assigned to the seeded admin user by `npm run db:seed`.
    * Optional (seeding is a manual step), with NO default. Strength and
    * placeholder rejection are enforced by the seed script itself (PLACEHOLDER

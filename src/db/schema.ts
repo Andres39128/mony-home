@@ -624,3 +624,17 @@ export const recurringMovements = pgTable(
     ),
   ],
 );
+
+/**
+ * App-wide configuration key/value store (migration 0015). Two rows seeded
+ * from APP_CURRENCY/APP_LOCALE by `npm run db:seed` (currencyCode, locale),
+ * editable later from the admin Configuración page through
+ * src/lib/app-settings.ts. No user column: settings are instance-global for
+ * the single household this app serves. RLS deny-all (same as every table) —
+ * only the app's direct connection touches it.
+ */
+export const appConfig = pgTable("app_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
