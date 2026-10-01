@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import {
+  openingBalanceCents,
   transactionTotals,
   type TransactionFilters,
 } from "@/features/transactions/service";
@@ -184,16 +185,22 @@ export default async function DashboardPage({
   // accrual engines).
   await catchUpRecurringMovements(getDb());
 
-  const [options, totals, slices, monthlyRows, budgetMonth, cumulativeRows, patrimony] =
+  const [options, totals, openingBalance, slices, monthlyRows, budgetMonth, cumulativeRows, patrimony] =
     await Promise.all([
       movementFormOptions(getDb()),
       transactionTotals(getDb(), filters),
+      openingBalanceCents(getDb(), filters),
       expensesByCategory(getDb(), filters),
       monthlyTotals(getDb(), month, DEFAULT_MONTHS_BACK, filters),
       getMonth(getDb(), month),
       cumulativeBudgetVsActual(getDb(), Number(month.slice(0, 4)), filters),
       getPatrimony(getDb()),
     ]);
+
+  // Same saldo semantics as /movimientos: the month never starts at zero —
+  // previous months left positive or negative. Card purchases never drag
+  // (debt); the hero shows the CASH accumulated saldo.
+  const saldoAcumulado = openingBalance + totals.balanceCents;
 
   const donutData = buildDonutData(slices);
   const barsData = buildBarsData(monthlyRows);
@@ -306,15 +313,21 @@ export default async function DashboardPage({
         </label>
       </FiltersSheet>
 
-      {/* KPI strip: the period's net CASH balance leads as the hero figure;
-          below it the income/cash-expense/card-debt/budget row and the
+      {/* KPI strip: the ACCUMULATED cash saldo (arrastre + this month's net)
+          leads as the hero figure — the same number /movimientos shows, so a
+          month's surplus is never "lost" at the turn of the month. Below it
+          the period income/cash-expense/card-debt/budget row and the
           patrimony link. */}
       <div data-tour="dashboard-kpis" className="flex flex-col gap-4">
         <Card className="p-5">
-          <h2 className="text-sm font-medium text-muted">Saldo del período</h2>
+          <h2 className="text-sm font-medium text-muted">Saldo</h2>
           <p
-            className={`mt-2 inline-block rounded-xl px-3 py-1 text-3xl font-semibold tabular-nums sm:text-4xl ${balanceHeroClass(totals.balanceCents)}`}
+            className={`mt-2 inline-block rounded-xl px-3 py-1 text-3xl font-semibold tabular-nums sm:text-4xl ${balanceHeroClass(saldoAcumulado)}`}
           >
+            {formatCents(saldoAcumulado)}
+          </p>
+          <p className="mt-1 text-xs tabular-nums text-muted">
+            Inicia el mes: {formatCents(openingBalance)} · Neto del mes:{" "}
             {formatCents(totals.balanceCents)}
           </p>
         </Card>
