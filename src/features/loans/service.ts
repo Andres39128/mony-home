@@ -1337,20 +1337,6 @@ export async function updateOutstanding(
 }
 
 // ---------------------------------------------------------------------------
-// Patrimony helper
-// ---------------------------------------------------------------------------
-
-/**
- * Total household debt across ALL loans (active or not — deactivating a
- * tracker does not forgive the debt): the sum of computed outstanding
- * balances. Runs the lazy catch-up first so charges are current.
- */
-export async function getDebtCents(db: Database): Promise<number> {
-  const loanRows = await listLoans(db);
-  return loanRows.reduce((total, loan) => total + Math.max(loan.outstandingCents, 0), 0);
-}
-
-// ---------------------------------------------------------------------------
 // Bank period statement (D5)
 // ---------------------------------------------------------------------------
 

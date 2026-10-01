@@ -37,18 +37,6 @@ export async function clearSessionCookie(): Promise<void> {
 const readSessionUser = cache(async (token: string) => getSessionUser(getDb(), token));
 
 /**
- * Current session user from the request cookie, or null.
- * Applies sliding renewal to the DB session; the cookie maxAge is refreshed
- * opportunistically when the context allows it (see requireUser).
- */
-export async function getOptionalUser(): Promise<SessionUser | null> {
-  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return null;
-  const info = await readSessionUser(token);
-  return info?.user ?? null;
-}
-
-/**
  * Guard for (app) routes: redirects to /login without a valid session.
  *
  * When sliding renewal fires, the cookie is refreshed opportunistically:

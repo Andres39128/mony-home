@@ -279,14 +279,6 @@ export async function listTransactionsPage(
   return { rows, total, page: safePage, pageSize };
 }
 
-export async function getTransaction(
-  db: Database,
-  id: string,
-): Promise<TransactionView | null> {
-  const rows = await baseQuery(db).where(eq(transactions.id, id)).limit(1);
-  return rows[0] ?? null;
-}
-
 /**
  * Receipt bytes for the API route: returns the stored image and its declared
  * MIME type, or null when the receipt is missing OR not owned — a member may

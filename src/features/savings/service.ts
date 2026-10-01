@@ -716,7 +716,7 @@ export async function getPatrimony(
 ): Promise<Patrimony> {
   goals ??= await listGoals(db);
   loans ??= await listLoans(db);
-  // Same clamp as getDebtCents (a saldo a favor never subtracts) plus the
+  // A saldo a favor never subtracts, plus the
   // property side — both computed over the rows we already hold.
   const debtCents = loans.reduce(
     (total, loan) => total + Math.max(loan.outstandingCents, 0),
