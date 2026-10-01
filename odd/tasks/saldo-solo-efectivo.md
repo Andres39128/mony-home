@@ -51,7 +51,7 @@ ask-on-risk (default). Forecast ~350–500 líneas changed con tests → probabl
 - [x] Verificación (writer, foreground): suites tocadas 203/204 passed; 1 fallo preexistente en main (loans/accrual.test.ts:273, dependiente del reloj — probado con stash en main b55adacc97b3). lint 0, typecheck 0, build OK.
 - [x] Spot check padre: diff stat confirmado; hunks nucleares releídos (split case-when, espejo capital con CASCADE); transactions suite re-ejecutada 46/46.
 - [x] RDD: assess medium (slice_budget_reached, 604 líneas) → consent granted → review lineage review-c61cbc7dbb628b1f, lens review-reliability → **approved + acknowledged** (authority burned).
-- [!] R3-001 (WARNING informativo, no bloqueante, trabajo futuro): addCardPayment exige "Pago de tarjetas" incondicionalmente — un pago all-finance (capital 0) fallaría con system_category_missing aunque no insertaría espejo; path sin test. Fix trivial: condicionar la exigencia a capitalCents > 0.
+- [x] R3-001 fixeado (commit dba827169766): `capitalCents` se calcula antes de los checks; "Pago de tarjetas" se exige solo si `capitalCents > 0`; test de regresión renombrando la categoría (FK intacta). 42/42 loans suite, typecheck OK. RDD: assess medium 58 líneas, review_due false (under_budget).
 
 ## Next step
 Entrega: >400 líneas → decisión del usuario (ask-on-risk): single PR con size:exception vs chained PRs. Push/PR restan decisión humana.
