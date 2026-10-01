@@ -1,4 +1,4 @@
-# Feature: Saldo inicial como movimiento de ajuste (opción A)
+# Feature: Saldo inicial como movimiento de ajuste (opción A) — ✅ ENTREGADO
 
 ## Objective
 Anclar el saldo de la app a la plata real: un movimiento de sistema "Saldo inicial" (ingreso si es positivo, gasto si se arranca en rojo) que el arrastre ya suma automáticamente. Sin schema, sin estado nuevo — el ledger sigue siendo la única fuente de verdad.
@@ -45,7 +45,7 @@ ask-on-risk. Forecast ~150–250 líneas → un PR solo, bajo presupuesto.
 - Writer hallazgos: parseAmountCents soporta `-` nativo (sin stripping); "1.000" es ambiguous por diseño (compartido, no special-case); revalidación vía refresh() (convención Next 16 del repo).
 
 ## Next step
-PR: 523 líneas > 400 → ask-on-risk activo (pregunta single+exception vs encadenado).
+ENTREGADO 2026-10-01: PR#11 mergeado (3aaced34c8, merge commit, CI verde), seed production-mode corrido, categoría "Saldo inicial" verificada en prod (admins: 1 intacto, 0 filas de ajuste — se crea desde /perfil cuando el admin la defina). Deploy note: el ajuste inicial lo carga el admin desde /perfil al empezar.
 
 ## Route declaration
 T1–T3 delegated (writer trigger: 2+ archivos no triviales).
