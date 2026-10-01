@@ -1204,6 +1204,7 @@ export async function updateOutstanding(
   user: SessionUser,
   loanId: string,
   newOutstanding: string,
+  now: Date = new Date(),
 ): Promise<OutstandingResult> {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
 
@@ -1231,7 +1232,10 @@ export async function updateOutstanding(
       .for("update");
     if (!loan) return;
 
-    const today = todayIso();
+    // Injectable clock (same pattern as listCardCycles): the true-up date
+    // decides which accrual day runs on the rebased saldo — tests inject a
+    // fixed date so the same-day ordering never depends on the real today.
+    const today = todayIso(now);
     // Drop today's earlier adjustment first (same-day converge), then
     // recompute: repeated corrections converge to the latest stated value.
     await tx

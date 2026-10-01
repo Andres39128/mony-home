@@ -260,8 +260,13 @@ describe("catchUpInterest (integration on PGlite)", () => {
       })
       .returning();
 
-    // Statement says $1.000: +80000 as ONE "Ajuste de saldo" row.
-    expect(await updateOutstanding(appDb, user, loan.id, "1.000,00")).toEqual({ ok: true });
+    // Statement says $1.000: +80000 as ONE "Ajuste de saldo" row. Fixed
+    // clock: the true-up lands 2026-09-20 so the 2026-10-01 accrual always
+    // runs on the rebased saldo (a real today between Oct 1 and Nov 18
+    // would same-day-collide with the Oct row and flip the expectation).
+    expect(
+      await updateOutstanding(appDb, user, loan.id, "1.000,00", new Date("2026-09-20T00:00:00Z")),
+    ).toEqual({ ok: true });
     let rows = await ledgerRows(db, loan.id);
     const ajuste = rows.find((r) => r.note === "Ajuste de saldo")!;
     expect(ajuste).toMatchObject({ kind: "interest", memberId: null, amountCents: 80_000 });
