@@ -49,7 +49,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "dashboard-kpis",
       title: "Resumen del mes",
       description:
-        "Ingresos, gastos, saldo y porcentaje del presupuesto ejecutado. La barra del presupuesto muestra cuánto llevás gastado del total planificado.",
+        "Ingresos, gastos en efectivo, compras con tarjeta, saldo y porcentaje del presupuesto ejecutado. Las compras con tarjeta no descuentan del saldo: son deuda de la tarjeta. La barra del presupuesto muestra cuánto llevás gastado del total planificado.",
     },
     {
       id: "dashboard-patrimonio",
@@ -181,7 +181,7 @@ export const TOURS: Record<string, readonly TourStep[]> = {
       element: "movimientos-totales",
       title: "Totales del período",
       description:
-        "Suma de ingresos, gastos y saldo según los filtros aplicados.",
+        "Ingresos, gastos en efectivo, compras con tarjeta (no descuentan del saldo) y saldo, según los filtros aplicados.",
     },
     {
       id: "movimientos-tabla",

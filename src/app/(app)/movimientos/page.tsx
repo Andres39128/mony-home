@@ -121,8 +121,10 @@ export default async function MovimientosPage({
     });
   }
 
-  // Saldo real: what the month opened with (arrastre) plus this month's net.
-  // A month never starts at zero — previous months left positive or negative.
+  // Saldo real (cash-basis): what the month opened with (arrastre) plus this
+  // month's CASH net. A month never starts at zero — previous months left
+  // positive or negative. Card purchases are debt: they show in the Tarjeta
+  // card and only hit the saldo when the card is paid.
   const saldoAcumulado = openingBalance + totals.balanceCents;
 
   const balanceClass =
@@ -249,7 +251,9 @@ export default async function MovimientosPage({
         </label>
       </FiltersSheet>
 
-      <div data-tour="movimientos-totales" className="grid gap-4 sm:grid-cols-3">
+      {/* Cash-basis KPIs: Gastos is cash only; card purchases sit apart in
+          Tarjeta (debt) and reach the saldo via the card payment mirror. */}
+      <div data-tour="movimientos-totales" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="p-5">
           <h2 className="text-sm font-medium text-muted">Ingresos</h2>
           <p className={`mt-1 text-2xl font-semibold tabular-nums ${CHIP_INCOME}`}>
@@ -260,6 +264,16 @@ export default async function MovimientosPage({
           <h2 className="text-sm font-medium text-muted">Gastos</h2>
           <p className={`mt-1 text-2xl font-semibold tabular-nums ${CHIP_EXPENSE}`}>
             {formatCents(totals.expenseCents)}
+          </p>
+          <p className="mt-1 text-xs tabular-nums text-muted">En efectivo</p>
+        </Card>
+        <Card className="p-5">
+          <h2 className="text-sm font-medium text-muted">Tarjeta</h2>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
+            {formatCents(totals.cardExpenseCents)}
+          </p>
+          <p className="mt-1 text-xs tabular-nums text-muted">
+            Compras del mes · no descuenta del saldo
           </p>
         </Card>
         <Card className="p-5">
