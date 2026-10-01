@@ -16,6 +16,7 @@ import {
   LogoutIcon,
   PouchIcon,
   RepeatIcon,
+  SettingsIcon,
   SparklesIcon,
   TagIcon,
   UserIcon,
@@ -40,6 +41,7 @@ const MENU_LINKS = [
   { href: "/integrantes", label: "Integrantes", Icon: UsersIcon },
   { href: "/categorias", label: "Categorías", Icon: TagIcon },
   { href: "/grupos", label: "Grupos", Icon: LayersIcon },
+  { href: "/configuracion", label: "Configuración", Icon: SettingsIcon },
 ] as const;
 
 function isActive(pathname: string, href: string) {
