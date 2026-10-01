@@ -13,8 +13,17 @@
  * every gasto figure: card purchases are card debt, not budget execution.
  * Household income and expense context REUSES
  * transactions.transactionTotals (never duplicated).
+ *
+ * Rollover (roadmap F2): every row also carries the NET carry of its
+ * category — the accumulated plan − spent of EVERY month strictly before
+ * the requested one, positive AND negative, the same honest-accumulation
+ * philosophy as the transactions saldo. The carry rule for months WITHOUT
+ * a budget row is plan = 0: an unbudgeted month contributes only its
+ * (negative) spend, so overspending without a plan still debits the
+ * category's carry — computed, zero new state (follows
+ * transactions.openingBalanceCents' lt(month-start) windowing).
  */
-import { and, asc, eq, inArray, sum } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, sum } from "drizzle-orm";
 import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { parseAmountToCents, percentage } from "@/lib/money";
@@ -36,11 +45,21 @@ export interface BudgetRowView {
   pct: number;
   remainingCents: number;
   status: ProgressStatus;
+  /** Net accumulated plan − spent of every month STRICTLY before this one. */
+  carryCents: number;
+  /** plannedCents + carryCents — the money honestly left to spend. */
+  availableCents: number;
 }
 
 export interface BudgetMonthView {
   rows: BudgetRowView[];
-  totals: { plannedCents: number; spentCents: number; pct: number };
+  totals: {
+    plannedCents: number;
+    spentCents: number;
+    pct: number;
+    carryCents: number;
+    availableCents: number;
+  };
   context: { incomeCents: number; expenseCents: number };
   /** Categories whose spend already exceeded their plan (status 'over'). */
   overCount: number;
@@ -73,45 +92,82 @@ export async function getMonth(
   const bounds = monthBounds(month);
   if (!bounds) return null;
 
-  const [categoryRows, budgetRows, spentRows, context] = await Promise.all([
-    db
-      .select({ id: categories.id, name: categories.name, color: categories.color })
-      .from(categories)
-      .where(and(eq(categories.kind, "expense"), eq(categories.isActive, true)))
-      .orderBy(asc(categories.name)),
-    db
-      .select({ categoryId: budgets.categoryId, amountCents: budgets.amountCents })
-      .from(budgets)
-      .where(eq(budgets.month, bounds.start)),
-    db
-      .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
-      .from(transactions)
-      // Cash-basis execution: completed cash expenses of the month (the
-      // shared builders apply the identical bounds/pending/cash rules the
-      // analytics aggregates use — no diverging copy).
-      .where(completedOnly(cashOnly(filtersWhere({ month, type: "expense" }))))
-      .groupBy(transactions.categoryId),
-    transactionTotals(db, { month }),
-  ]);
+  const [categoryRows, budgetRows, spentRows, carryPlannedRows, carrySpentRows, context] =
+    await Promise.all([
+      db
+        .select({ id: categories.id, name: categories.name, color: categories.color })
+        .from(categories)
+        .where(and(eq(categories.kind, "expense"), eq(categories.isActive, true)))
+        .orderBy(asc(categories.name)),
+      db
+        .select({ categoryId: budgets.categoryId, amountCents: budgets.amountCents })
+        .from(budgets)
+        .where(eq(budgets.month, bounds.start)),
+      db
+        .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
+        .from(transactions)
+        // Cash-basis execution: completed cash expenses of the month (the
+        // shared builders apply the identical bounds/pending/cash rules the
+        // analytics aggregates use — no diverging copy).
+        .where(completedOnly(cashOnly(filtersWhere({ month, type: "expense" }))))
+        .groupBy(transactions.categoryId),
+      // Rollover aggregates, bounded to every month STRICTLY before this one
+      // (no lower bound needed: nothing exists before the history start).
+      db
+        .select({ categoryId: budgets.categoryId, planned: sum(budgets.amountCents) })
+        .from(budgets)
+        .where(lt(budgets.month, bounds.start))
+        .groupBy(budgets.categoryId),
+      // The carry's "spent" side uses the SAME cash-basis rule as the
+      // month's execution figure — completed cash expenses only.
+      db
+        .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
+        .from(transactions)
+        .where(
+          completedOnly(
+            cashOnly(and(eq(transactions.type, "expense"), lt(transactions.date, bounds.start))),
+          ),
+        )
+        .groupBy(transactions.categoryId),
+      transactionTotals(db, { month }),
+    ]);
 
   const plannedByCategory = new Map(budgetRows.map((row) => [row.categoryId, row.amountCents]));
   const spentByCategory = new Map(spentRows.map((row) => [row.categoryId, Number(row.spent ?? 0)]));
 
+  // Net carry per category: total prior plan (0 for unbudgeted months —
+  // the documented rule) minus total prior cash spend.
+  const carryByCategory = new Map<string, number>();
+  for (const row of carryPlannedRows) {
+    carryByCategory.set(row.categoryId, Number(row.planned ?? 0));
+  }
+  for (const row of carrySpentRows) {
+    if (row.categoryId === null) continue; // pending rows have no category
+    carryByCategory.set(
+      row.categoryId,
+      (carryByCategory.get(row.categoryId) ?? 0) - Number(row.spent ?? 0),
+    );
+  }
+
   const rows = categoryRows.map((category) => {
     const plannedCents = plannedByCategory.get(category.id) ?? 0;
     const spentCents = spentByCategory.get(category.id) ?? 0;
+    const carryCents = carryByCategory.get(category.id) ?? 0;
     return {
       categoryId: category.id,
       categoryName: category.name,
       color: category.color,
       plannedCents,
       spentCents,
+      carryCents,
+      availableCents: plannedCents + carryCents,
       ...computeProgress(plannedCents, spentCents),
     };
   });
 
   const totalsPlannedCents = rows.reduce((total, row) => total + row.plannedCents, 0);
   const totalsSpentCents = rows.reduce((total, row) => total + row.spentCents, 0);
+  const totalsCarryCents = rows.reduce((total, row) => total + row.carryCents, 0);
 
   return {
     rows,
@@ -119,6 +175,8 @@ export async function getMonth(
       plannedCents: totalsPlannedCents,
       spentCents: totalsSpentCents,
       pct: percentage(totalsSpentCents, totalsPlannedCents),
+      carryCents: totalsCarryCents,
+      availableCents: totalsPlannedCents + totalsCarryCents,
     },
     context: { incomeCents: context.incomeCents, expenseCents: context.expenseCents },
     overCount: rows.filter((row) => row.status === "over").length,

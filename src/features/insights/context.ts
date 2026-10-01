@@ -165,7 +165,15 @@ export interface FinanceContext {
     cardExpenseCents: number;
     balanceCents: number;
     /** null when the month has no budget with planned > 0. */
-    budget: { plannedCents: number; spentCents: number; pct: number } | null;
+    budget: {
+      plannedCents: number;
+      spentCents: number;
+      pct: number;
+      /** NET rollover of prior months (plan − spent, budgeted or not). */
+      carryCents: number;
+      /** plannedCents + carryCents — the honest money left. */
+      availableCents: number;
+    } | null;
   };
   topExpenseCategories: ContextCategory[];
   /** Rollup of everything outside the top N; null when there is nothing left. */
@@ -382,6 +390,8 @@ export async function buildFinanceContext(
               plannedCents: budgetView.totals.plannedCents,
               spentCents: budgetView.totals.spentCents,
               pct: budgetView.totals.pct,
+              carryCents: budgetView.totals.carryCents,
+              availableCents: budgetView.totals.availableCents,
             }
           : null,
     },
@@ -523,6 +533,8 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
             planificado: ar(summary.budget.plannedCents),
             gastado: ar(summary.budget.spentCents),
             porcentaje: `${String(summary.budget.pct).replace(".", ",")}%`,
+            arrastre: ar(summary.budget.carryCents),
+            disponible: ar(summary.budget.availableCents),
           }
         : "sin presupuesto para este mes",
     },

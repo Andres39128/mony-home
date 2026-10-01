@@ -136,12 +136,21 @@ describe("insights context (integration on PGlite)", () => {
     // Budget totals reuse budgets.getMonth semantics: spent is the CASH
     // expenses of the month against the plan — the same numbers the
     // /presupuesto page shows (card purchases are debt, never execution).
+    // Carry (rollover) is the NET prior history per category: no prior
+    // budgets existed, so it is minus ALL prior cash spend (July Varios
+    // 100.000 + August 263.000) — unbudgeted months still debit.
     expect(ctx.summary).toEqual({
       incomeCents: 800_000,
       expenseCents: 306_000,
       cardExpenseCents: 0,
       balanceCents: 494_000,
-      budget: { plannedCents: 150_000, spentCents: 306_000, pct: 204 },
+      budget: {
+        plannedCents: 150_000,
+        spentCents: 306_000,
+        pct: 204,
+        carryCents: -363_000,
+        availableCents: -213_000,
+      },
     });
   });
 

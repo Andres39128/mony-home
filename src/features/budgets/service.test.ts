@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, transactions, users } from "@/db/schema";
+import { budgets, categories, loans, transactions, users } from "@/db/schema";
 import {
   copyFromPreviousMonth,
   getMonth,
@@ -28,9 +28,10 @@ describe("budgets service (integration on PGlite)", () => {
   let member: SessionUser;
   let memberId: string;
   let superId: string;
-  let ocioId: string;
   let sueldoId: string;
   let inactivaId: string;
+  let ocioId: string;
+  let transporteId: string;
 
   /** Fixture: two expenses for Super inside 2026-09, one outside, one income. */
   async function seedSeptemberMovements(): Promise<void> {
@@ -73,6 +74,7 @@ describe("budgets service (integration on PGlite)", () => {
     ocioId = byName.get("Ocio")!;
     sueldoId = byName.get("Sueldo")!;
     inactivaId = byName.get("Vieja")!;
+    transporteId = byName.get("Transporte")!;
   });
 
   afterAll(async () => {
@@ -119,6 +121,8 @@ describe("budgets service (integration on PGlite)", () => {
       plannedCents: 150050,
       spentCents: 19134,
       pct: 12.75,
+      carryCents: 0,
+      availableCents: 150050,
     });
     // Context comes from transactions.totals (income ignored for expense sums).
     expect(view.context).toEqual({ incomeCents: 1000000, expenseCents: 19134 });
@@ -230,5 +234,155 @@ describe("budgets service (integration on PGlite)", () => {
   it("computes the previous month across the year boundary", () => {
     expect(previousMonth("2026-09")).toBe("2026-08");
     expect(previousMonth("2026-01")).toBe("2025-12");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Rollover (F2): net carry per category. These use the Transporte category
+  // in Jan–Jul 2026 — months/categories the earlier tests never touch — and
+  // clean up after themselves so the shared DB stays unpolluted.
+  // ---------------------------------------------------------------------------
+
+  /** Wipes Transporte's Jan–Jul 2026 trace: budgets cleared, movements gone.
+   * Runs at the START of each carry test too, so a failed sibling test can
+   * never cascade its leftovers into the next assertion. */
+  async function cleanupCarryFixture(): Promise<void> {
+    await db
+      .delete(transactions)
+      .where(
+        and(eq(transactions.categoryId, transporteId), lt(transactions.date, "2026-08-01")),
+      );
+    await db.delete(loans).where(eq(loans.name, "Visa carry"));
+    for (const month of ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]) {
+      await setForMonth(appDb, admin, month, []);
+    }
+  }
+
+  it("carry: zero on the first month — disponible equals the plan", async () => {
+    await cleanupCarryFixture();
+    await setForMonth(appDb, admin, "2026-01", [{ categoryId: transporteId, amount: "1.000,00" }]);
+    const view = await getMonth(appDb, "2026-01");
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const row = view.rows.find((item) => item.categoryId === transporteId)!;
+    expect(row.carryCents).toBe(0);
+    expect(row.availableCents).toBe(100_000);
+    expect(view.totals.carryCents).toBe(0);
+    expect(view.totals.availableCents).toBe(view.totals.plannedCents);
+    await cleanupCarryFixture();
+  });
+
+  it("carry: positive after under-spend; card purchases never drag", async () => {
+    await cleanupCarryFixture();
+    await setForMonth(appDb, admin, "2026-02", [{ categoryId: transporteId, amount: "1.000,00" }]);
+    await db.insert(transactions).values({
+      date: "2026-02-10",
+      amountCents: 40_000,
+      type: "expense",
+      categoryId: transporteId,
+      memberId,
+    });
+    await setForMonth(appDb, admin, "2026-04", [{ categoryId: transporteId, amount: "500,00" }]);
+
+    const view = await getMonth(appDb, "2026-04");
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const row = view.rows.find((item) => item.categoryId === transporteId)!;
+    expect(row.carryCents).toBe(60_000); // 1.000 − 400
+    expect(row.availableCents).toBe(110_000); // 500 + 600
+    expect(view.totals.availableCents).toBe(
+      view.totals.plannedCents + view.totals.carryCents,
+    );
+
+    // A card purchase is DEBT, not budget execution: it must not drag.
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa carry",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000_000,
+      })
+      .returning();
+    await db.insert(transactions).values({
+      date: "2026-02-11",
+      amountCents: 25_000,
+      type: "expense",
+      categoryId: transporteId,
+      memberId,
+      paymentMethod: "card",
+      cardLoanId: card.id,
+    });
+    const afterCard = await getMonth(appDb, "2026-04");
+    expect(
+      afterCard?.rows.find((item) => item.categoryId === transporteId)?.carryCents,
+    ).toBe(60_000);
+
+    await cleanupCarryFixture();
+  });
+
+  it("carry: negative after over-spend", async () => {
+    await cleanupCarryFixture();
+    await setForMonth(appDb, admin, "2026-02", [{ categoryId: transporteId, amount: "1.000,00" }]);
+    await db.insert(transactions).values({
+      date: "2026-02-10",
+      amountCents: 200_000,
+      type: "expense",
+      categoryId: transporteId,
+      memberId,
+    });
+    await setForMonth(appDb, admin, "2026-04", [{ categoryId: transporteId, amount: "500,00" }]);
+
+    const view = await getMonth(appDb, "2026-04");
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const row = view.rows.find((item) => item.categoryId === transporteId)!;
+    expect(row.carryCents).toBe(-100_000); // 1.000 − 2.000
+    expect(row.availableCents).toBe(-50_000); // 500 − 1.000
+    await cleanupCarryFixture();
+  });
+
+  it("carry: skips future months entirely", async () => {
+    await cleanupCarryFixture();
+    // June's budget and spend are STRICTLY AFTER April — they must not
+    // leak into April's carry.
+    await setForMonth(appDb, admin, "2026-06", [{ categoryId: transporteId, amount: "9.000,00" }]);
+    await db.insert(transactions).values({
+      date: "2026-06-10",
+      amountCents: 30_000,
+      type: "expense",
+      categoryId: transporteId,
+      memberId,
+    });
+
+    const view = await getMonth(appDb, "2026-04");
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const row = view.rows.find((item) => item.categoryId === transporteId)!;
+    expect(row.carryCents).toBe(0);
+    expect(row.availableCents).toBe(0); // no April budget either
+    await cleanupCarryFixture();
+  });
+
+  it("carry: unbudgeted prior months contribute their spend (net rule, plan defaults 0)", async () => {
+    await cleanupCarryFixture();
+    await setForMonth(appDb, admin, "2026-02", [{ categoryId: transporteId, amount: "1.000,00" }]);
+    await db.insert(transactions).values([
+      // Budgeted February: 1.000 − 400 = +600.
+      { date: "2026-02-10", amountCents: 40_000, type: "expense", categoryId: transporteId, memberId },
+      // UNBUDGETED March: plan 0 − 800 = −800. The spend still debits.
+      { date: "2026-03-10", amountCents: 80_000, type: "expense", categoryId: transporteId, memberId },
+    ]);
+    await setForMonth(appDb, admin, "2026-04", [{ categoryId: transporteId, amount: "500,00" }]);
+
+    const view = await getMonth(appDb, "2026-04");
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const row = view.rows.find((item) => item.categoryId === transporteId)!;
+    expect(row.carryCents).toBe(-20_000); // 600 − 800
+    expect(row.availableCents).toBe(30_000); // 500,00 plan + (−200,00) carry
+    await cleanupCarryFixture();
   });
 });

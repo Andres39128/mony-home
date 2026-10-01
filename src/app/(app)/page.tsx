@@ -184,7 +184,13 @@ export default async function DashboardPage({
   const donutData = buildDonutData(slices);
   const barsData = buildBarsData(monthlyRows);
   const linesData = buildLinesData(cumulativeRows);
-  const budgetTotals = budgetMonth?.totals ?? { plannedCents: 0, spentCents: 0, pct: 0 };
+  const budgetTotals = budgetMonth?.totals ?? {
+    plannedCents: 0,
+    spentCents: 0,
+    pct: 0,
+    carryCents: 0,
+    availableCents: 0,
+  };
   const budgetProgress = computeProgress(budgetTotals.plannedCents, budgetTotals.spentCents);
 
   // Removable chips: one per set filter, each linking to the URL minus it.
