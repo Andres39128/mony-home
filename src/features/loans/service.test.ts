@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { asc, eq } from "drizzle-orm";
+import { asc, and, eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
@@ -1088,6 +1088,7 @@ describe("revolving cards (integration on PGlite)", () => {
     appDb = db as unknown as Database;
     await db.insert(categories).values([
       { name: "Pago de préstamos", kind: "expense" },
+      { name: "Pago de tarjetas", kind: "expense" },
       { name: "Intereses de tarjetas", kind: "expense" },
       { name: "Cuota de manejo de tarjetas", kind: "expense" },
       { name: "Supermercado", kind: "expense" },
@@ -1220,13 +1221,25 @@ describe("revolving cards (integration on PGlite)", () => {
     expect(feeRow.amountCents).toBe(5_000_000);
     expect(feeRow.note).toBe(CARD_FEE_NOTE);
 
-    // ONLY the finance costs mirror — never the capital (the purchase was
-    // already the expense; mirroring again would double-count).
-    const mirrors = await db
+    // The capital mirrors the CASH outflow: total − interés − manejo
+    // = 70.000.000 − 10.000.000 − 5.000.000. This payment is an OVERPAYMENT
+    // (card debt was only 400.000) — the mirror formula is unchanged, the
+    // cash left the household anyway. Linked to the payment row: CASCADE
+    // keeps stats and ledger in lockstep.
+    const capitalMirror = await db
       .select()
       .from(transactions)
       .where(eq(transactions.loanPaymentId, paymentRow.id));
-    expect(mirrors).toHaveLength(0);
+    expect(capitalMirror).toHaveLength(1);
+    expect(capitalMirror[0]).toMatchObject({
+      amountCents: 55_000_000,
+      type: "expense",
+      categoryId: (
+        await db.select({ id: categories.id }).from(categories).where(eq(categories.name, "Pago de tarjetas"))
+      )[0].id,
+      memberId: payerId,
+      note: "Pago Visa Oro",
+    });
     const interestMirror = await db
       .select()
       .from(transactions)
@@ -1251,6 +1264,31 @@ describe("revolving cards (integration on PGlite)", () => {
     const card = (await listLoans(appDb)).find((l) => l.id === cardId)!;
     expect(card.outstandingCents).toBe(400_000 + 10_000_000 + 5_000_000 - 70_000_000);
     expect(card.availableCents).toBe(100_000_000);
+  });
+
+  it("an all-finance payment mirrors NO capital row (nothing amortized)", async () => {
+    // Total exactly = the included cuota de manejo → the amortizing portion
+    // is zero: no 0-cent expense row, and no interest involved.
+    expect(
+      await addCardPayment(appDb, member, cardId, cardPayment("50.000,00", { includeFee: "1" })),
+    ).toEqual({ ok: true });
+    const [paymentRow] = await db
+      .select()
+      .from(loanPayments)
+      .where(
+        and(
+          eq(loanPayments.loanId, cardId),
+          eq(loanPayments.kind, "payment"),
+          eq(loanPayments.amountCents, 5_000_000),
+        ),
+      )
+      .limit(1);
+    expect(paymentRow.kind).toBe("payment");
+    const capitalMirrors = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.loanPaymentId, paymentRow.id));
+    expect(capitalMirrors).toHaveLength(0);
   });
 
   it("rejects card payments with typed errors", async () => {

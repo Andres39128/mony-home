@@ -8,7 +8,9 @@
  * they test against PGlite like every other service.
  *
  * Movement-side conditions come from transactions.filtersWhere — ONE place
- * builds transaction WHERE clauses for the whole app. Money is ALWAYS
+ * builds transaction WHERE clauses for the whole app. Expense aggregations
+ * are CASH-BASIS: they compose transactions.cashOnly so "Gastos" means cash
+ * spent (card purchases are card debt, shown apart). Money is ALWAYS
  * integer cents; percentages via money.percentage (2 decimals, 0 on
  * divide-by-zero).
  */
@@ -17,6 +19,7 @@ import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { percentage } from "@/lib/money";
 import {
+  cashOnly,
   completedOnly,
   filtersWhere,
   type TransactionFilters,
@@ -33,12 +36,13 @@ export interface CategoryExpenseSlice {
   pct: number;
 }
 
-/** Expense-only total grouped by category, biggest first, honoring filters. */
+/** Cash expense total grouped by category, biggest first, honoring filters. */
 export async function expensesByCategory(
   db: Database,
   filters: TransactionFilters = {},
 ): Promise<CategoryExpenseSlice[]> {
-  // The chart is about expenses; the type filter is forced, never inherited.
+  // The chart is about cash expenses; the type filter is forced, never
+  // inherited. Card purchases are card debt → cashOnly excludes them.
   // Pending quick-capture rows are placeholders, not money → excluded.
   const rows = await db
     .select({
@@ -51,7 +55,7 @@ export async function expensesByCategory(
     })
     .from(transactions)
     .innerJoin(categories, eq(transactions.categoryId, categories.id))
-    .where(completedOnly(filtersWhere({ ...filters, type: "expense" })))
+    .where(completedOnly(cashOnly(filtersWhere({ ...filters, type: "expense" }))))
     .groupBy(categories.id, categories.name, categories.color)
     .orderBy(desc(sum(transactions.amountCents)));
 
@@ -71,11 +75,11 @@ export interface MonthlyTotal {
 export const DEFAULT_MONTHS_BACK = 12;
 
 /**
- * Income/expense totals for the `monthsBack` months ending at `endingMonth`
- * (inclusive), oldest first. Gap months come back as ZERO rows (never
- * missing keys) so charts never break on an empty month. The month range is
- * owned by this window; every OTHER filter (member/scope/category/group) is
- * honored.
+ * Cash income/expense totals for the `monthsBack` months ending at
+ * `endingMonth` (inclusive), oldest first. Gap months come back as ZERO
+ * rows (never missing keys) so charts never break on an empty month. The
+ * month range is owned by this window; every OTHER filter
+ * (member/scope/category/group) is honored.
  */
 export async function monthlyTotals(
   db: Database,
@@ -97,8 +101,10 @@ export async function monthlyTotals(
       income: sum(
         sql`case when ${transactions.type} = 'income' then ${transactions.amountCents} end`,
       ),
+      // Cash-basis: card purchases are debt, never the month's gastos.
       expense: sum(
-        sql`case when ${transactions.type} = 'expense' then ${transactions.amountCents} end`,
+        sql`case when ${transactions.type} = 'expense' and ${transactions.paymentMethod} = 'cash'
+             then ${transactions.amountCents} end`,
       ),
     })
     .from(transactions)
@@ -135,7 +141,8 @@ export interface CumulativeBudgetPoint {
  * the filter month when it falls in that year (else December — the page
  * always passes the selected month, so no future-zero spam). A month with
  * no budget row contributes 0 to the planned curve; the actual curve sums
- * expense transactions honoring the movement filters. The budget plan side
+ * CASH expense transactions (card purchases are card debt, not budget
+ * execution) honoring the movement filters. The budget plan side
  * honors the category filter (plans are per category); member/scope/group
  * have no meaning for a plan and are ignored there.
  * No data at all → [] (the chart shows its empty state).
@@ -182,7 +189,7 @@ export async function cumulativeBudgetVsActual(
           eq(transactions.type, "expense"),
           gte(transactions.date, `${firstMonth}-01`),
           lte(transactions.date, endBounds.end),
-          completedOnly(filtersWhere({ ...filters, month: undefined, type: undefined })),
+          completedOnly(cashOnly(filtersWhere({ ...filters, month: undefined, type: undefined }))),
         ),
       )
       .groupBy(sql`to_char(${transactions.date}, 'YYYY-MM')`),

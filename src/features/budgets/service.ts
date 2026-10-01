@@ -8,15 +8,22 @@
  * inside a single DB transaction. ALL mutations are admin-only, enforced
  * here at service level — UI hiding is never trusted.
  *
- * "Spent" is the SUM of expense transactions for the category within the
- * calendar month (inclusive bounds from monthBounds); household income and
- * expense context REUSES transactions.transactionTotals (never duplicated).
+ * "Spent" is the SUM of CASH expense transactions for the category within
+ * the calendar month (inclusive bounds from monthBounds) — cash-basis like
+ * every gasto figure: card purchases are card debt, not budget execution.
+ * Household income and expense context REUSES
+ * transactions.transactionTotals (never duplicated).
  */
-import { and, asc, eq, gte, inArray, lte, sum } from "drizzle-orm";
+import { and, asc, eq, inArray, sum } from "drizzle-orm";
 import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { parseAmountToCents, percentage } from "@/lib/money";
-import { transactionTotals } from "@/features/transactions/service";
+import {
+  cashOnly,
+  completedOnly,
+  filtersWhere,
+  transactionTotals,
+} from "@/features/transactions/service";
 import type { SessionUser } from "@/lib/auth";
 import { computeProgress, monthBounds, type ProgressStatus } from "@/features/budgets/progress";
 
@@ -79,15 +86,10 @@ export async function getMonth(
     db
       .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
       .from(transactions)
-      .where(
-        and(
-          eq(transactions.type, "expense"),
-          // Pending quick-capture rows are placeholders, not spend.
-          eq(transactions.needsDetails, false),
-          gte(transactions.date, bounds.start),
-          lte(transactions.date, bounds.end),
-        ),
-      )
+      // Cash-basis execution: completed cash expenses of the month (the
+      // shared builders apply the identical bounds/pending/cash rules the
+      // analytics aggregates use — no diverging copy).
+      .where(completedOnly(cashOnly(filtersWhere({ month, type: "expense" }))))
       .groupBy(transactions.categoryId),
     transactionTotals(db, { month }),
   ]);

@@ -12,7 +12,8 @@
  * The OUTSTANDING balance is computed, never stored: principal + interest −
  * payments. A loan's proceeds create NO transaction (borrowed money is not
  * income); each PAYMENT mirrors one expense so the household stats reflect
- * the real money flow. Interest rows never mirror.
+ * the real money flow (card payments mirror their amortizing portion — the
+ * purchase itself was card debt, not cash). Interest rows never mirror.
  */
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -843,9 +844,17 @@ function resolveMemberId(
 const MIRROR_PAYMENT_CATEGORY = "Pago de préstamos";
 
 /**
+ * System mirror category for the amortizing portion of a revolving card
+ * payment (seeded in BOTH modes): the purchase was card debt (it never hit
+ * the cash saldo), so paying the card is the real cash outflow.
+ */
+const MIRROR_CARD_PAYMENT_CATEGORY = "Pago de tarjetas";
+
+/**
  * System mirror categories for revolving finance costs (seeded in BOTH
- * modes): card interest and the cuota de manejo are real expenses, while
- * the purchase itself was already recorded as its own movement.
+ * modes): card interest and the cuota de manejo are real cash the bank
+ * took at payment time. The amortizing capital mirrors separately under
+ * "Pago de tarjetas" — the three together add up to the total paid.
  */
 const MIRROR_CARD_INTEREST_CATEGORY = "Intereses de tarjetas";
 const MIRROR_CARD_FEE_CATEGORY = "Cuota de manejo de tarjetas";
@@ -861,7 +870,8 @@ type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /**
  * Inserts the expense transaction mirrored from ONE ledger row, linked via
  * transactions.loan_payment_id (CASCADE delete keeps stats and ledger in
- * lockstep). Shared by loan payments, card interest and card fee mirrors.
+ * lockstep). Shared by loan payments, card payment capital, card interest
+ * and card fee mirrors.
  */
 async function insertMirrorExpense(
   tx: Tx,
@@ -1015,13 +1025,15 @@ export type CardPaymentResult =
     };
 
 /**
- * Registers a card payment on a REVOLVING loan. The total paid becomes one
- * 'payment' row — but UNLIKE addLoanPayment it mirrors NO expense: the
- * purchase was already recorded as its own movement, mirroring again would
- * double-count the household spend. Only the finance costs mirror: the
- * manually-entered interest and the included cuota de manejo become
- * 'interest'/'charge' engine rows, each with its own expense mirror
- * (real money the bank took, invisible otherwise).
+ * Registers a card payment on a REVOLVING loan. The purchase was card debt
+ * (it never reduced the cash saldo), so the payment is the real cash
+ * outflow: its amortizing portion (total − interest − cuota de manejo)
+ * mirrors ONE cash expense under "Pago de tarjetas", linked via
+ * transactions.loan_payment_id (CASCADE delete). Overpayment mirrors the
+ * same formula — the cash left the household regardless. The finance costs
+ * mirror separately: the manually-entered interest and the included cuota
+ * de manejo become 'interest'/'charge' engine rows, each with its own
+ * expense mirror (the three mirrors add up to the total paid).
  *
  * Outstanding effect: +interest +fee −total converges to the statement
  * (paying the interest portion does not reduce capital).
@@ -1074,24 +1086,50 @@ export async function addCardPayment(
       feeCents = loan.managementFeeCents;
     }
 
-    // Both mirror categories are needed whenever a finance cost rides along.
+    // Mirror categories: the capital always mirrors (the amount is positive,
+    // but the amortizing portion can be zero — see below); the finance-cost
+    // categories are needed whenever a finance cost rides along.
+    const paymentCategoryId = await findMirrorCategoryId(tx, MIRROR_CARD_PAYMENT_CATEGORY);
     const interestCategoryId =
       interestCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_INTEREST_CATEGORY) : null;
     const feeCategoryId =
       feeCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_FEE_CATEGORY) : null;
-    if ((interestCents > 0 && !interestCategoryId) || (feeCents > 0 && !feeCategoryId)) {
+    if (
+      !paymentCategoryId ||
+      (interestCents > 0 && !interestCategoryId) ||
+      (feeCents > 0 && !feeCategoryId)
+    ) {
       return { ok: false, error: "system_category_missing" };
     }
 
     try {
-      await tx.insert(loanPayments).values({
-        loanId,
-        memberId: member.memberId,
-        kind: "payment",
-        amountCents: cents,
-        date: input.date,
-        note: input.note ? input.note : null,
-      });
+      const [payment] = await tx
+        .insert(loanPayments)
+        .values({
+          loanId,
+          memberId: member.memberId,
+          kind: "payment",
+          amountCents: cents,
+          date: input.date,
+          note: input.note ? input.note : null,
+        })
+        .returning({ id: loanPayments.id });
+
+      // The amortizing portion is the cash that used to be card debt: total
+      // paid minus the finance costs (which mirror on their own rows). Zero
+      // (all-finance payment) inserts no row — never a 0-cent expense.
+      const capitalCents = Math.max(cents - interestCents - feeCents, 0);
+      if (capitalCents > 0) {
+        await insertMirrorExpense(tx, {
+          date: input.date,
+          amountCents: capitalCents,
+          categoryId: paymentCategoryId,
+          memberId: member.memberId,
+          scope: loan.scope,
+          note: `Pago ${loan.name}`,
+          ledgerRowId: payment.id,
+        });
+      }
 
       if (interestCents > 0) {
         const row = await insertEngineRow(tx, {

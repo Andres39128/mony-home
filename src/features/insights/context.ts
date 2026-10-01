@@ -229,7 +229,7 @@ export async function buildFinanceContext(
   const bounds = monthBounds(month);
   if (!bounds) throw new Error(`buildFinanceContext: invalid month "${month}"`);
 
-  const [budgetView, currentSlices, previousSlices, trendTotals, goals, loans, cashTotals, cardTotals] =
+  const [budgetView, currentSlices, previousSlices, trendTotals, goals, loans, cardTotals] =
     await Promise.all([
       getMonth(db, month),
       expensesByCategory(db, { month }),
@@ -239,14 +239,14 @@ export async function buildFinanceContext(
       // Single source of debt/cupo math (also runs the lazy interest
       // catch-up, so the figures the model narrates are current).
       listLoans(db),
-      // Medio de pago split: the month's expenses by how they were paid.
-      transactionTotals(db, { month, paymentMethod: "cash" }),
+      // Card purchases of the month (debt — they never ride the totals
+      // below, which are cash-basis).
       transactionTotals(db, { month, paymentMethod: "card" }),
     ]);
   if (!budgetView) throw new Error(`buildFinanceContext: invalid month "${month}"`);
 
-  // Household totals ride along with getMonth (it already reuses
-  // transactions.transactionTotals internally — never queried twice).
+  // Cash-basis month totals: income minus CASH expenses (card purchases
+  // are debt, reported through paymentSplit/tarjetas instead).
   const totals = await transactionTotals(db, { month });
   const expenseCents = totals.expenseCents;
 
@@ -388,8 +388,10 @@ export async function buildFinanceContext(
         : null,
     categoryChanges,
     paymentSplit: {
-      cashCents: cashTotals.expenseCents,
-      cardCents: cardTotals.expenseCents,
+      // Cash-basis: the month's gastos are the cash ones; card purchases
+      // are the card's debt, listed apart.
+      cashCents: totals.expenseCents,
+      cardCents: cardTotals.cardExpenseCents,
     },
     bolsas: goals.map((goal) => ({
       name: goal.name,

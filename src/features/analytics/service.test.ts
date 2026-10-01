@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, expenseGroups, transactions, users } from "@/db/schema";
+import { budgets, categories, expenseGroups, loans, transactions, users } from "@/db/schema";
 import {
   DEFAULT_MONTHS_BACK,
   cumulativeBudgetVsActual,
@@ -57,6 +57,20 @@ describe("analytics service (integration on PGlite)", () => {
       .values([{ name: "Vacaciones", status: "active" }])
       .returning();
 
+    // A revolving card: its purchases are debt, never analytics gasto.
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa Analytics",
+        kind: "credit_card",
+        entity: "Banco Fixture",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000_000,
+      })
+      .returning();
+
     await db.insert(transactions).values([
       // 2025-12: outside every window below.
       { date: "2025-12-20", amountCents: 12_345, type: "expense", categoryId: superCat.id, memberId: mateId, scope: "common" },
@@ -69,6 +83,17 @@ describe("analytics service (integration on PGlite)", () => {
       { date: "2026-03-02", amountCents: 20_000, type: "expense", categoryId: superCat.id, memberId: mateId, scope: "common", groupId: vacaciones.id },
       { date: "2026-03-15", amountCents: 8_000, type: "expense", categoryId: ocio.id, memberId: anaId, scope: "common" },
       { date: "2026-03-30", amountCents: 60_000, type: "income", categoryId: sueldo.id, memberId: mateId, scope: "common" },
+      // 2026-03 card purchase: DEBT — every cash-basis aggregate ignores it.
+      {
+        date: "2026-03-20",
+        amountCents: 7_000,
+        type: "expense",
+        categoryId: superCat.id,
+        memberId: mateId,
+        scope: "common",
+        paymentMethod: "card",
+        cardLoanId: card.id,
+      },
     ]);
 
     // Budgets: 2026-02 intentionally missing so the cumulative curve carries.
@@ -114,6 +139,23 @@ describe("analytics service (integration on PGlite)", () => {
 
     it("returns [] when nothing matches instead of throwing", async () => {
       expect(await expensesByCategory(appDb, { month: "2030-01" })).toEqual([]);
+    });
+
+    it("is cash-basis: card purchases are debt, never gasto", async () => {
+      // The fixture's 7.000 card purchase (Super, 2026-03) exists in the
+      // movements list but stays out of every cash expense aggregate.
+      expect(
+        (await expensesByCategory(appDb, { month: "2026-03" })).map((s) => [s.name, s.cents]),
+      ).toEqual([
+        ["Super", 20_000],
+        ["Ocio", 8_000],
+      ]);
+      const byMonth = new Map(
+        (await monthlyTotals(appDb, "2026-03", 3)).map((row) => [row.month, row]),
+      );
+      expect(byMonth.get("2026-03")?.expenseCents).toBe(28_000);
+      const points = await cumulativeBudgetVsActual(appDb, 2026, { month: "2026-03" });
+      expect(points.at(-1)?.actualCumCents).toBe(43_000);
     });
   });
 
