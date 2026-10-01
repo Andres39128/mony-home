@@ -19,11 +19,8 @@ import {
   setOpeningBalance,
   updateTransaction,
 } from "@/features/transactions/service";
-import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
-import {
-  AMBIGUOUS_AMOUNT_MESSAGE,
-  INVALID_AMOUNT_MESSAGE,
-} from "@/lib/money-errors";
+import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
+import { amountFieldError } from "@/lib/money-errors";
 
 /** FormState plus the category created inline from the movement form. */
 export interface InlineCategoryState extends FormState {
@@ -59,17 +56,9 @@ function readQuickMovementForm(formData: FormData) {
   };
 }
 
-function idFrom(formData: FormData): string | null {
-  const id = formData.get("id");
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
-
 function mapMovementError(error: string): FormState {
-  if (error === "invalid_amount") {
-    return { fieldErrors: { amount: INVALID_AMOUNT_MESSAGE } };
-  }
-  if (error === "ambiguous_amount") {
-    return { fieldErrors: { amount: AMBIGUOUS_AMOUNT_MESSAGE } };
+  if (error === "invalid_amount" || error === "ambiguous_amount") {
+    return amountFieldError(error);
   }
   if (error === "category_kind_mismatch") {
     return {
@@ -204,11 +193,8 @@ export async function deleteMovementAction(
 
 /** Spanish form feedback for the saldo inicial service's typed errors. */
 function mapOpeningBalanceError(error: string): FormState {
-  if (error === "invalid_amount") {
-    return { fieldErrors: { amount: INVALID_AMOUNT_MESSAGE } };
-  }
-  if (error === "ambiguous_amount") {
-    return { fieldErrors: { amount: AMBIGUOUS_AMOUNT_MESSAGE } };
+  if (error === "invalid_amount" || error === "ambiguous_amount") {
+    return amountFieldError(error);
   }
   if (error === "future_date") {
     return { fieldErrors: { date: "La fecha no puede ser futura." } };

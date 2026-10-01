@@ -20,3 +20,9 @@ export function fieldErrorsFrom(
   }
   return fieldErrors;
 }
+
+/** The submitted entity id, or null when absent/empty. */
+export function idFrom(formData: FormData): string | null {
+  const id = formData.get("id");
+  return typeof id === "string" && id.length > 0 ? id : null;
+}

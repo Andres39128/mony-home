@@ -8,6 +8,7 @@ import type {
   PaymentView,
 } from "@/features/loans/service";
 import { formatCents, formatPerMillon } from "@/lib/money";
+import { asLocalDate, dateFormatter } from "@/lib/date";
 import type { FormState } from "@/lib/form-state";
 import { formatRatePercent } from "@/features/savings/math";
 import { ProgressBar } from "@/components/progress";
@@ -138,14 +139,6 @@ function PaymentHistory({
   if (entries.length === 0) {
     return <p className="text-xs text-muted">Sin pagos registrados todavía.</p>;
   }
-  const dateFormatter = new Intl.DateTimeFormat("es-AR", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-  // Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
-  // UTC-3 rendering never shifts the day backwards.
-  const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
   return (
     <ul className="flex flex-col divide-y divide-line">
       {entries.map((entry) => (
@@ -210,7 +203,6 @@ function HistoryDetails({
 
 /** Short '4 sep' style date for period headers (no year clutter). */
 const PERIOD_DATE = new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short" });
-const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
 
 /**
  * One closed cuota's statement breakdown (D5): the five Davivienda sections

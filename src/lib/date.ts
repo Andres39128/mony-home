@@ -42,3 +42,18 @@ export function dayIndexOfDate(date: Date): number {
 export function isoOfDayIndex(dayIndex: number): string {
   return new Date(dayIndex * DAY_MS).toISOString().slice(0, 10);
 }
+
+/** Shared es-AR date rendering for ledger rows and valuation stamps. */
+export const dateFormatter = new Intl.DateTimeFormat("es-AR", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+/**
+ * Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
+ * UTC-3 rendering never shifts the day backwards.
+ */
+export function asLocalDate(iso: string): Date {
+  return new Date(`${iso}T12:00:00`);
+}

@@ -10,6 +10,7 @@ import {
   monthsUntilDeadline,
 } from "@/features/savings/math";
 import type { FormState } from "@/lib/form-state";
+import { asLocalDate, dateFormatter } from "@/lib/date";
 import { formatCents } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
 import { RateBadge, ScopeBadge } from "@/components/badges";
@@ -68,13 +69,6 @@ const KIND_LABELS = {
   interest: "Interés",
 } as const;
 
-/** Shared es-AR date rendering for ledger rows and valuation stamps. */
-const dateFormatter = new Intl.DateTimeFormat("es-AR", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-});
-
 /**
  * Per-bolsa collapsible history of every ledger entry. Interest rows carry
  * the "Interés" badge and no member attribution; deposit/withdrawal mirrors
@@ -84,9 +78,6 @@ function ContributionHistory({ entries }: { entries: ContributionView[] }) {
   if (entries.length === 0) {
     return <p className="text-xs text-muted">Sin movimientos registrados todavía.</p>;
   }
-  // Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
-  // UTC-3 rendering never shifts the day backwards.
-  const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
   return (
     <ul className="flex flex-col divide-y divide-line">
       {entries.map((entry) => (

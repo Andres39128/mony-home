@@ -25,8 +25,9 @@ import {
 } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
+import { resolveMemberId } from "@/lib/authorization";
 import type { SessionUser } from "@/lib/auth";
-import { parseAmountCents } from "@/lib/money-errors";
+import { parseAmountCents, parsePositiveAmountCents } from "@/lib/money-errors";
 import { todayIso } from "@/lib/date";
 import { getCardPurchaseInfo } from "@/features/loans/service";
 
@@ -402,32 +403,6 @@ export async function openingBalanceCents(
   return incomeCents - expenseCents;
 }
 
-/**
- * Parses the free-text amount into cents, or returns the typed error code:
- * 'ambiguous_amount' means the input needs disambiguation (e.g. '1.234'),
- * 'invalid_amount' anything else unparseable/non-positive. Parsing and the
- * ambiguity discrimination live in lib/money-errors (shared with savings,
- * loans and budgets); movements additionally require a POSITIVE amount.
- */
-function parsePositiveAmountCents(
-  amount: string,
-): number | "invalid_amount" | "ambiguous_amount" {
-  const cents = parseAmountCents(amount);
-  if (cents === "ambiguous_amount") return cents;
-  if (cents === "invalid_amount" || cents <= 0) return "invalid_amount";
-  return cents;
-}
-
-/** Member attribution: empty = the acting user; non-admins cannot target others. */
-function resolveMemberId(
-  user: SessionUser,
-  input: Pick<MovementInput, "memberId">,
-): { ok: true; memberId: string } | { ok: false; error: "forbidden" } {
-  const memberId = input.memberId === "" ? user.id : input.memberId;
-  if (user.role !== "admin" && memberId !== user.id) return { ok: false, error: "forbidden" };
-  return { ok: true, memberId };
-}
-
 /** The pooled client or an open transaction — only `.select` is needed. */
 type RowLoader = Pick<Database, "select">;
 
@@ -562,7 +537,7 @@ export async function createTransaction(
   const cents = parsePositiveAmountCents(input.amount);
   if (typeof cents === "string") return { ok: false, error: cents };
 
-  const member = resolveMemberId(user, input);
+  const member = resolveMemberId(user, input.memberId);
   if (!member.ok) return member;
 
   // Check + insert share one transaction: a row deleted between the rule
@@ -608,7 +583,7 @@ export async function createQuickTransaction(
   user: SessionUser,
   input: QuickMovementInput,
 ): Promise<MovementResult> {
-  const member = resolveMemberId(user, input);
+  const member = resolveMemberId(user, input.memberId);
   if (!member.ok) return member;
 
   try {
@@ -655,7 +630,7 @@ export async function updateTransaction(
   const cents = parsePositiveAmountCents(input.amount);
   if (typeof cents === "string") return { ok: false, error: cents };
 
-  const member = resolveMemberId(user, input);
+  const member = resolveMemberId(user, input.memberId);
   if (!member.ok) return member;
 
   // Checks + update + receipt replace share one transaction (same TOCTOU

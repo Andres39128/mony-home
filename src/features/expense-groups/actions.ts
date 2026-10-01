@@ -12,7 +12,7 @@ import {
   setExpenseGroupStatus,
   updateExpenseGroup,
 } from "@/features/expense-groups/service";
-import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden modificar grupos.";
 
@@ -21,11 +21,6 @@ function readGroupForm(formData: FormData) {
     name: formData.get("name"),
     description: formData.get("description") ?? "",
   };
-}
-
-function idFrom(formData: FormData): string | null {
-  const id = formData.get("id");
-  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function mapGroupError(error: string): FormState {

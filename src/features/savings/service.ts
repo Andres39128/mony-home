@@ -17,7 +17,8 @@ import { categories, savingsContributions, savingsGoals, transactions, users } f
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
-import { parseAmountCents } from "@/lib/money-errors";
+import { parsePositiveAmountCents } from "@/lib/money-errors";
+import { resolveMemberId } from "@/lib/authorization";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/lib/date";
 import { listLoans, type LoanView } from "@/features/loans/service";
@@ -302,11 +303,14 @@ function checkKindFields(input: GoalInput): GoalResult | null {
   return null;
 }
 
-export async function createGoal(
-  db: Database,
+/**
+ * Shared create/update validation prologue: admin gate, kind/field coherence
+ * and the parsed optional numbers. Returns the values or the typed error.
+ */
+function validateGoalInput(
   user: SessionUser,
   input: GoalInput,
-): Promise<GoalResult> {
+): { target: number | null; value: number | null; rate: number | null } | GoalResult {
   if (user.role !== "admin") return { ok: false, error: "forbidden" };
   const kindError = checkKindFields(input);
   if (kindError) return kindError;
@@ -316,12 +320,23 @@ export async function createGoal(
   if ("error" in value) return { ok: false, error: value.error };
   const rate = parseOptionalRate(input.annualRate);
   if ("error" in rate) return { ok: false, error: rate.error };
+  return { target: target.cents, value: value.cents, rate: rate.bp };
+}
+
+export async function createGoal(
+  db: Database,
+  user: SessionUser,
+  input: GoalInput,
+): Promise<GoalResult> {
+  const validated = validateGoalInput(user, input);
+  if (!("target" in validated)) return validated;
+  const { target, value, rate } = validated;
 
   try {
     await db.insert(savingsGoals).values({
-      ...goalValues(input, target.cents, rate.bp),
-      currentValueCents: input.kind === "investment" ? value.cents : null,
-      valueUpdatedAt: input.kind === "investment" && value.cents !== null ? new Date() : null,
+      ...goalValues(input, target, rate),
+      currentValueCents: input.kind === "investment" ? value : null,
+      valueUpdatedAt: input.kind === "investment" && value !== null ? new Date() : null,
     });
     return { ok: true };
   } catch (error) {
@@ -337,15 +352,9 @@ export async function updateGoal(
   id: string,
   input: GoalInput,
 ): Promise<GoalResult> {
-  if (user.role !== "admin") return { ok: false, error: "forbidden" };
-  const kindError = checkKindFields(input);
-  if (kindError) return kindError;
-  const target = parseOptionalCents(input.target, "invalid_target");
-  if ("error" in target) return { ok: false, error: target.error };
-  const value = parseOptionalCents(input.currentValue, "invalid_current_value");
-  if ("error" in value) return { ok: false, error: value.error };
-  const rate = parseOptionalRate(input.annualRate);
-  if ("error" in rate) return { ok: false, error: rate.error };
+  const validated = validateGoalInput(user, input);
+  if (!("target" in validated)) return validated;
+  const { target, value, rate } = validated;
 
   const [existing] = await db
     .select({ currentValueCents: savingsGoals.currentValueCents })
@@ -361,16 +370,16 @@ export async function updateGoal(
   if (input.kind === "savings") {
     currentValueCents = null;
     valueUpdatedAt = null;
-  } else if (value.cents !== null) {
-    currentValueCents = value.cents;
-    valueUpdatedAt = value.cents === existing.currentValueCents ? undefined : new Date();
+  } else if (value !== null) {
+    currentValueCents = value;
+    valueUpdatedAt = value === existing.currentValueCents ? undefined : new Date();
   }
 
   try {
     const updated = await db
       .update(savingsGoals)
       .set({
-        ...goalValues(input, target.cents, rate.bp),
+        ...goalValues(input, target, rate),
         currentValueCents,
         ...(valueUpdatedAt === undefined ? {} : { valueUpdatedAt }),
       })
@@ -479,16 +488,6 @@ export type ContributionResult =
         | "forbidden";
     };
 
-/** Member attribution: empty = the acting user; non-admins cannot target others. */
-function resolveMemberId(
-  user: SessionUser,
-  memberId: string,
-): { ok: true; memberId: string } | { ok: false; error: "forbidden" } {
-  const resolved = memberId === "" ? user.id : memberId;
-  if (user.role !== "admin" && resolved !== user.id) return { ok: false, error: "forbidden" };
-  return { ok: true, memberId: resolved };
-}
-
 /**
  * Mirror categories (system-seeded): a savings DEPOSIT is money that LEFT
  * the household's income/expense flow — an expense; a WITHDRAWAL returns it
@@ -506,9 +505,9 @@ export async function addContribution(
 ): Promise<ContributionResult> {
   // Discriminated like movements: '1.234' asks for guidance instead of a
   // generic rejection (shared lib/money-errors surface).
-  const cents = parseAmountCents(input.amount);
+  const cents = parsePositiveAmountCents(input.amount);
   if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
-  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
+  if (cents === "invalid_amount") return { ok: false, error: "invalid_amount" };
 
   // Contribution + mirror commit together (R1): stats never diverge from
   // the savings ledger. Interest rows never pass through here.

@@ -21,7 +21,8 @@ import { categories, loanPayments, loans, transactions, users } from "@/db/schem
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
-import { parseAmountCents } from "@/lib/money-errors";
+import { parseAmountCents, parsePositiveAmountCents } from "@/lib/money-errors";
+import { resolveMemberId } from "@/lib/authorization";
 import type { SessionUser } from "@/lib/auth";
 import { dayIndexOfIso, isoOfDayIndex, todayIso } from "@/lib/date";
 import { catchUpAllLoanInterest } from "./accrual";
@@ -827,16 +828,6 @@ export type PaymentResult =
         | "forbidden";
     };
 
-/** Member attribution: empty = the acting user; non-admins cannot target others. */
-function resolveMemberId(
-  user: SessionUser,
-  memberId: string,
-): { ok: true; memberId: string } | { ok: false; error: "forbidden" } {
-  const resolved = memberId === "" ? user.id : memberId;
-  if (user.role !== "admin" && resolved !== user.id) return { ok: false, error: "forbidden" };
-  return { ok: true, memberId: resolved };
-}
-
 /**
  * System mirror category (seeded in BOTH modes): paying a loan is real
  * money leaving the household — an expense.
@@ -957,9 +948,9 @@ export async function addLoanPayment(
 ): Promise<PaymentResult> {
   // Discriminated like movements: '1.234' asks for guidance instead of a
   // generic rejection (shared lib/money-errors surface).
-  const cents = parseAmountCents(input.amount);
+  const cents = parsePositiveAmountCents(input.amount);
   if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
-  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
+  if (cents === "invalid_amount") return { ok: false, error: "invalid_amount" };
 
   return db.transaction(async (tx) => {
     const [loan] = await tx
@@ -1044,9 +1035,9 @@ export async function addCardPayment(
   loanId: string,
   input: CardPaymentInput,
 ): Promise<CardPaymentResult> {
-  const cents = parseAmountCents(input.amount);
+  const cents = parsePositiveAmountCents(input.amount);
   if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
-  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
+  if (cents === "invalid_amount") return { ok: false, error: "invalid_amount" };
 
   let interestCents = 0;
   if (input.interest !== "") {
@@ -1379,6 +1370,18 @@ export interface LoanPeriodView {
  * Callers run `listLoans` first (the lazy catch-up trigger); this read only
  * groups what is already materialized.
  */
+/**
+ * Closing anchor (the next day-of-month equal to `day`, today included) for a
+ * row date — shared by the loan cuota periods and the card statement cycles.
+ */
+function closingAnchor(iso: string, day: number): string {
+  const [year, month, dayOfMonth] = iso.split("-").map(Number);
+  const monthShift = dayOfMonth <= day ? month - 1 : month; // this month's anchor…
+  const anchorMonth = (monthShift % 12) + 1; // …or next month's
+  const anchorYear = year + Math.floor(monthShift / 12);
+  return `${anchorYear}-${String(anchorMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export async function listLoanPeriods(db: Database, loanId: string): Promise<LoanPeriodView[]> {
   const [loan] = await db
     .select({
@@ -1408,22 +1411,13 @@ export async function listLoanPeriods(db: Database, loanId: string): Promise<Loa
   const cuotaCents = loan.fixedCuotaCents ?? 0;
   const createdIso = todayIso(loan.createdAt);
 
-  /** Closing anchor (next day-of-month == cuotaDay, today included) for a row date. */
-  const closingAnchor = (iso: string): string => {
-    const [year, month, day] = iso.split("-").map(Number);
-    const monthShift = day <= loan.cuotaDay! ? month - 1 : month; // this month's anchor…
-    const anchorMonth = (monthShift % 12) + 1; // …or next month's
-    const anchorYear = year + Math.floor(monthShift / 12);
-    return `${anchorYear}-${String(anchorMonth).padStart(2, "0")}-${String(loan.cuotaDay!).padStart(2, "0")}`;
-  };
-
   const periods: LoanPeriodView[] = [];
   let current: LoanPeriodView | null = null;
   let saldo = loan.principalCents;
   let prevEndDay = Number.NaN;
 
   for (const row of rows) {
-    const endDate = closingAnchor(row.date);
+    const endDate = closingAnchor(row.date, loan.cuotaDay!);
     if (current === null || endDate !== current.endDate) {
       if (current !== null) periods.push(current);
       const startDay = Number.isNaN(prevEndDay) ? dayIndexOfIso(createdIso) : prevEndDay + 1;
@@ -1564,22 +1558,13 @@ export async function listCardCycles(
   ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   if (events.length === 0) return [];
 
-  /** Closing anchor (next day-of-month == statementDay, today included). */
-  const closingAnchor = (iso: string): string => {
-    const [year, month, day] = iso.split("-").map(Number);
-    const monthShift = day <= card.statementDay! ? month - 1 : month; // this month's anchor…
-    const anchorMonth = (monthShift % 12) + 1; // …or next month's
-    const anchorYear = year + Math.floor(monthShift / 12);
-    return `${anchorYear}-${String(anchorMonth).padStart(2, "0")}-${String(card.statementDay!).padStart(2, "0")}`;
-  };
-
   const today = todayIso(now);
   const cycles: CardCycleView[] = [];
   let current: CardCycleView | null = null;
   let prevEndDay = Number.NaN;
 
   for (const event of events) {
-    const endDate = closingAnchor(event.date);
+    const endDate = closingAnchor(event.date, card.statementDay!);
     if (current === null || endDate !== current.endDate) {
       if (current !== null) cycles.push(current);
       const startDay = Number.isNaN(prevEndDay)

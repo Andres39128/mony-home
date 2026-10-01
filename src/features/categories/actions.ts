@@ -11,7 +11,7 @@ import {
   toggleCategoryActive,
   updateCategory,
 } from "@/features/categories/service";
-import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden modificar categorías.";
 
@@ -22,11 +22,6 @@ function readCategoryForm(formData: FormData) {
     color: formData.get("color"),
     icon: formData.get("icon") ?? "",
   };
-}
-
-function idFrom(formData: FormData): string | null {
-  const id = formData.get("id");
-  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function mapCategoryError(error: string): FormState {

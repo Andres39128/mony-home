@@ -10,17 +10,13 @@ import {
   setBudgetsAction,
 } from "@/features/budgets/actions";
 import { formatCents } from "@/lib/money";
+import { singleParam } from "@/lib/page-params";
 import { ProgressBar } from "@/components/progress";
 import { Card } from "@/components/card";
 import { ChevronLeftIcon, ChevronRightIcon, TagIcon } from "@/components/icons";
 import BudgetEditor from "./budget-editor";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
-
-function singleParam(params: Record<string, string | string[] | undefined>, key: string) {
-  const value = params[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
 
 /** "2026-09" → "septiembre de 2026" for the heading (display only). */
 function longMonthLabel(month: string): string {

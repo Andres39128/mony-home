@@ -39,3 +39,19 @@ export function amountFieldError(code: "invalid_amount" | "ambiguous_amount"): F
     },
   };
 }
+
+/**
+ * Parses the free-text amount into cents, or returns the typed error code:
+ * 'ambiguous_amount' means the input needs disambiguation (e.g. '1.234'),
+ * 'invalid_amount' anything else unparseable/non-positive. Movements, savings
+ * contributions and loan payments additionally require a POSITIVE amount;
+ * budgets allow 0 and call parseAmountCents directly.
+ */
+export function parsePositiveAmountCents(
+  amount: string,
+): number | "invalid_amount" | "ambiguous_amount" {
+  const cents = parseAmountCents(amount);
+  if (cents === "ambiguous_amount") return cents;
+  if (cents === "invalid_amount" || cents <= 0) return "invalid_amount";
+  return cents;
+}
