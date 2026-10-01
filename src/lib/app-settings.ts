@@ -10,10 +10,13 @@
 import { cache } from "react";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { appConfig } from "@/db/schema";
-import type { Database } from "@/db";
-import type { SessionUser } from "@/lib/auth";
-import { hasPgError } from "@/db/pg-errors";
+// Relative on purpose: the seed CLI (`npm run db:seed`) runs plain node ESM,
+// which does not resolve the `@/` alias — only Next/vitest do. Any module the
+// seed imports must stay alias-free end to end.
+import { appConfig } from "../db/schema.ts";
+import type { Database } from "../db/index.ts";
+import type { SessionUser } from "./auth.ts";
+import { hasPgError } from "../db/pg-errors.ts";
 
 export interface AppSettings {
   /** ISO 4217 code, e.g. 'COP'. */
