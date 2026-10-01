@@ -119,6 +119,22 @@ describe("formatCents", () => {
     expect(formatCents(150075)).toBe(expected);
   });
 
+  it("pins the module-state isolation boundary: call-time resolution, sync switch, param precedence", () => {
+    // The formatter contract this module actually promises (see the ponytail
+    // note in money.ts): values resolve AT CALL TIME, switching is
+    // synchronous, and an explicit currency always beats module state.
+    setDefaultCurrency("COP", "es-CO");
+    const cop = formatCents(150075);
+    setDefaultCurrency("ARS", "es-AR");
+    const ars = formatCents(150075);
+    expect(cop).not.toBe(ars); // earlier call kept the earlier default
+    expect(formatCents(150075, "USD")).toContain("US$"); // param wins over state
+    // Idempotent re-set (the layout runs on every request): same output.
+    setDefaultCurrency("ARS", "es-AR");
+    expect(formatCents(150075)).toBe(ars);
+    setDefaultCurrency("COP", "es-CO");
+  });
+
   it("formats ARS with es-AR grouping when configured, matching a local Intl expectation", () => {
     setDefaultCurrency("ARS", "es-AR");
     const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(

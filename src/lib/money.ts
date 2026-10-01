@@ -143,6 +143,14 @@ export function centsToNumber(cents: number): number {
  * panel renders, so SSR and hydration always agree. Defaults are the same
  * code-level fallbacks as src/lib/app-settings.ts — never a hardcoded
  * instance decision.
+ *
+ * ponytail: process-global server formatting state — two concurrent requests
+ * that read DIFFERENT app_config values (only possible in the milliseconds
+ * around a rare admin currency change) can mix currencies in one in-flight
+ * render; cosmetic, self-healing on the next render, no data is written with
+ * it. Explicit currency threading (or RSC context) is the upgrade path if
+ * this app ever serves diverging concurrent households. Call-time resolution
+ * and the explicit-param precedence are pinned by money.test.ts.
  */
 let defaultCurrency = "COP";
 let defaultLocale = "es-CO";
