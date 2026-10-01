@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import {
+  appConfig,
   budgets,
   categories,
   expenseGroups,
@@ -1171,6 +1172,41 @@ describe("migration 0012 (revolving cards invariants)", () => {
     await expectPgError(
       db.insert(loans).values({ ...base, name: "Negativo", principalCents: -1 }),
       "23514",
+    );
+  });
+});
+
+describe("migration 0015 (app_config)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("round-trips a config key with its default timestamp", async () => {
+    const [row] = await db
+      .insert(appConfig)
+      .values({ key: "currencyCode", value: "COP" })
+      .returning();
+    expect(row.value).toBe("COP");
+    expect(row.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("keeps one row per key (text primary key backs the upsert)", async () => {
+    await db.insert(appConfig).values({ key: "locale", value: "es-CO" });
+    await expectPgError(
+      db.insert(appConfig).values({ key: "locale", value: "es-AR" }),
+      "23505",
+    );
+    // The value column is NOT NULL — an empty config value is a bug, not a state.
+    await expectPgError(
+      db.execute(sql`insert into app_config ("key", "value") values ('locale', null)`),
+      "23502",
     );
   });
 });

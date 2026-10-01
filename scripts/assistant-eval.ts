@@ -34,6 +34,7 @@ import { getDb, closeDb } from "@/db";
 import { todayIso } from "@/lib/date";
 import { buildFinanceContext, toPromptContext } from "@/features/insights/context";
 import { buildAssistantMessages } from "@/features/assistant/service";
+import { setDefaultCurrency } from "@/lib/money";
 import { chatCompletion } from "@/features/assistant/llm";
 
 const MODELS = [
@@ -86,6 +87,9 @@ async function main(): Promise<void> {
 
   const month = todayIso().slice(0, 7);
   const db = getDb();
+  // Format the prompt context in the configured currency/locale, same as the
+  // app's ask() path does.
+  setDefaultCurrency(config.APP_CURRENCY, config.APP_LOCALE);
   const context = await buildFinanceContext(db, month);
   const promptJson = JSON.stringify(toPromptContext(context));
 
@@ -109,7 +113,7 @@ async function main(): Promise<void> {
     let totalLatency = 0;
 
     for (const [index, question] of QUESTIONS.entries()) {
-      const messages = buildAssistantMessages(context, question, [], today, config.APP_NAME);
+      const messages = buildAssistantMessages(context, question, [], today, config.APP_NAME, { currencyCode: config.APP_CURRENCY, locale: config.APP_LOCALE });
       const startedAt = performance.now();
       const result = await chatCompletion({ messages, model });
       const latencyMs = Math.round(performance.now() - startedAt);

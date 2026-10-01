@@ -1,7 +1,11 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import { logoutAction } from "@/features/auth/actions";
+import { getAppSettings } from "@/lib/app-settings";
+import { setDefaultCurrency } from "@/lib/money";
+import CurrencyBoot from "@/components/currency-boot";
 import TourLauncher from "@/features/tour/tour-launcher";
 import { SparklesIcon } from "@/components/icons";
 import { BottomNav } from "@/components/bottom-nav";
@@ -69,8 +73,18 @@ function AppMark() {
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
 
+  // One settings read per request (React cache). The money module keeps the
+  // configured currency/locale as its implicit formatting default, so every
+  // server-rendered amount follows app_config — and CurrencyBoot below
+  // mirrors it on the client before any panel hydrates.
+  const settings = await getAppSettings(getDb());
+  setDefaultCurrency(settings.currencyCode, settings.locale);
+
   return (
     <div className="flex min-h-full flex-col bg-base font-sans">
+      {/* Must precede {children}: client panels read the money module default
+          during hydration and need it already configured. */}
+      <CurrencyBoot currencyCode={settings.currencyCode} locale={settings.locale} />
       {/* Mobile header: brand + assistant shortcut + theme. Navigation lives
           in the bottom tab bar; desktop never sees this bar. */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-line bg-surface/95 px-4 py-2 backdrop-blur md:hidden">

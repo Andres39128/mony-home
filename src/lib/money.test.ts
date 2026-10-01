@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { AmbiguousAmountError, centsToNumber, formatCents, formatCentsCompact, MoneyParseError, parseAmountToCents, percentage } from "@/lib/money";
+import { afterEach, describe, expect, it } from "vitest";
+import { AmbiguousAmountError, centsToNumber, formatCents, formatCentsCompact, MoneyParseError, parseAmountToCents, percentage, setDefaultCurrency } from "@/lib/money";
 
 describe("parseAmountToCents", () => {
   it("parses plain integers", () => {
@@ -105,7 +105,38 @@ describe("formatCents", () => {
   // The exact glyph between '$' and the digits (regular vs narrow no-break
   // space) varies across ICU versions, so we assert against an Intl-generated
   // expectation plus a structural regex instead of a hardcoded literal.
-  it("formats ARS with es-AR grouping, matching a local Intl expectation", () => {
+  // setDefaultCurrency is module state: every test configures its own
+  // currency/locale and afterEach restores the code fallbacks (COP/es-CO).
+  afterEach(() => {
+    setDefaultCurrency("COP", "es-CO");
+  });
+
+  it("uses the configured default currency/locale (setDefaultCurrency)", () => {
+    setDefaultCurrency("COP", "es-CO");
+    const expected = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP" }).format(
+      1500.75,
+    );
+    expect(formatCents(150075)).toBe(expected);
+  });
+
+  it("pins the module-state isolation boundary: call-time resolution, sync switch, param precedence", () => {
+    // The formatter contract this module actually promises (see the ponytail
+    // note in money.ts): values resolve AT CALL TIME, switching is
+    // synchronous, and an explicit currency always beats module state.
+    setDefaultCurrency("COP", "es-CO");
+    const cop = formatCents(150075);
+    setDefaultCurrency("ARS", "es-AR");
+    const ars = formatCents(150075);
+    expect(cop).not.toBe(ars); // earlier call kept the earlier default
+    expect(formatCents(150075, "USD")).toContain("US$"); // param wins over state
+    // Idempotent re-set (the layout runs on every request): same output.
+    setDefaultCurrency("ARS", "es-AR");
+    expect(formatCents(150075)).toBe(ars);
+    setDefaultCurrency("COP", "es-CO");
+  });
+
+  it("formats ARS with es-AR grouping when configured, matching a local Intl expectation", () => {
+    setDefaultCurrency("ARS", "es-AR");
     const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(
       1500.75,
     );
@@ -114,13 +145,15 @@ describe("formatCents", () => {
   });
 
   it("formats negative amounts", () => {
+    setDefaultCurrency("ARS", "es-AR");
     const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(
       -1500.75,
     );
     expect(formatCents(-150075)).toBe(expected);
   });
 
-  it("honors a custom currency", () => {
+  it("honors a custom currency passed explicitly over the configured default", () => {
+    setDefaultCurrency("ARS", "es-AR");
     const expected = new Intl.NumberFormat("es-AR", { style: "currency", currency: "USD" }).format(
       10,
     );
@@ -155,8 +188,8 @@ describe("percentage", () => {
 });
 
 describe("parseAmountToCents range (bigint-backed money columns)", () => {
-  it("accepts real-world ARS magnitudes beyond int4 cents", () => {
-    // The exact production case: a $36M ARS emergency-fund target.
+  it("accepts real-world magnitudes beyond int4 cents", () => {
+    // The exact production case: a $36M emergency-fund target.
     expect(parseAmountToCents("36000000")).toBe(3_600_000_000);
     expect(parseAmountToCents("99.999.999.999,99")).toBe(9_999_999_999_999);
   });

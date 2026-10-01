@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { users } from "@/db/schema";
+import { appConfig, users } from "@/db/schema";
 
 vi.mock("@/lib/config", () => ({
   getConfig: () => ({
@@ -45,6 +45,13 @@ describe("assistant service (integration on PGlite, mocked llm)", () => {
       .values({ username: "ana", name: "Ana", passwordHash: "x" })
       .returning();
     user = { id: row.id, username: row.username, name: row.name, role: row.role };
+    // Configured instance settings: ask() reads app_config and phrases the
+    // system prompt (and formats the context) from these — the es-AR rows
+    // prove the currency is DB-driven, not hardcoded COP.
+    await db.insert(appConfig).values([
+      { key: "currencyCode", value: "ARS" },
+      { key: "locale", value: "es-AR" },
+    ]);
   });
 
   afterAll(async () => {
@@ -154,6 +161,7 @@ describe("assistant service (integration on PGlite, mocked llm)", () => {
       clean,
       TODAY,
       "mony-home",
+      { currencyCode: "COP", locale: "es-CO" },
     );
     expect(messages).toHaveLength(8);
     expect(messages.at(-1)?.content).toBe("última");

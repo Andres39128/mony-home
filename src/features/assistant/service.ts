@@ -16,6 +16,8 @@ import { getConfig } from "@/lib/config";
 import type { Database } from "@/db";
 import type { SessionUser } from "@/lib/auth";
 import { todayIso } from "@/lib/date";
+import { getAppSettings, type AppSettings } from "@/lib/app-settings";
+import { setDefaultCurrency } from "@/lib/money";
 import {
   buildFinanceContext,
   toPromptContext,
@@ -62,20 +64,39 @@ export function sanitizeHistory(history: HistoryTurn[] | unknown): HistoryTurn[]
 }
 
 /**
+ * Human-readable currency label from the configured locale, e.g.
+ * 'peso colombiano (COP)'. Falls back to the bare code if the runtime's ICU
+ * does not know the currency — the prompt must never crash on a bad code
+ * (zod already validated the shape, so this is belt-and-suspenders).
+ */
+function currencyLabel(settings: AppSettings): string {
+  try {
+    const name = new Intl.DisplayNames([settings.locale], { type: "currency" }).of(
+      settings.currencyCode,
+    );
+    return name ? `${name.toLowerCase()} (${settings.currencyCode})` : settings.currencyCode;
+  } catch {
+    return settings.currencyCode;
+  }
+}
+
+/**
  * Grounded system prompt: the model only narrates over the given context,
- * answers in neutral Spanish, and says so when a datum is missing.
+ * answers in neutral Spanish, and says so when a datum is missing. The
+ * currency comes from the configured settings — never hardcoded.
  */
 export function buildSystemPrompt(
   context: FinanceContext,
   today: string,
   appName: string,
+  settings: AppSettings,
 ): string {
   return [
     `Eres el asistente financiero de ${appName}, una aplicación de finanzas del hogar.`,
     "Responde SIEMPRE en español neutro, de forma breve, clara y directa.",
     "",
     "Reglas obligatorias:",
-    "- Usa ÚNICAMENTE los datos del contexto que aparece al final. No inventes ni calcules cifras: todos los montos ya vienen pre-calculados y formateados en pesos colombianos (COP).",
+    `- Usa ÚNICAMENTE los datos del contexto que aparece al final. No inventes ni calcules cifras: todos los montos ya vienen pre-calculados y formateados en la moneda del hogar (${currencyLabel(settings)}).`,
     "- Si el contexto no contiene el dato que te preguntan, dilo explícitamente y no lo estimes.",
     "- Al citar montos, copia tal cual los valores formateados del contexto (por ejemplo: $ 1.234,56).",
     "- Nunca ves movimientos individuales, solo agregados del hogar; no prometas ni pidas detalles que no estén en el contexto.",
@@ -95,9 +116,10 @@ export function buildAssistantMessages(
   history: HistoryTurn[],
   today: string,
   appName: string,
+  settings: AppSettings,
 ): ChatMessage[] {
   return [
-    { role: "system", content: buildSystemPrompt(context, today, appName) },
+    { role: "system", content: buildSystemPrompt(context, today, appName, settings) },
     ...history.map((turn) => ({ role: turn.role, content: turn.content })),
     { role: "user", content: question },
   ];
@@ -130,6 +152,12 @@ export async function ask(
   const quota = await assertQuota(db, user.id, today);
   if (!quota.ok) return quota;
 
+  // The configured currency drives BOTH the prompt wording and the amount
+  // formatting of the context (toPromptContext → formatCents): server
+  // actions run without the layout, so (re)set the module default here too.
+  const settings = await getAppSettings(db);
+  setDefaultCurrency(settings.currencyCode, settings.locale);
+
   const context = await buildFinanceContext(db, today.slice(0, 7), today);
   const messages = buildAssistantMessages(
     context,
@@ -137,6 +165,7 @@ export async function ask(
     sanitizeHistory(history),
     today,
     getConfig().APP_NAME,
+    settings,
   );
 
   const result = await chatCompletion({ messages, fetchImpl: options.fetchImpl });
