@@ -56,10 +56,11 @@ ask-on-risk (default). Forecast ~350–500 líneas changed con tests → probabl
 ## Next step
 Entrega: cadena stacked-to-main elegida por el usuario (2026-10-01). Post-rebase shas: core=1ffb4a7b62a5, ui=0beae928bbd4, r3fix=9326a6668cd6, docs=e7bf2092cff0/3894f76a0609/2a8fe753442d.
 
-## Chain plan (stacked to main)
-- PR#0 `fix/update-outstanding-clock` (a6bfb62025fb, 15 líneas) → main. Baseline: test de accrual clock-dependent fallaba en main desde 2026-10-01; ahora inyectable `now`. 459/459 suite completa verde.
-- PR#1 `feat/saldo-cash-basis-core` (1ffb4a7b62a5, 485 líneas) → base PR#0. Núcleo cash-basis. **size:exception**: flip semántico indivisible (exclusión de compras card + espejo del pago deben landar juntos o el saldo pierde ambos lados); tests viajan con su unidad.
-- PR#2 `feat/saldo-solo-efectivo` (2a8fe753442d, 201 líneas) → base PR#1. UI consumers + fix R3-001 + docs.
+## Chain plan (stacked to main) — ABIERTA
+- PR#7 `fix/update-outstanding-clock` (a6bfb62025fb, 15 líneas) → main. Baseline: test de accrual clock-dependent fallaba en main desde 2026-10-01; ahora inyectable `now`. 459/459 suite completa verde.
+- PR#8 `feat/saldo-cash-basis-core` (1ffb4a7b62a5, 485 líneas) → base PR#7. Núcleo cash-basis. **size:exception**: flip semántico indivisible (exclusión de compras card + espejo del pago deben landar juntos o el saldo pierde ambos lados); tests viajan con su unidad.
+- PR#9 `feat/saldo-solo-efectivo` (3f61c19721eb, ~210 líneas) → base PR#8. UI consumers + fix R3-001 + docs. 462/462 suite completa.
+- Merge order: #7 → #8 → #9. Al mergear #7, GitHub re-targetea #8 a main automáticamente.
 - Deploy: tras merge correr `npm run db:seed` (categoría sistema "Pago de tarjetas" — no viene por migración).
 
 ## Route declaration
