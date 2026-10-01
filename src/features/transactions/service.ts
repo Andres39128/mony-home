@@ -755,6 +755,9 @@ export async function removeTransaction(
 /** System category the adjustment lives under; seeded in BOTH modes. */
 const OPENING_BALANCE_CATEGORY = "Saldo inicial";
 
+/** Advisory-lock key serializing the first-insert gap of the upsert. */
+const OPENING_BALANCE_LOCK_KEY = "mony-home:opening-balance";
+
 export const openingBalanceSchema = z.object({
   date: z.iso.date({ message: "La fecha no es válida" }),
   /** Free-text AR-formatted SIGNED amount ("-$ 1.000" = starting in the red). */
@@ -845,6 +848,11 @@ export async function setOpeningBalance(
         .where(eq(categories.name, OPENING_BALANCE_CATEGORY))
         .limit(1);
       if (!category) return { ok: false, error: "system_category_missing" };
+
+      // Serialize the upsert gap (R3-001): FOR UPDATE only locks an EXISTING
+      // row, so two concurrent FIRST calls could both insert. The advisory
+      // xact lock closes that window without a schema constraint.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${OPENING_BALANCE_LOCK_KEY}))`);
 
       const current = and(
         eq(transactions.categoryId, category.id),
