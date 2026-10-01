@@ -16,15 +16,18 @@ import {
   PENDING_DETAILS_NOTE,
   RECEIPT_MAX_BYTES,
   createQuickTransaction,
-  listTransactionsPage,
-  movementSchema,
   createTransaction,
+  findOpeningBalance,
   getReceiptFile,
   getTransaction,
   listTransactions,
+  listTransactionsPage,
+  movementSchema,
+  openingBalanceCents,
+  openingBalanceSchema,
   quickMovementSchema,
   removeTransaction,
-  openingBalanceCents,
+  setOpeningBalance,
   transactionTotals,
   updateTransaction,
 } from "@/features/transactions/service";
@@ -1058,5 +1061,154 @@ describe("card purchases (integration on PGlite)", () => {
       await updateTransaction(appDb, mate, pending.id, cardInput({ date: "2026-09-15" })),
     ).toEqual({ ok: true });
     expect(await availableCents()).toBe(70_000);
+  });
+});
+
+describe("setOpeningBalance (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let admin: SessionUser;
+  let mate: SessionUser;
+  // Fixed clock: the not-future date boundary never depends on the real today.
+  const NOW = new Date("2026-09-20T12:00:00Z");
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [adminRow] = await db
+      .insert(users)
+      .values({ username: "admin", name: "Admin", passwordHash: "x", role: "admin" })
+      .returning();
+    const [mateRow] = await db
+      .insert(users)
+      .values({ username: "mate", name: "Mate", passwordHash: "x", role: "member" })
+      .returning();
+    admin = { id: adminRow.id, username: adminRow.username, name: adminRow.name, role: adminRow.role };
+    mate = { id: mateRow.id, username: mateRow.username, name: mateRow.name, role: mateRow.role };
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("rejects a member with forbidden", async () => {
+    expect(
+      await setOpeningBalance(appDb, mate, { amount: "100", date: "2026-08-15" }, NOW),
+    ).toEqual({ ok: false, error: "forbidden" });
+  });
+
+  it("reports system_category_missing when the seed has not run", async () => {
+    expect(
+      await setOpeningBalance(appDb, admin, { amount: "100", date: "2026-08-15" }, NOW),
+    ).toEqual({ ok: false, error: "system_category_missing" });
+
+    // The rest of the suite runs against the seeded system category.
+    await db.insert(categories).values({ name: "Saldo inicial", kind: "income" });
+  });
+
+  it("creates a positive adjustment: income of its month, anchors next month's arrastre", async () => {
+    const result = await setOpeningBalance(
+      appDb,
+      admin,
+      { amount: "$ 50.000,00", date: "2026-08-15" },
+      NOW,
+    );
+    expect(result).toEqual({ ok: true });
+
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      date: "2026-08-15",
+      amountCents: 5_000_000,
+      type: "income",
+      memberId: admin.id,
+      scope: "common",
+      paymentMethod: "cash",
+      note: "Saldo inicial",
+      needsDetails: false,
+    });
+
+    // No special-casing: it IS a movement of its month...
+    expect(await transactionTotals(appDb, { month: "2026-08" })).toMatchObject({
+      incomeCents: 5_000_000,
+    });
+    // ...and the arrastre of the NEXT month starts at the real money.
+    expect(await openingBalanceCents(appDb, { month: "2026-09" })).toBe(5_000_000);
+    expect(await findOpeningBalance(appDb)).toEqual({ date: "2026-08-15", signedCents: 5_000_000 });
+  });
+
+  it("upserts on sign change: updates amount + date and flips type, one row total", async () => {
+    const result = await setOpeningBalance(
+      appDb,
+      admin,
+      { amount: "-30.000,00", date: "2026-08-10" },
+      NOW,
+    );
+    expect(result).toEqual({ ok: true });
+
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      date: "2026-08-10",
+      amountCents: 3_000_000,
+      type: "expense",
+      memberId: admin.id,
+    });
+
+    // Flipped to an expense of its month; the arrastre goes negative.
+    expect(await transactionTotals(appDb, { month: "2026-08" })).toMatchObject({
+      incomeCents: 0,
+      expenseCents: 3_000_000,
+    });
+    expect(await openingBalanceCents(appDb, { month: "2026-09" })).toBe(-3_000_000);
+    expect(await findOpeningBalance(appDb)).toEqual({ date: "2026-08-10", signedCents: -3_000_000 });
+  });
+
+  it("inserts a fresh negative adjustment when no row exists", async () => {
+    await db.delete(transactions);
+    const result = await setOpeningBalance(
+      appDb,
+      admin,
+      { amount: "-$ 30.000,00", date: "2026-07-31" },
+      NOW,
+    );
+    expect(result).toEqual({ ok: true });
+
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      date: "2026-07-31",
+      amountCents: 3_000_000,
+      type: "expense",
+      paymentMethod: "cash",
+    });
+    expect(await openingBalanceCents(appDb, { month: "2026-09" })).toBe(-3_000_000);
+  });
+
+  it("rejects a future date against the injected clock (today passes)", async () => {
+    expect(
+      await setOpeningBalance(appDb, admin, { amount: "100", date: "2026-09-21" }, NOW),
+    ).toEqual({ ok: false, error: "future_date" });
+    expect(
+      await setOpeningBalance(appDb, admin, { amount: "100", date: "2026-09-20" }, NOW),
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects invalid, zero and ambiguous amounts", async () => {
+    expect(
+      await setOpeningBalance(appDb, admin, { amount: "no-es-numero", date: "2026-08-15" }, NOW),
+    ).toEqual({ ok: false, error: "invalid_amount" });
+    expect(
+      await setOpeningBalance(appDb, admin, { amount: "0", date: "2026-08-15" }, NOW),
+    ).toEqual({ ok: false, error: "invalid_amount" });
+    expect(
+      await setOpeningBalance(appDb, admin, { amount: "1.234", date: "2026-08-15" }, NOW),
+    ).toEqual({ ok: false, error: "ambiguous_amount" });
+  });
+
+  it("openingBalanceSchema rejects a malformed date and an empty amount", () => {
+    expect(openingBalanceSchema.safeParse({ date: "20/09/2026", amount: "1" }).success).toBe(false);
+    expect(openingBalanceSchema.safeParse({ date: "2026-09-20", amount: "" }).success).toBe(false);
   });
 });

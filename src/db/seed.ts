@@ -110,6 +110,10 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     ["Sueldo", "#22c55e"],
     ["Otros ingresos", "#4ade80"],
     ["Recupero de ahorro", "#14b8a6"],
+    // SYSTEM category: setOpeningBalance writes the household's opening
+    // balance as ONE signed adjustment under it (positive → income, negative
+    // → expense). Production mode needs it too.
+    ["Saldo inicial", "#10b981"],
   ] as const;
 
   await db
