@@ -8,6 +8,8 @@ import type {
   PaymentView,
 } from "@/features/loans/service";
 import { formatCents, formatPerMillon } from "@/lib/money";
+import { asLocalDate } from "@/lib/date";
+import { LedgerHistory } from "@/components/ledger-history";
 import type { FormState } from "@/lib/form-state";
 import { formatRatePercent } from "@/features/savings/math";
 import { ProgressBar } from "@/components/progress";
@@ -128,59 +130,6 @@ function RemoveEntryButton({
  * listed here — those live in /movimientos. Admins get a per-row ✕ to
  * correct wrong entries (manual card interest invites mistakes).
  */
-function PaymentHistory({
-  entries,
-  removeAction,
-}: {
-  entries: PaymentView[];
-  removeAction?: LoanAction;
-}) {
-  if (entries.length === 0) {
-    return <p className="text-xs text-muted">Sin pagos registrados todavía.</p>;
-  }
-  const dateFormatter = new Intl.DateTimeFormat("es-AR", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-  // Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
-  // UTC-3 rendering never shifts the day backwards.
-  const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
-  return (
-    <ul className="flex flex-col divide-y divide-line">
-      {entries.map((entry) => (
-        <li key={entry.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-          <span className="tabular-nums text-muted">
-            {dateFormatter.format(asLocalDate(entry.date))}
-          </span>
-          {entry.kind === "interest" ? (
-            <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
-              Interés
-            </span>
-          ) : entry.kind === "charge" ? (
-            // Charge rows carry their component in the note — render it as
-            // the pill itself (seguros, otros cargos, mora).
-            <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
-              {entry.note}
-            </span>
-          ) : (
-            <span className="text-muted">Pago</span>
-          )}
-          <span className="ml-auto font-medium tabular-nums text-ink">
-            {entry.kind === "payment" ? "−" : "+"}
-            {formatCents(entry.amountCents)}
-          </span>
-          <span className="w-full text-xs text-muted sm:w-auto">
-            {entry.memberName ?? entry.note ?? ""}
-          </span>
-          {removeAction && <RemoveEntryButton entryId={entry.id} removeAction={removeAction} />}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Collapsible wrapper so cards stay compact until the member wants detail. */
 function HistoryDetails({
   entries,
   tourId,
@@ -191,26 +140,33 @@ function HistoryDetails({
   removeAction?: LoanAction;
 }) {
   return (
-    <details className="group border-t border-line pt-3" data-tour={tourId}>
-      <summary className="cursor-pointer list-none text-xs font-medium text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
-        <span
-          aria-hidden
-          className="mr-1 inline-block transition-transform group-open:rotate-90"
-        >
-          ▸
-        </span>
-        Historial ({entries.length})
-      </summary>
-      <div className="pt-2">
-        <PaymentHistory entries={entries} removeAction={removeAction} />
-      </div>
-    </details>
+    <LedgerHistory
+      entries={entries}
+      tourId={tourId}
+      emptyLabel="Sin pagos registrados todavía."
+      minusKind="payment"
+      // Charge rows carry their component in the note — render it as
+      // the pill itself (seguros, otros cargos, mora).
+      kindSlot={(row) =>
+        row.kind === "charge" ? (
+          <span className="rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink">
+            {row.note}
+          </span>
+        ) : (
+          <span className="text-muted">Pago</span>
+        )
+      }
+      renderRemove={
+        removeAction
+          ? (row) => <RemoveEntryButton entryId={row.id} removeAction={removeAction} />
+          : undefined
+      }
+    />
   );
 }
 
 /** Short '4 sep' style date for period headers (no year clutter). */
 const PERIOD_DATE = new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short" });
-const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
 
 /**
  * One closed cuota's statement breakdown (D5): the five Davivienda sections

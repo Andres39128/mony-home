@@ -37,6 +37,7 @@ import {
   createMovementAction,
 } from "@/features/transactions/actions";
 import { formatCents } from "@/lib/money";
+import { hrefWith, singleParam } from "@/lib/page-params";
 import FiltersSheet, { type ActiveFilter } from "@/components/filters-sheet";
 import { Card } from "@/components/card";
 import { ProgressBar } from "@/components/progress";
@@ -49,28 +50,6 @@ import {
 } from "@/components/icons";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
-
-type Params = Awaited<SearchParams>;
-
-function singleParam(params: Params, key: string) {
-  const value = params[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-/** URL of "/" with the same params, overriding/dropping some. */
-function hrefWith(params: Params, overrides: Record<string, string | null>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (key in overrides) continue;
-    if (typeof value === "string" && value) query.set(key, value);
-    else if (Array.isArray(value)) for (const item of value) if (item) query.append(key, item);
-  }
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value) query.set(key, value);
-  }
-  const qs = query.toString();
-  return qs ? `/?${qs}` : "/";
-}
 
 /** Active filters as a query string, dropping/overriding keys per chart. */
 function drillQuery(
@@ -214,7 +193,7 @@ export default async function DashboardPage({
     activeFilters.push({
       param: "scope",
       label: `Ámbito: ${filters.scope === "individual" ? "Individual" : "Común"}`,
-      href: hrefWith(params, { scope: null }),
+      href: hrefWith("/", params, { scope: null }),
     });
   }
   const member = options.members.find((item) => item.id === filters.memberId);
@@ -222,7 +201,7 @@ export default async function DashboardPage({
     activeFilters.push({
       param: "memberId",
       label: `Integrante: ${member.name}`,
-      href: hrefWith(params, { memberId: null }),
+      href: hrefWith("/", params, { memberId: null }),
     });
   }
   const category = options.categories.find((item) => item.id === filters.categoryId);
@@ -230,7 +209,7 @@ export default async function DashboardPage({
     activeFilters.push({
       param: "categoryId",
       label: `Categoría: ${category.name}`,
-      href: hrefWith(params, { categoryId: null }),
+      href: hrefWith("/", params, { categoryId: null }),
     });
   }
   const group = options.groups.find((item) => item.id === filters.groupId);
@@ -238,7 +217,7 @@ export default async function DashboardPage({
     activeFilters.push({
       param: "groupId",
       label: `Grupo: ${group.name}`,
-      href: hrefWith(params, { groupId: null }),
+      href: hrefWith("/", params, { groupId: null }),
     });
   }
 
@@ -260,8 +239,8 @@ export default async function DashboardPage({
         action="/"
         tourId="dashboard-filtros"
         monthLabel={monthLabel(month)}
-        prevMonthHref={hrefWith(params, { month: shiftMonth(month, -1) })}
-        nextMonthHref={hrefWith(params, { month: shiftMonth(month, 1) })}
+        prevMonthHref={hrefWith("/", params, { month: shiftMonth(month, -1) })}
+        nextMonthHref={hrefWith("/", params, { month: shiftMonth(month, 1) })}
         activeFilters={activeFilters}
       >
         <label className="flex flex-col gap-1 text-sm">

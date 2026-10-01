@@ -19,7 +19,6 @@ import {
   createTransaction,
   findOpeningBalance,
   getReceiptFile,
-  getTransaction,
   listTransactions,
   listTransactionsPage,
   movementSchema,
@@ -323,12 +322,6 @@ describe("transactions service (integration on PGlite)", () => {
     const page = await listTransactionsPage(appDb, { month: MONTH, q: "nada-que-ver" }, 4, 2);
     expect(page).toMatchObject({ total: 0, page: 1 });
     expect(page.rows).toHaveLength(0);
-  });
-
-  it("gets one transaction with joined names, or null", async () => {
-    const view = await getTransaction(appDb, fixtureTx.id);
-    expect(view).toMatchObject({ memberName: "Mate", categoryName: "Super" });
-    expect(await getTransaction(appDb, GHOST)).toBeNull();
   });
 
   it("creates an expense (common) with group, parsing AR amounts", async () => {

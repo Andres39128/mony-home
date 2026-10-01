@@ -11,15 +11,10 @@ import {
   toggleRecurringActive,
   updateRecurring,
 } from "@/features/recurring/service";
-import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar los recurrentes.";
-
-function idFrom(formData: FormData): string | null {
-  const id = formData.get("id");
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
 
 function mapRecurringError(error: string): FormState {
   if (error === "invalid_amount" || error === "ambiguous_amount") {

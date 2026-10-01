@@ -7,7 +7,7 @@ import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { catchUpAllLoanInterest, catchUpBankInterest, catchUpInterest } from "@/features/loans/accrual";
 import { COMPOUNDED_33_DAY_INTEREST_CENTS, GOLDEN, seedGoldenBankLoan } from "@/features/loans/golden-fixture";
-import { getDebtCents, listLoans, updateOutstanding } from "@/features/loans/service";
+import { listLoans, updateOutstanding } from "@/features/loans/service";
 import type { SessionUser } from "@/lib/auth";
 
 /**
@@ -217,7 +217,7 @@ describe("catchUpInterest (integration on PGlite)", () => {
     ]);
   });
 
-  it("runs lazily from read paths: listLoans and getDebtCents trigger catch-up", async () => {
+  it("runs lazily from read paths: listLoans triggers catch-up", async () => {
     await seedDecliningFixture(db, payerId, "Lectura");
 
     // No catchUpInterest call here — the read path must do it.
@@ -230,9 +230,6 @@ describe("catchUpInterest (integration on PGlite)", () => {
     expect(loan.outstandingCents).toBe(
       loan.principalCents + loan.interestCents - loan.paidCents,
     );
-
-    const debt = await getDebtCents(appDb);
-    expect(debt).toBeGreaterThan(0);
   });
 
   it("rebases accrual after an admin balance true-up", async () => {

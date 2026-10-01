@@ -13,7 +13,6 @@ import {
   computeOutstanding,
   computePaidPct,
   createLoan,
-  getDebtCents,
   listCardCycles,
   loanPaymentSchema,
   loanSchema,
@@ -576,7 +575,6 @@ describe("patrimony includes debt (integration on PGlite)", () => {
     const withDebt = await getPatrimony(appDb);
     expect(withDebt.debtCents).toBe(50_000);
     expect(withDebt.totalCents).toBe(before.savingsCents + before.investmentsCents - 50_000);
-    await expect(getDebtCents(appDb)).resolves.toBe(50_000);
 
     // Paying back reduces the debt (and the net rises accordingly).
     const [loan] = await db.select().from(loans).where(eq(loans.name, "Deuda"));
@@ -589,7 +587,7 @@ describe("patrimony includes debt (integration on PGlite)", () => {
   it("includes inactive loans in the debt (deactivating does not forgive)", async () => {
     const [loan] = await db.select().from(loans).where(eq(loans.name, "Deuda"));
     await toggleLoanActive(appDb, admin, loan.id);
-    expect(await getDebtCents(appDb)).toBe(30_000);
+    expect((await getPatrimony(appDb)).debtCents).toBe(30_000);
     await toggleLoanActive(appDb, admin, loan.id);
   });
 });

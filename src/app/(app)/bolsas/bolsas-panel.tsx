@@ -10,6 +10,8 @@ import {
   monthsUntilDeadline,
 } from "@/features/savings/math";
 import type { FormState } from "@/lib/form-state";
+import { dateFormatter } from "@/lib/date";
+import { LedgerHistory } from "@/components/ledger-history";
 import { formatCents } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
 import { RateBadge, ScopeBadge } from "@/components/badges";
@@ -65,72 +67,25 @@ function YieldLine({ goal }: { goal: GoalView }) {
 const KIND_LABELS = {
   deposit: "Depósito",
   withdrawal: "Retiro",
-  interest: "Interés",
 } as const;
-
-/** Shared es-AR date rendering for ledger rows and valuation stamps. */
-const dateFormatter = new Intl.DateTimeFormat("es-AR", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-});
 
 /**
  * Per-bolsa collapsible history of every ledger entry. Interest rows carry
  * the "Interés" badge and no member attribution; deposit/withdrawal mirrors
  * are NOT listed here — those live in /movimientos.
  */
-function ContributionHistory({ entries }: { entries: ContributionView[] }) {
-  if (entries.length === 0) {
-    return <p className="text-xs text-muted">Sin movimientos registrados todavía.</p>;
-  }
-  // Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
-  // UTC-3 rendering never shifts the day backwards.
-  const asLocalDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
-  return (
-    <ul className="flex flex-col divide-y divide-line">
-      {entries.map((entry) => (
-        <li key={entry.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-          <span className="tabular-nums text-muted">
-            {dateFormatter.format(asLocalDate(entry.date))}
-          </span>
-          {entry.kind === "interest" ? (
-            <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
-              Interés
-            </span>
-          ) : (
-            <span className="text-muted">{KIND_LABELS[entry.kind]}</span>
-          )}
-          <span className="ml-auto font-medium tabular-nums text-ink">
-            {entry.kind === "withdrawal" ? "−" : "+"}
-            {formatCents(entry.amountCents)}
-          </span>
-          <span className="w-full text-xs text-muted sm:w-auto">
-            {entry.memberName ?? entry.note ?? ""}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Collapsible wrapper so cards stay compact until the member wants detail. */
 function HistoryDetails({ entries }: { entries: ContributionView[] }) {
   return (
-    <details className="group border-t border-line pt-3">
-      <summary className="cursor-pointer list-none text-xs font-medium text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
-        <span
-          aria-hidden
-          className="mr-1 inline-block transition-transform group-open:rotate-90"
-        >
-          ▸
+    <LedgerHistory
+      entries={entries}
+      emptyLabel="Sin movimientos registrados todavía."
+      minusKind="withdrawal"
+      kindSlot={(row) => (
+        <span className="text-muted">
+          {KIND_LABELS[row.kind as keyof typeof KIND_LABELS]}
         </span>
-        Historial ({entries.length})
-      </summary>
-      <div className="pt-2">
-        <ContributionHistory entries={entries} />
-      </div>
-    </details>
+      )}
+    />
   );
 }
 

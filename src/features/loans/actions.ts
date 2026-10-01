@@ -20,7 +20,7 @@ import {
   type BankConfigField,
   type RevolvingConfigField,
 } from "@/features/loans/service";
-import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar préstamos.";
@@ -46,11 +46,6 @@ const REVOLVING_FIELD_ERRORS: Record<RevolvingConfigField, string> = {
   managementFee: "La cuota de manejo no es válida.",
   statementDay: "El día de cierre debe ser un número entre 1 y 28.",
 };
-
-function idFrom(formData: FormData): string | null {
-  const id = formData.get("id");
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
 
 /** Maps any loan-service failure to a form state (typed errors carry a field). */
 function mapLoanError(result: {

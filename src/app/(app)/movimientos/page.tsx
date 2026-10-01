@@ -20,27 +20,11 @@ import MovementsTable from "@/features/transactions/movements-table";
 import NewMovementFab from "@/features/transactions/new-movement-fab";
 import FiltersSheet, { type ActiveFilter } from "@/components/filters-sheet";
 import { formatCents } from "@/lib/money";
+import { hrefWith } from "@/lib/page-params";
 import { Card } from "@/components/card";
 import { inputClass } from "@/components/forms";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
-
-type Params = Awaited<SearchParams>;
-
-/** URL of /movimientos with the same params, overriding/dropping some. */
-function hrefWith(params: Params, overrides: Record<string, string | null>): string {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (key in overrides) continue;
-    if (typeof value === "string" && value) query.set(key, value);
-    else if (Array.isArray(value)) for (const item of value) if (item) query.append(key, item);
-  }
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value) query.set(key, value);
-  }
-  const qs = query.toString();
-  return qs ? `/movimientos?${qs}` : "/movimientos";
-}
 
 /** Colored money chips: pastel fill + ink/danger text, legible on both themes. */
 const CHIP_INCOME = "w-fit rounded-lg bg-sage px-2 py-0.5 text-on-accent";
@@ -80,7 +64,7 @@ export default async function MovimientosPage({
     activeFilters.push({
       param: "categoryId",
       label: `Categoría: ${category.name}`,
-      href: hrefWith(params, { categoryId: null, page: null }),
+      href: hrefWith("/movimientos", params, { categoryId: null, page: null }),
     });
   }
   const member = options.members.find((item) => item.id === filters.memberId);
@@ -88,7 +72,7 @@ export default async function MovimientosPage({
     activeFilters.push({
       param: "memberId",
       label: `Integrante: ${member.name}`,
-      href: hrefWith(params, { memberId: null, page: null }),
+      href: hrefWith("/movimientos", params, { memberId: null, page: null }),
     });
   }
   const group = options.groups.find((item) => item.id === filters.groupId);
@@ -96,28 +80,28 @@ export default async function MovimientosPage({
     activeFilters.push({
       param: "groupId",
       label: `Grupo: ${group.name}`,
-      href: hrefWith(params, { groupId: null, page: null }),
+      href: hrefWith("/movimientos", params, { groupId: null, page: null }),
     });
   }
   if (filters.type) {
     activeFilters.push({
       param: "type",
       label: `Tipo: ${filters.type === "income" ? "Ingreso" : "Gasto"}`,
-      href: hrefWith(params, { type: null, page: null }),
+      href: hrefWith("/movimientos", params, { type: null, page: null }),
     });
   }
   if (filters.paymentMethod) {
     activeFilters.push({
       param: "paymentMethod",
       label: `Medio de pago: ${filters.paymentMethod === "card" ? "Tarjeta" : "Efectivo"}`,
-      href: hrefWith(params, { paymentMethod: null, page: null }),
+      href: hrefWith("/movimientos", params, { paymentMethod: null, page: null }),
     });
   }
   if (filters.q) {
     activeFilters.push({
       param: "q",
       label: `Búsqueda: ${filters.q}`,
-      href: hrefWith(params, { q: null, page: null }),
+      href: hrefWith("/movimientos", params, { q: null, page: null }),
     });
   }
 
@@ -137,9 +121,9 @@ export default async function MovimientosPage({
   // Pagination: prev/next preserve every filter, first/last disable the link.
   const firstRow = (safePage - 1) * PAGE_SIZE + 1;
   const lastRow = (safePage - 1) * PAGE_SIZE + rows.length;
-  const prevHref = safePage > 1 ? hrefWith(params, { page: String(safePage - 1) }) : null;
+  const prevHref = safePage > 1 ? hrefWith("/movimientos", params, { page: String(safePage - 1) }) : null;
   const nextHref =
-    lastRow < total ? hrefWith(params, { page: String(safePage + 1) }) : null;
+    lastRow < total ? hrefWith("/movimientos", params, { page: String(safePage + 1) }) : null;
 
   return (
     <section className="flex flex-col gap-6">
@@ -150,7 +134,7 @@ export default async function MovimientosPage({
         <div className="flex items-center gap-2">
           {/* Plain link: the export keeps the exact filter query string. */}
           <a
-            href={hrefWith(params, { page: null })}
+            href={hrefWith("/movimientos", params, { page: null })}
             className="inline-flex min-h-11 items-center self-start rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base"
           >
             Exportar CSV
@@ -175,8 +159,8 @@ export default async function MovimientosPage({
         action="/movimientos"
         tourId="movimientos-filtros"
         monthLabel={monthLabel(filters.month)}
-        prevMonthHref={hrefWith(params, { month: shiftMonth(filters.month, -1), page: null })}
-        nextMonthHref={hrefWith(params, { month: shiftMonth(filters.month, 1), page: null })}
+        prevMonthHref={hrefWith("/movimientos", params, { month: shiftMonth(filters.month, -1), page: null })}
+        nextMonthHref={hrefWith("/movimientos", params, { month: shiftMonth(filters.month, 1), page: null })}
         activeFilters={activeFilters}
       >
         <label className="flex flex-col gap-1 text-sm">

@@ -15,15 +15,10 @@ import {
   updateGoal,
   updateGoalValue,
 } from "@/features/savings/service";
-import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar bolsas.";
-
-function idFrom(formData: FormData): string | null {
-  const id = formData.get("id");
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
 
 function mapGoalError(error: string): FormState {
   if (error === "invalid_target") {

@@ -19,7 +19,6 @@ import {
   login,
   loginWithIpGuard,
   requireAdmin,
-  setPassword,
   ForbiddenError,
 } from "@/lib/auth";
 import { LOCKOUT_MS, MAX_FAILED_ATTEMPTS, hashPassword } from "@/lib/password";
@@ -363,15 +362,6 @@ describe("auth (integration on PGlite)", () => {
   });
 
   describe("password helpers and admin guard", () => {
-    it("setPassword replaces the hash so the new password logs in", async () => {
-      const user = await createTestUser();
-
-      await setPassword(appDb, user.id, "brand-new-pass-9");
-
-      expect((await login(appDb, "andres", "brand-new-pass-9", clock)).ok).toBe(true);
-      expect((await login(appDb, "andres", "correct-horse-1", clock)).ok).toBe(false);
-    });
-
     it("requireAdmin throws ForbiddenError only for non-admins", () => {
       expect(() =>
         requireAdmin({ id: "u", username: "a", name: "A", role: "member" }),

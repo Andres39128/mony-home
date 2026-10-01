@@ -22,7 +22,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, count, desc, eq, gt, lt } from "drizzle-orm";
 import { loginIpAttempts, sessions, users, type roleEnum } from "@/db/schema";
 import type { Database } from "@/db";
-import { LOCKOUT_MS, MAX_FAILED_ATTEMPTS, hashPassword, verifyPassword } from "@/lib/password";
+import { LOCKOUT_MS, MAX_FAILED_ATTEMPTS, verifyPassword } from "@/lib/password";
 import { revokeUserSessions } from "@/lib/sessions";
 
 /** Cookie name; isolated in this module's public surface for the edge proxy. */
@@ -303,16 +303,4 @@ export class ForbiddenError extends Error {
 /** Guard for admin-only operations; throws ForbiddenError. */
 export function requireAdmin(user: SessionUser): void {
   if (user.role !== "admin") throw new ForbiddenError();
-}
-
-/** Set (or reset) a user's password, e.g. from the admin members screen. */
-export async function setPassword(
-  db: Database,
-  userId: string,
-  password: string,
-): Promise<void> {
-  await db
-    .update(users)
-    .set({ passwordHash: await hashPassword(password) })
-    .where(eq(users.id, userId));
 }

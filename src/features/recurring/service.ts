@@ -17,7 +17,7 @@ import { categories, recurringMovements, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import type { SessionUser } from "@/lib/auth";
-import { parseAmountCents } from "@/lib/money-errors";
+import { parsePositiveAmountCents } from "@/lib/money-errors";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -149,22 +149,31 @@ function recurringValues(input: RecurringInput, cents: number) {
   };
 }
 
+/** Shared create/update prologue: admin gate + positive-amount parsing. */
+function validateRecurringInput(
+  user: SessionUser,
+  input: RecurringInput,
+): { cents: number } | RecurringResult {
+  if (user.role !== "admin") return { ok: false, error: "forbidden" };
+  const cents = parsePositiveAmountCents(input.amount);
+  if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
+  if (cents === "invalid_amount") return { ok: false, error: "invalid_amount" };
+  return { cents };
+}
+
 export async function createRecurring(
   db: Database,
   user: SessionUser,
   input: RecurringInput,
 ): Promise<RecurringResult> {
-  if (user.role !== "admin") return { ok: false, error: "forbidden" };
-
-  const cents = parseAmountCents(input.amount);
-  if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
-  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
+  const validated = validateRecurringInput(user, input);
+  if (!("cents" in validated)) return validated;
 
   const ruleError = await checkReferences(db, input);
   if (ruleError) return ruleError;
 
   try {
-    await db.insert(recurringMovements).values(recurringValues(input, cents));
+    await db.insert(recurringMovements).values(recurringValues(input, validated.cents));
     return { ok: true };
   } catch (error) {
     // A referenced row deleted between the checks and the insert.
@@ -179,11 +188,8 @@ export async function updateRecurring(
   id: string,
   input: RecurringInput,
 ): Promise<RecurringResult> {
-  if (user.role !== "admin") return { ok: false, error: "forbidden" };
-
-  const cents = parseAmountCents(input.amount);
-  if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
-  if (cents === "invalid_amount" || cents <= 0) return { ok: false, error: "invalid_amount" };
+  const validated = validateRecurringInput(user, input);
+  if (!("cents" in validated)) return validated;
 
   const ruleError = await checkReferences(db, input);
   if (ruleError) return ruleError;
@@ -191,7 +197,7 @@ export async function updateRecurring(
   try {
     const updated = await db
       .update(recurringMovements)
-      .set(recurringValues(input, cents))
+      .set(recurringValues(input, validated.cents))
       .where(eq(recurringMovements.id, id))
       .returning({ id: recurringMovements.id });
     if (updated.length === 0) return { ok: false, error: "not_found" };

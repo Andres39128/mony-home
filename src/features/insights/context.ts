@@ -354,7 +354,7 @@ export async function buildFinanceContext(
           : null,
       isActive: loan.isActive,
     }));
-  // Same clamp as getDebtCents, computed over the rows we already hold (a
+  // Same clamp as getPatrimony, computed over the rows we already hold (a
   // saldo a favor on a card never subtracts from the household debt).
   const totalDebtCents = loans.reduce(
     (total, loan) => total + Math.max(loan.outstandingCents, 0),
