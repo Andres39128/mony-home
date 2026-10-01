@@ -747,3 +747,146 @@ export async function removeTransaction(
   if (deleted.length === 0) return { ok: false, error: "not_found" };
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Saldo inicial — the opening balance as ONE signed ledger adjustment
+// ---------------------------------------------------------------------------
+
+/** System category the adjustment lives under; seeded in BOTH modes. */
+const OPENING_BALANCE_CATEGORY = "Saldo inicial";
+
+export const openingBalanceSchema = z.object({
+  date: z.iso.date({ message: "La fecha no es válida" }),
+  /** Free-text AR-formatted SIGNED amount ("-$ 1.000" = starting in the red). */
+  amount: z.string().trim().min(1, "El monto es obligatorio"),
+});
+
+export type OpeningBalanceInput = z.output<typeof openingBalanceSchema>;
+
+export type OpeningBalanceResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error:
+        | "invalid_amount"
+        | "ambiguous_amount"
+        | "future_date"
+        | "system_category_missing"
+        | "forbidden";
+    };
+
+export interface OpeningBalanceView {
+  date: string;
+  /** Signed: positive (income) or negative (expense); the row keeps |value|. */
+  signedCents: number;
+}
+
+/** The current adjustment: the NEWEST completed transaction under the system category. */
+export async function findOpeningBalance(db: Database): Promise<OpeningBalanceView | null> {
+  const [category] = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(eq(categories.name, OPENING_BALANCE_CATEGORY))
+    .limit(1);
+  if (!category) return null;
+
+  const [row] = await db
+    .select({
+      date: transactions.date,
+      amountCents: transactions.amountCents,
+      type: transactions.type,
+    })
+    .from(transactions)
+    .where(and(eq(transactions.categoryId, category.id), eq(transactions.needsDetails, false)))
+    .orderBy(desc(transactions.date), desc(transactions.createdAt))
+    .limit(1);
+  if (!row) return null;
+  return {
+    date: row.date,
+    signedCents: row.type === "income" ? row.amountCents : -row.amountCents,
+  };
+}
+
+/**
+ * Admin-only true-up of the household's starting money: writes ONE cash
+ * movement under the system category so the derived arrastre
+ * (openingBalanceCents) anchors to the real balance. Upsert semantics: the
+ * "current adjustment" is the newest completed row under that category —
+ * setting again UPDATES it instead of stacking rows.
+ *
+ * The sign travels in `type` (amountCents is always positive on the ledger):
+ * positive → income, negative → expense. This dedicated path bypasses
+ * createTransaction on purpose — its positive-only and category-kind-matching
+ * rules don't apply to a signed adjustment (an income-kind category hosts the
+ * expense row when starting in the red).
+ */
+export async function setOpeningBalance(
+  db: Database,
+  user: SessionUser,
+  input: OpeningBalanceInput,
+  now: Date = new Date(),
+): Promise<OpeningBalanceResult> {
+  if (user.role !== "admin") return { ok: false, error: "forbidden" };
+
+  // parseAmountToCents handles the leading '-' natively; zero means the
+  // household has no starting money to anchor (and the ledger bans 0 rows).
+  const cents = parseAmountCents(input.amount);
+  if (cents === "ambiguous_amount") return { ok: false, error: cents };
+  if (cents === "invalid_amount" || cents === 0) return { ok: false, error: "invalid_amount" };
+
+  if (input.date > todayIso(now)) return { ok: false, error: "future_date" };
+
+  const type = cents > 0 ? ("income" as const) : ("expense" as const);
+  try {
+    return await db.transaction<OpeningBalanceResult>(async (tx) => {
+      const [category] = await tx
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.name, OPENING_BALANCE_CATEGORY))
+        .limit(1);
+      if (!category) return { ok: false, error: "system_category_missing" };
+
+      const current = and(
+        eq(transactions.categoryId, category.id),
+        eq(transactions.needsDetails, false),
+      );
+      const [existing] = await tx
+        .select({ id: transactions.id })
+        .from(transactions)
+        .where(current)
+        .orderBy(desc(transactions.date), desc(transactions.createdAt))
+        .limit(1)
+        .for("update");
+
+      if (existing) {
+        await tx
+          .update(transactions)
+          .set({
+            date: input.date,
+            amountCents: Math.abs(cents),
+            type,
+            memberId: user.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(transactions.id, existing.id));
+      } else {
+        await tx.insert(transactions).values({
+          date: input.date,
+          amountCents: Math.abs(cents),
+          type,
+          categoryId: category.id,
+          memberId: user.id,
+          scope: "common",
+          paymentMethod: "cash",
+          note: OPENING_BALANCE_CATEGORY,
+        });
+      }
+      return { ok: true };
+    });
+  } catch (error) {
+    // The category row vanished between the lookup and the write (seed re-runs
+    // with a wiped DB): same answer as the upfront check.
+    if (hasPgError(error, "23503")) return { ok: false, error: "system_category_missing" };
+    throw error;
+  }
+}

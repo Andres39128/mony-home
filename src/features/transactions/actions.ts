@@ -13,8 +13,10 @@ import {
   createQuickTransaction,
   createTransaction,
   movementSchema,
+  openingBalanceSchema,
   quickMovementSchema,
   removeTransaction,
+  setOpeningBalance,
   updateTransaction,
 } from "@/features/transactions/service";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
@@ -196,6 +198,50 @@ export async function deleteMovementAction(
       ? { error: "El movimiento ya no existe." }
       : mapMovementError(result.error);
   }
+  refresh();
+  return { ok: true };
+}
+
+/** Spanish form feedback for the saldo inicial service's typed errors. */
+function mapOpeningBalanceError(error: string): FormState {
+  if (error === "invalid_amount") {
+    return { fieldErrors: { amount: INVALID_AMOUNT_MESSAGE } };
+  }
+  if (error === "ambiguous_amount") {
+    return { fieldErrors: { amount: AMBIGUOUS_AMOUNT_MESSAGE } };
+  }
+  if (error === "future_date") {
+    return { fieldErrors: { date: "La fecha no puede ser futura." } };
+  }
+  if (error === "system_category_missing") {
+    return {
+      error: 'Falta la categoría de sistema "Saldo inicial". Ejecutá el seed y recargá.',
+    };
+  }
+  if (error === "forbidden") {
+    return { error: "Solo los administradores pueden definir el saldo inicial." };
+  }
+  return { error: "No se pudo guardar el saldo inicial." };
+}
+
+/**
+ * Admin-only opening balance: writes/updates the ONE system adjustment that
+ * anchors the app's saldo to real starting money.
+ */
+export async function setOpeningBalanceAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const user = await requireUser();
+
+  const parsed = openingBalanceSchema.safeParse({
+    date: formData.get("date") ?? "",
+    amount: formData.get("amount"),
+  });
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
+
+  const result = await setOpeningBalance(getDb(), user, parsed.data);
+  if (!result.ok) return mapOpeningBalanceError(result.error);
   refresh();
   return { ok: true };
 }
