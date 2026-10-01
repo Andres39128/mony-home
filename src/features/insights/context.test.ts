@@ -4,11 +4,19 @@ import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { budgets, categories, loanPayments, loans, savingsContributions, savingsGoals, transactions, users } from "@/db/schema";
+import { setDefaultCurrency } from "@/lib/money";
 import {
   buildFinanceContext,
   monthLabel,
   toPromptContext,
 } from "@/features/insights/context";
+
+// The prompt rendering tests below pin the es-AR amount format; the money
+// module's implicit currency/locale is module state, so set it explicitly
+// instead of relying on the code fallback (COP/es-CO).
+beforeAll(() => {
+  setDefaultCurrency("ARS", "es-AR");
+});
 
 /**
  * Insights context suite: exact pre-computed figures in every section (the

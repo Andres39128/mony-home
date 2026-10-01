@@ -9,17 +9,11 @@
  */
 import { cache } from "react";
 import { sql } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { appConfig } from "@/db/schema";
+import type { Database } from "@/db";
 import type { SessionUser } from "@/lib/auth";
 import { hasPgError } from "@/db/pg-errors";
-
-/**
- * Any Postgres drizzle database — the app pool in production, PGlite in
- * tests, postgres-js in the seed CLI (same loose contract as src/db/seed.ts).
- */
-type SettingsDb = PgDatabase<PgQueryResultHKT>;
 
 export interface AppSettings {
   /** ISO 4217 code, e.g. 'COP'. */
@@ -44,7 +38,7 @@ export const appSettingsSchema = z.object({
 });
 
 /** Raw upsert of both keys (also used by the seed script; no auth here). */
-export async function upsertAppConfig(db: SettingsDb, settings: AppSettings): Promise<void> {
+export async function upsertAppConfig(db: Database, settings: AppSettings): Promise<void> {
   await db
     .insert(appConfig)
     .values([
@@ -64,7 +58,7 @@ export async function upsertAppConfig(db: SettingsDb, settings: AppSettings): Pr
  * per-field to the code defaults when a key is missing or invalid — a
  * half-seeded or hand-edited table must never crash a render.
  */
-export const getAppSettings = cache(async (db: SettingsDb): Promise<AppSettings> => {
+export const getAppSettings = cache(async (db: Database): Promise<AppSettings> => {
   let rows: { key: string; value: string }[];
   try {
     rows = await db.select({ key: appConfig.key, value: appConfig.value }).from(appConfig);
@@ -87,7 +81,7 @@ export type AppSettingsMutationError = "forbidden" | "invalid_input";
 
 /** Admin-only write of both settings; validates before touching the table. */
 export async function setAppSettings(
-  db: SettingsDb,
+  db: Database,
   user: SessionUser,
   input: { currencyCode: string; locale: string },
 ): Promise<{ ok: true } | { ok: false; error: AppSettingsMutationError }> {

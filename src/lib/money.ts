@@ -136,8 +136,25 @@ export function centsToNumber(cents: number): number {
   return cents / 100;
 }
 
-export function formatCents(cents: number, currency = "ARS"): string {
-  return new Intl.NumberFormat("es-AR", { style: "currency", currency }).format(
+/**
+ * Module-level currency/locale used whenever a caller doesn't pass an
+ * explicit currency. Seeded from app_config at server bootstrap
+ * ((app)/layout.tsx) and mirrored on the client by CurrencyBoot BEFORE any
+ * panel renders, so SSR and hydration always agree. Defaults are the same
+ * code-level fallbacks as src/lib/app-settings.ts — never a hardcoded
+ * instance decision.
+ */
+let defaultCurrency = "COP";
+let defaultLocale = "es-CO";
+
+/** Configure the implicit formatting currency/locale (idempotent). */
+export function setDefaultCurrency(code: string, locale: string): void {
+  defaultCurrency = code;
+  defaultLocale = locale;
+}
+
+export function formatCents(cents: number, currency: string = defaultCurrency): string {
+  return new Intl.NumberFormat(defaultLocale, { style: "currency", currency }).format(
     centsToNumber(cents),
   );
 }
@@ -147,7 +164,7 @@ export function formatCents(cents: number, currency = "ARS"): string {
  * 1_540_000 cents → '15,4 k'. Exact values always go through formatCents.
  */
 export function formatCentsCompact(cents: number): string {
-  return new Intl.NumberFormat("es-AR", {
+  return new Intl.NumberFormat(defaultLocale, {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(centsToNumber(cents));
@@ -165,5 +182,5 @@ export function percentage(part: number, total: number): number {
  * context — one canonical formatter.
  */
 export function formatPerMillon(x100k: number): string {
-  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(x100k / 1e5);
+  return new Intl.NumberFormat(defaultLocale, { maximumFractionDigits: 2 }).format(x100k / 1e5);
 }

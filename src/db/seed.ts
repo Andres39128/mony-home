@@ -15,6 +15,7 @@ import { hash } from "@node-rs/argon2";
 import { gte } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
+import type { Database } from "./index.ts";
 import postgres from "postgres";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type AppConfig } from "../lib/config.ts";
@@ -71,8 +72,13 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
 
   // --- App config (always, both modes): currency/locale from env ---
   // Upsert on purpose: re-running the seed re-asserts the env values, the
-  // same idempotent contract as the admin user below.
-  await upsertAppConfig(db, { currencyCode: config.APP_CURRENCY, locale: config.APP_LOCALE });
+  // same idempotent contract as the admin user below. The cast mirrors the
+  // test-side convention: SeedDb is the loose CLI type, Database the strict
+  // app one — structurally the same drizzle API at runtime.
+  await upsertAppConfig(db as unknown as Database, {
+    currencyCode: config.APP_CURRENCY,
+    locale: config.APP_LOCALE,
+  });
 
   // --- Admin user (always; username is unique; conflicts skipped) ---
   const passwordHash = await hash(password);
