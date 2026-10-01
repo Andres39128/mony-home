@@ -1,4 +1,4 @@
-# Feature: Saldo solo efectivo (cash-basis) — tarjeta aparte
+# Feature: Saldo solo efectivo (cash-basis) — tarjeta aparte — ✅ ENTREGADO
 
 ## Objective
 El saldo y el total "Gastos" cuentan únicamente movimientos de efectivo. Las compras con tarjeta son deuda (cupo): se muestran aparte y golpean el saldo recién cuando se paga la tarjeta (salida de efectivo).
@@ -56,12 +56,17 @@ ask-on-risk (default). Forecast ~350–500 líneas changed con tests → probabl
 ## Next step
 Entrega: cadena stacked-to-main elegida por el usuario (2026-10-01). Post-rebase shas: core=1ffb4a7b62a5, ui=0beae928bbd4, r3fix=9326a6668cd6, docs=e7bf2092cff0/3894f76a0609/2a8fe753442d.
 
-## Chain plan (stacked to main) — ABIERTA
-- PR#7 `fix/update-outstanding-clock` (a6bfb62025fb, 15 líneas) → main. Baseline: test de accrual clock-dependent fallaba en main desde 2026-10-01; ahora inyectable `now`. 459/459 suite completa verde.
-- PR#8 `feat/saldo-cash-basis-core` (1ffb4a7b62a5, 485 líneas) → base PR#7. Núcleo cash-basis. **size:exception**: flip semántico indivisible (exclusión de compras card + espejo del pago deben landar juntos o el saldo pierde ambos lados); tests viajan con su unidad.
-- PR#9 `feat/saldo-solo-efectivo` (3f61c19721eb, ~210 líneas) → base PR#8. UI consumers + fix R3-001 + docs. 462/462 suite completa.
-- Merge order: #7 → #8 → #9. Al mergear #7, GitHub re-targetea #8 a main automáticamente.
-- Deploy: tras merge correr `npm run db:seed` (categoría sistema "Pago de tarjetas" — no viene por migración).
+## Chain plan (stacked to main) — MERGEADA 2026-10-01
+- PR#7 `fix/update-outstanding-clock` → main, merge c1ff4f8c311d.
+- PR#8 se CERRÓ solo al borrarse su rama base (bug de PRs apilados); recreada como **PR#10** → main, merge a0b5dd29a5ad.
+- PR#9 (UI + R3-001 + docs) retargeteada a main, merge 287814e38d7b.
+- Lección: en cadenas, merge con `--merge` SIN `--delete-branch` y retarget manual de los hijos.
+- CI verde en los tres (verify + Vercel). Local main sincronizado; ramas borradas.
+
+## Deploy (2026-10-01) — COMPLETO
+- Sin migraciones (schema sin cambios).
+- `SEED_DEMO_DATA=false SEED_ADMIN_PASSWORD=$(openssl rand -hex 16) npm run db:seed` → "Seed completed (production mode)". GOTCHAS: SEED_DEMO_DATA **defaultea a true** (siempre overridear en prod); SEED_ADMIN_PASSWORD sin default (random de un solo uso es inert si el admin ya existe — onConflictDoNothing lo descarta); pooler 6543 ya cubierto por prepare:false en ambos clientes.
+- Verificado en prod: categoría "Pago de tarjetas" presente; admin intacto; sin datos demo.
 
 ## Route declaration
 T1–T3 delegated (writer trigger: 2+ archivos no triviales; lectura-preparación-para-escribir pertenece al writer).
