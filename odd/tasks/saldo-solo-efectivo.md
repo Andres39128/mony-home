@@ -42,16 +42,19 @@ Off — tests funcionales junto a cada fase (patrón repo: vitest + PGlite, *.te
 ask-on-risk (default). Forecast ~350–500 líneas changed con tests → probable que cruce ~400: aplicar strategy antes del commit que cruce el presupuesto.
 
 ## Tasks
-- [ ] T1: Núcleo semántico (UN commit atómico — la app queda consistente):
-  `sumIncomeExpense` cash/card split + `transactionTotals` (+cardExpenseCents) + `openingBalanceCents` cash-only + espejo amortizador en `addCardPayment` + seed "Pago de tarjetas" + analytics cash-only + tests (transactions service, loans service, analytics). Ruta: delegated (writer).
-- [ ] T2: UI consumers: /movimientos (Gastos cash, card Tarjeta aparte, Saldo), dashboard hero/KPIs, presupuesto, insights/assistant context (+sus tests). Ruta: delegated (mismo writer).
-- [ ] T3: Higiene: comentarios stale, copy engañoso, sweep huérfanos, `npm run verify` completo. Ruta: delegated (mismo writer).
+- [x] T1: Núcleo semántico (commit 17e96c82d984): `sumIncomeExpense` cash/card split, `transactionTotals` + `cardExpenseCents`, helper compartido `cashOnly`, `openingBalanceCents` cash-only, espejo amortizador en `addCardPayment` (`total − interés − fee`, skip si 0), seed "Pago de tarjetas" + demo mirror, analytics + budgets cash-only, tests. Ruta: delegated (writer).
+- [x] T2: UI consumers (commit 2700ec360c79): /movimientos 4 cards (Gastos "En efectivo", Tarjeta aparte, Saldo cash), dashboard KPI Tarjeta, presupuesto vía service (page sin cambios), insights `cardExpenseCents` + `compras_con_tarjeta` en prompt, tour copy. Ruta: delegated (mismo writer).
+- [x] T3: Higiene (en commit 2): comentarios stale en schema.ts/loans/service.ts actualizados, sin huérfanos (`cashOnly` ×3 consumers, `cardExpenseCents` ×3, `MIRROR_CARD_PAYMENT_CATEGORY`), lint 0 warnings, typecheck OK, build OK. Ruta: delegated.
 
 ## Progress / evidence
-(vacío)
+- [x] Commits: 17e96c82d984 (core), 2700ec360c79 (UI+higiene), ea56dd68ff23 (docs). Total 604 líneas changed / 17 paths.
+- [x] Verificación (writer, foreground): suites tocadas 203/204 passed; 1 fallo preexistente en main (loans/accrual.test.ts:273, dependiente del reloj — probado con stash en main b55adacc97b3). lint 0, typecheck 0, build OK.
+- [x] Spot check padre: diff stat confirmado; hunks nucleares releídos (split case-when, espejo capital con CASCADE); transactions suite re-ejecutada 46/46.
+- [x] RDD: assess medium (slice_budget_reached, 604 líneas) → consent granted → review lineage review-c61cbc7dbb628b1f, lens review-reliability → **approved + acknowledged** (authority burned).
+- [!] R3-001 (WARNING informativo, no bloqueante, trabajo futuro): addCardPayment exige "Pago de tarjetas" incondicionalmente — un pago all-finance (capital 0) fallaría con system_category_missing aunque no insertaría espejo; path sin test. Fix trivial: condicionar la exigencia a capitalCents > 0.
 
 ## Next step
-Delegar T1+T2+T3 a un writer con verification commands; al volver: readback + spot check + RDD assess sobre el diff (RDD on).
+Entrega: >400 líneas → decisión del usuario (ask-on-risk): single PR con size:exception vs chained PRs. Push/PR restan decisión humana.
 
 ## Route declaration
 T1–T3 delegated (writer trigger: 2+ archivos no triviales; lectura-preparación-para-escribir pertenece al writer).
