@@ -7,6 +7,7 @@ import type { Database } from "@/db";
 import {
   categories,
   expenseGroups,
+  loans,
   movementReceipts,
   transactions,
   users,
@@ -115,6 +116,19 @@ describe("transactions service (integration on PGlite)", () => {
       .returning();
 
     // Mixed fixture for filters/totals, all inside 2026-09 except the last one.
+    // The card purchase is cupo DEBT: totals must never count it as gasto.
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa Fixture",
+        kind: "credit_card",
+        entity: "Banco Fixture",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000_000,
+      })
+      .returning();
     const inserted = await db
       .insert(transactions)
       .values([
@@ -144,6 +158,16 @@ describe("transactions service (integration on PGlite)", () => {
           groupId: closedGroup.id, // history may reference a closed group
         },
         {
+          date: "2026-09-08",
+          amountCents: 40_000,
+          type: "expense",
+          categoryId: expenseCat.id,
+          memberId: mateId,
+          paymentMethod: "card",
+          cardLoanId: card.id,
+          note: "Compra con tarjeta",
+        },
+        {
           date: "2026-10-01",
           amountCents: 999_999,
           type: "expense",
@@ -161,13 +185,28 @@ describe("transactions service (integration on PGlite)", () => {
 
   it("lists with each filter individually", async () => {
     const month = await listTransactions(appDb, { month: MONTH });
-    expect(month.map((t) => t.date)).toEqual(["2026-09-20", "2026-09-10", "2026-09-05"]);
+    expect(month.map((t) => t.date)).toEqual([
+      "2026-09-20",
+      "2026-09-10",
+      "2026-09-08",
+      "2026-09-05",
+    ]);
 
     const byCategory = await listTransactions(appDb, { categoryId: expenseCat.id });
-    expect(byCategory.map((t) => t.date)).toEqual(["2026-10-01", "2026-09-10", "2026-09-05"]);
+    expect(byCategory.map((t) => t.date)).toEqual([
+      "2026-10-01",
+      "2026-09-10",
+      "2026-09-08",
+      "2026-09-05",
+    ]);
 
     const byMember = await listTransactions(appDb, { memberId: mateId });
-    expect(byMember.map((t) => t.date)).toEqual(["2026-10-01", "2026-09-20", "2026-09-10"]);
+    expect(byMember.map((t) => t.date)).toEqual([
+      "2026-10-01",
+      "2026-09-20",
+      "2026-09-10",
+      "2026-09-08",
+    ]);
 
     const byActiveGroup = await listTransactions(appDb, { groupId: activeGroup.id });
     expect(byActiveGroup.map((t) => t.date)).toEqual(["2026-09-10"]);
@@ -177,11 +216,21 @@ describe("transactions service (integration on PGlite)", () => {
 
     const byType = await listTransactions(appDb, { type: "income" });
     expect(byType.map((t) => t.date)).toEqual(["2026-09-20"]);
+
+    const byCard = await listTransactions(appDb, { paymentMethod: "card" });
+    expect(byCard.map((t) => t.date)).toEqual(["2026-09-08"]);
+    const byCash = await listTransactions(appDb, { paymentMethod: "cash" });
+    expect(byCash.map((t) => t.date)).toEqual([
+      "2026-10-01",
+      "2026-09-20",
+      "2026-09-10",
+      "2026-09-05",
+    ]);
   });
 
   it("lists with combined filters and joins display names", async () => {
     const rows = await listTransactions(appDb, { month: MONTH, memberId: mateId, type: "expense" });
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       categoryName: "Super",
       categoryColor: "#16a34a",
@@ -189,22 +238,31 @@ describe("transactions service (integration on PGlite)", () => {
       groupName: "Vacaciones",
       amountCents: 25_000,
     });
+    // Card rows keep naming their revolving card (list is cash-agnostic).
+    expect(rows[1]).toMatchObject({
+      paymentMethod: "card",
+      cardName: "Visa Fixture",
+      amountCents: 40_000,
+    });
   });
 
-  it("computes exact-cent totals for the filtered set", async () => {
+  it("computes cash-basis totals: card purchases stay out of the saldo", async () => {
     expect(await transactionTotals(appDb, { month: MONTH })).toEqual({
       incomeCents: 100_000,
       expenseCents: 30_500,
+      cardExpenseCents: 40_000,
       balanceCents: 69_500,
     });
     expect(await transactionTotals(appDb, { month: MONTH, type: "income" })).toEqual({
       incomeCents: 100_000,
       expenseCents: 0,
+      cardExpenseCents: 0,
       balanceCents: 100_000,
     });
     expect(await transactionTotals(appDb, { month: MONTH, memberId: anaId })).toEqual({
       incomeCents: 0,
       expenseCents: 5_500,
+      cardExpenseCents: 0,
       balanceCents: -5_500,
     });
   });
@@ -212,10 +270,11 @@ describe("transactions service (integration on PGlite)", () => {
   it("carries the opening balance from previous months", async () => {
     // Nothing before September → September opens at zero.
     expect(await openingBalanceCents(appDb, { month: MONTH })).toBe(0);
-    // October opens with September's net: 100_000 − 30_500 = 69_500.
-    // The 2026-10-01 movement itself is NOT part of the opening (strictly before).
+    // October opens with September's CASH net: 100.000 − 30.500 = 69.500.
+    // The 40.000 card purchase never drags (it is card debt), and the
+    // 2026-10-01 movement itself is NOT part of the opening (strictly before).
     expect(await openingBalanceCents(appDb, { month: "2026-10" })).toBe(69_500);
-    // Same non-month filters apply: Ana's history before October is −5_500.
+    // Same non-month filters apply: Ana's history before October is −5.500.
     expect(await openingBalanceCents(appDb, { month: "2026-10", memberId: anaId })).toBe(-5_500);
     // No month (or malformed) → no opening concept, 0.
     expect(await openingBalanceCents(appDb, {})).toBe(0);
@@ -224,7 +283,7 @@ describe("transactions service (integration on PGlite)", () => {
 
   it("matches a note substring case-insensitively (q filter)", async () => {
     const rows = await listTransactions(appDb, { month: MONTH, q: "COMPRA" });
-    expect(rows.map((t) => t.note)).toEqual(["Compra semanal"]);
+    expect(rows.map((t) => t.note)).toEqual(["Compra semanal", "Compra con tarjeta"]);
     expect(await listTransactions(appDb, { month: MONTH, q: "sueldo" }).then((r) => r.map((t) => t.note)))
       .toEqual(["Sueldo septiembre"]);
     // Rows with no note never match.
@@ -241,19 +300,19 @@ describe("transactions service (integration on PGlite)", () => {
 
   it("paginates: page 2 keeps the offset and the real total", async () => {
     const page = await listTransactionsPage(appDb, { month: MONTH }, 2, 2);
-    expect(page).toMatchObject({ total: 3, page: 2, pageSize: 2 });
-    expect(page.rows.map((t) => t.date)).toEqual(["2026-09-05"]);
+    expect(page).toMatchObject({ total: 4, page: 2, pageSize: 2 });
+    expect(page.rows.map((t) => t.date)).toEqual(["2026-09-08", "2026-09-05"]);
   });
 
   it("clamps a requested page beyond the last one", async () => {
     const page = await listTransactionsPage(appDb, { month: MONTH }, 99, 2);
-    expect(page).toMatchObject({ total: 3, page: 2 });
-    expect(page.rows).toHaveLength(1);
+    expect(page).toMatchObject({ total: 4, page: 2 });
+    expect(page.rows).toHaveLength(2);
   });
 
   it("clamps page 0 up to page 1", async () => {
     const page = await listTransactionsPage(appDb, { month: MONTH }, 0, 2);
-    expect(page).toMatchObject({ total: 3, page: 1 });
+    expect(page).toMatchObject({ total: 4, page: 1 });
     expect(page.rows.map((t) => t.date)).toEqual(["2026-09-20", "2026-09-10"]);
   });
 

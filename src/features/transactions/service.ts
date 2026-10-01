@@ -320,41 +320,82 @@ export async function getReceiptFile(
 
 export interface TransactionTotals {
   incomeCents: number;
+  /** CASH expenses only — card purchases are debt, reported separately. */
   expenseCents: number;
+  /** Card purchases of the filtered period (cupo debt, never saldo). */
+  cardExpenseCents: number;
   balanceCents: number;
 }
 
+/**
+ * Cash-basis totals: income is always cash; expenseCents counts ONLY cash
+ * expenses. A card purchase is a loan from the card (debt, cupo) — it
+ * surfaces in cardExpenseCents and hits the saldo only when the card is
+ * paid (the payment's cash mirror under "Pago de tarjetas").
+ */
 export async function transactionTotals(
   db: Database,
   filters: TransactionFilters = {},
 ): Promise<TransactionTotals> {
-  const { incomeCents, expenseCents } = await sumIncomeExpense(
+  const { incomeCents, expenseCents, cardExpenseCents } = await sumIncomeExpense(
     db,
     completedOnly(filtersWhere(filters)),
   );
-  return { incomeCents, expenseCents, balanceCents: incomeCents - expenseCents };
-}
-
-/** Income/expense aggregation shared by the month totals and the opening balance. */
-async function sumIncomeExpense(
-  db: Database,
-  where: SQL | undefined,
-): Promise<{ incomeCents: number; expenseCents: number }> {
-  const [row] = await db
-    .select({
-      income: sum(sql`case when ${transactions.type} = 'income' then ${transactions.amountCents} end`),
-      expense: sum(sql`case when ${transactions.type} = 'expense' then ${transactions.amountCents} end`),
-    })
-    .from(transactions)
-    .where(where);
-  return { incomeCents: Number(row?.income ?? 0), expenseCents: Number(row?.expense ?? 0) };
+  return {
+    incomeCents,
+    expenseCents,
+    cardExpenseCents,
+    balanceCents: incomeCents - expenseCents,
+  };
 }
 
 /**
- * Saldo de arrastre: net (income − expense) of every completed movement
- * STRICTLY BEFORE the filtered month, under the same non-month filters.
- * Money is cumulative — a month does not start at zero, it starts at
- * whatever the previous months left (positive or negative).
+ * AND payment_method = 'cash', composed onto a filtersWhere() result. The
+ * shared cash-basis switch for expense aggregations (analytics breakdowns,
+ * budget execution): "Gastos" means cash spent everywhere.
+ */
+export function cashOnly(where: SQL | undefined): SQL | undefined {
+  const cash = eq(transactions.paymentMethod, "cash");
+  return where ? and(where, cash) : cash;
+}
+
+/**
+ * Income/expense aggregation shared by the month totals and the opening
+ * balance. Cash-basis split: income (always cash), cash expense and card
+ * expense (debt — excluded from every balance figure).
+ */
+async function sumIncomeExpense(
+  db: Database,
+  where: SQL | undefined,
+): Promise<{ incomeCents: number; expenseCents: number; cardExpenseCents: number }> {
+  const [row] = await db
+    .select({
+      income: sum(sql`case when ${transactions.type} = 'income' then ${transactions.amountCents} end`),
+      expense: sum(
+        sql`case when ${transactions.type} = 'expense' and ${transactions.paymentMethod} = 'cash'
+             then ${transactions.amountCents} end`,
+      ),
+      cardExpense: sum(
+        sql`case when ${transactions.type} = 'expense' and ${transactions.paymentMethod} = 'card'
+             then ${transactions.amountCents} end`,
+      ),
+    })
+    .from(transactions)
+    .where(where);
+  return {
+    incomeCents: Number(row?.income ?? 0),
+    expenseCents: Number(row?.expense ?? 0),
+    cardExpenseCents: Number(row?.cardExpense ?? 0),
+  };
+}
+
+/**
+ * Saldo de arrastre: CASH-BASIS net (income − cash expense) of every
+ * completed movement STRICTLY BEFORE the filtered month, under the same
+ * non-month filters. Money is cumulative — a month does not start at zero,
+ * it starts at whatever the previous months left (positive or negative).
+ * Card purchases never drag (they are debt); card payments drag through
+ * their "Pago de tarjetas" cash mirrors.
  */
 export async function openingBalanceCents(
   db: Database,

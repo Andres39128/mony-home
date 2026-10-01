@@ -95,9 +95,14 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     // SYSTEM category: the loans mirror writes it from pay() — a loan payment
     // is an expense. Production mode needs it too.
     ["Pago de préstamos", "#fb7185"],
+    // SYSTEM category: the revolving card payment mirror (addCardPayment) —
+    // the amortizing portion (total − interés − cuota de manejo) is the real
+    // cash outflow; the purchase itself was card debt. Production mode needs
+    // it too.
+    ["Pago de tarjetas", "#ef4444"],
     // SYSTEM categories: revolving card finance costs (addCardPayment) —
-    // interest and cuota de manejo are real expenses; the purchase itself is
-    // already its own movement. Production mode needs them too.
+    // interest and cuota de manejo are real cash the bank took at payment
+    // time. Production mode needs them too.
     ["Intereses de tarjetas", "#e879f9"],
     ["Cuota de manejo de tarjetas", "#b45309"],
   ] as const;
@@ -350,9 +355,10 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
 
   // --- Revolving card demo (demo only) ---
   // A card with cupo + cuota de manejo: purchases link via card_loan_id and
-  // consume the cupo; the payment carries the manual interest and fee, each
-  // mirrored as its own finance-cost expense (same shapes addCardPayment
-  // writes — the seed keeps the service's ledger/mirror contract).
+  // consume the cupo; the payment mirrors its amortizing portion (total −
+  // interés − cuota de manejo) plus the finance costs, each as its own
+  // expense (same shapes addCardPayment writes — the seed keeps the
+  // service's ledger/mirror contract).
   if (!loanRows.some((l) => l.name === "Visa Oro Galicia")) {
     const [card] = await db
       .insert(loans)
@@ -393,14 +399,28 @@ export async function seedDatabase(db: SeedDb, config: AppConfig): Promise<void>
     ]);
 
     // Card payment: total + manual interest + cuota de manejo. The payment
-    // row itself mirrors NOTHING (the purchase was already the expense);
-    // interest and fee are member-less engine rows with their mirrors.
-    await db.insert(loanPayments).values({
-      loanId: card.id,
-      memberId: userId("andres"),
-      kind: "payment",
-      amountCents: 10_000_000, // $100.000 pago parcial
+    // mirrors its amortizing portion ($100.000 − $3.200 − $25.000 = $71.800)
+    // — the purchase was card debt, the payment is the cash outflow — and
+    // interest and fee are member-less engine rows with their own mirrors.
+    const [payment] = await db
+      .insert(loanPayments)
+      .values({
+        loanId: card.id,
+        memberId: userId("andres"),
+        kind: "payment",
+        amountCents: 10_000_000, // $100.000 pago parcial
+        date: day(20),
+      })
+      .returning();
+    await db.insert(transactions).values({
       date: day(20),
+      amountCents: 10_000_000 - 320_000 - 2_500_000, // $71.800 amortización
+      type: "expense",
+      categoryId: categoryId("Pago de tarjetas"),
+      memberId: userId("andres"),
+      scope: card.scope,
+      note: "Pago Visa Oro Galicia",
+      loanPaymentId: payment.id,
     });
     const [interest] = await db
       .insert(loanPayments)
