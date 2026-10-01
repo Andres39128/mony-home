@@ -306,8 +306,9 @@ export default async function DashboardPage({
         </label>
       </FiltersSheet>
 
-      {/* KPI strip: the period's net balance leads as the hero figure; below
-          it the income/expense/budget row and the patrimony link. */}
+      {/* KPI strip: the period's net CASH balance leads as the hero figure;
+          below it the income/cash-expense/card-debt/budget row and the
+          patrimony link. */}
       <div data-tour="dashboard-kpis" className="flex flex-col gap-4">
         <Card className="p-5">
           <h2 className="text-sm font-medium text-muted">Saldo del período</h2>
@@ -318,7 +319,7 @@ export default async function DashboardPage({
           </p>
         </Card>
 
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <KpiCard
             title="Ingresos"
             value={formatCents(totals.incomeCents)}
@@ -330,7 +331,12 @@ export default async function DashboardPage({
             valueClass={CHIP_EXPENSE}
           />
           <KpiCard
-            className="col-span-2 lg:col-span-1"
+            title="Tarjeta"
+            value={formatCents(totals.cardExpenseCents)}
+          >
+            <p className="mt-1 text-xs text-muted">Compras del mes · no suma al saldo</p>
+          </KpiCard>
+          <KpiCard
             title="Presupuesto ejecutado"
             value={`${budgetTotals.pct}%`}
             valueClass={budgetProgress.status === "over" ? CHIP_EXPENSE : "text-ink"}

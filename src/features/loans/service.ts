@@ -1086,16 +1086,21 @@ export async function addCardPayment(
       feeCents = loan.managementFeeCents;
     }
 
-    // Mirror categories: the capital always mirrors (the amount is positive,
-    // but the amortizing portion can be zero — see below); the finance-cost
-    // categories are needed whenever a finance cost rides along.
-    const paymentCategoryId = await findMirrorCategoryId(tx, MIRROR_CARD_PAYMENT_CATEGORY);
+    // The amortizing portion is the cash that used to be card debt: total
+    // paid minus the finance costs (which mirror on their own rows). Zero
+    // (all-finance payment) inserts no row — and needs no category (R3-001).
+    const capitalCents = Math.max(cents - interestCents - feeCents, 0);
+
+    // Mirror categories: required only when the corresponding row will
+    // actually be written (capital > 0, or a finance cost riding along).
+    const paymentCategoryId =
+      capitalCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_PAYMENT_CATEGORY) : null;
     const interestCategoryId =
       interestCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_INTEREST_CATEGORY) : null;
     const feeCategoryId =
       feeCents > 0 ? await findMirrorCategoryId(tx, MIRROR_CARD_FEE_CATEGORY) : null;
     if (
-      !paymentCategoryId ||
+      (capitalCents > 0 && !paymentCategoryId) ||
       (interestCents > 0 && !interestCategoryId) ||
       (feeCents > 0 && !feeCategoryId)
     ) {
@@ -1115,15 +1120,13 @@ export async function addCardPayment(
         })
         .returning({ id: loanPayments.id });
 
-      // The amortizing portion is the cash that used to be card debt: total
-      // paid minus the finance costs (which mirror on their own rows). Zero
-      // (all-finance payment) inserts no row — never a 0-cent expense.
-      const capitalCents = Math.max(cents - interestCents - feeCents, 0);
+      // The amortizing portion is computed above (before the category
+      // checks): zero inserts no row — never a 0-cent expense.
       if (capitalCents > 0) {
         await insertMirrorExpense(tx, {
           date: input.date,
           amountCents: capitalCents,
-          categoryId: paymentCategoryId,
+          categoryId: paymentCategoryId!,
           memberId: member.memberId,
           scope: loan.scope,
           note: `Pago ${loan.name}`,

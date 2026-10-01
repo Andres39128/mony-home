@@ -135,7 +135,7 @@ describe("assistant service (integration on PGlite, mocked llm)", () => {
       isCurrentMonth: true,
       daysInMonth: 30,
       daysElapsed: 15,
-      summary: { incomeCents: 0, expenseCents: 0, balanceCents: 0, budget: null },
+      summary: { incomeCents: 0, expenseCents: 0, cardExpenseCents: 0, balanceCents: 0, budget: null },
       topExpenseCategories: [],
       otherCategories: null,
       categoryChanges: [],

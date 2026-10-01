@@ -159,7 +159,10 @@ export interface FinanceContext {
   daysElapsed: number;
   summary: {
     incomeCents: number;
+    /** CASH expenses — card purchases are debt (cardExpenseCents). */
     expenseCents: number;
+    /** Card purchases of the month (debt, never part of the saldo). */
+    cardExpenseCents: number;
     balanceCents: number;
     /** null when the month has no budget with planned > 0. */
     budget: { plannedCents: number; spentCents: number; pct: number } | null;
@@ -371,6 +374,7 @@ export async function buildFinanceContext(
     summary: {
       incomeCents: totals.incomeCents,
       expenseCents,
+      cardExpenseCents: totals.cardExpenseCents,
       balanceCents: totals.balanceCents,
       budget:
         budgetView.totals.plannedCents > 0
@@ -510,6 +514,9 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
     resumen: {
       ingresos: ar(summary.incomeCents),
       gastos: ar(summary.expenseCents),
+      // Card purchases are debt, not gasto: listed apart so the model never
+      // subtracts them from the saldo.
+      compras_con_tarjeta: ar(summary.cardExpenseCents),
       saldo: ar(summary.balanceCents),
       presupuesto: summary.budget
         ? {

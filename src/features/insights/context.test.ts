@@ -125,12 +125,13 @@ describe("insights context (integration on PGlite)", () => {
 
   it("pre-computes exact month summary figures", async () => {
     const ctx = await buildFinanceContext(appDb, MONTH, TODAY);
-    // Budget totals reuse budgets.getMonth semantics: spent is ALL household
+    // Budget totals reuse budgets.getMonth semantics: spent is the CASH
     // expenses of the month against the plan — the same numbers the
-    // /presupuesto page shows (not just budgeted categories).
+    // /presupuesto page shows (card purchases are debt, never execution).
     expect(ctx.summary).toEqual({
       incomeCents: 800_000,
       expenseCents: 306_000,
+      cardExpenseCents: 0,
       balanceCents: 494_000,
       budget: { plannedCents: 150_000, spentCents: 306_000, pct: 204 },
     });
@@ -219,6 +220,7 @@ describe("insights context (integration on PGlite)", () => {
     expect(ctx.summary).toEqual({
       incomeCents: 0,
       expenseCents: 0,
+      cardExpenseCents: 0,
       balanceCents: 0,
       budget: null,
     });
@@ -236,6 +238,8 @@ describe("insights context (integration on PGlite)", () => {
     const resumen = prompt.resumen as Record<string, string>;
     expect(resumen.ingresos).toBe("$ 8.000,00");
     expect(resumen.gastos).toBe("$ 3.060,00");
+    // Card purchases travel apart so the model never treats them as gasto.
+    expect(resumen.compras_con_tarjeta).toBe("$ 0,00");
     const supermercado = (
       prompt.mayores_gastos_por_categoria as { categoria: string; gasto: string }[]
     ).find((row) => row.categoria === "Supermercado");
@@ -392,6 +396,9 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
   it("splits the month expenses by payment method", async () => {
     const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
     expect(ctx.paymentSplit).toEqual({ cashCents: 10_000, cardCents: 50_000 });
+    // Cash-basis saldo: the card purchases are debt and never hit it.
+    expect(ctx.summary.balanceCents).toBe(-10_000);
+    expect(ctx.summary.cardExpenseCents).toBe(50_000);
   });
 
   it("separates fixed debts from revolving cards with the full cupo facts", async () => {

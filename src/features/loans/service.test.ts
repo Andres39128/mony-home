@@ -1291,6 +1291,26 @@ describe("revolving cards (integration on PGlite)", () => {
     expect(capitalMirrors).toHaveLength(0);
   });
 
+  it("an all-finance payment needs NO Pago de tarjetas category (R3-001)", async () => {
+    // Hide the system category by RENAMING it (the id stays, so the FKs of
+    // earlier mirrors stay intact): with nothing amortized, the payment must
+    // not require the capital mirror category to exist.
+    await db
+      .update(categories)
+      .set({ name: "Pago de tarjetas (oculta)" })
+      .where(eq(categories.name, "Pago de tarjetas"));
+    try {
+      expect(
+        await addCardPayment(appDb, member, cardId, cardPayment("50.000,00", { includeFee: "1" })),
+      ).toEqual({ ok: true });
+    } finally {
+      await db
+        .update(categories)
+        .set({ name: "Pago de tarjetas" })
+        .where(eq(categories.name, "Pago de tarjetas (oculta)"));
+    }
+  });
+
   it("rejects card payments with typed errors", async () => {
     expect(
       await addCardPayment(appDb, member, otherLoanId, cardPayment("1.000,00")),

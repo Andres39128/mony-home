@@ -363,12 +363,15 @@ export const savingsContributions = pgTable(
  *
  * Revolving credit cards (amortizationMode 'revolving') are the opposite of
  * a fixed loan: the borrowed amount GROWS with use. Purchases live in
- * `transactions` linked via card_loan_id (never in this ledger), interest is
- * VARIABLE and entered manually at payment time, and the fixed "cuota de
- * manejo" is charged when the user includes it in a payment. Outstanding =
- * principal (initial balance, may be 0) + purchases + interest + charges −
- * payments; available credit = credit_limit − outstanding (capped at the
- * limit; a negative outstanding is "saldo a favor").
+ * `transactions` linked via card_loan_id (never in this ledger) — they are
+ * card DEBT: cash-basis totals exclude them until the card is paid.
+ * Interest is VARIABLE and entered manually at payment time, and the fixed
+ * "cuota de manejo" is charged when the user includes it in a payment. The
+ * payment mirrors its amortizing portion (total − interest − fee) as a cash
+ * expense under "Pago de tarjetas". Outstanding = principal (initial
+ * balance, may be 0) + purchases + interest + charges − payments;
+ * available credit = credit_limit − outstanding (capped at the limit; a
+ * negative outstanding is "saldo a favor").
  */
 export const loans = pgTable(
   "loans",
@@ -537,11 +540,12 @@ export const loans = pgTable(
 
 /**
  * Loan payments ledger: 'payment' rows reduce the debt and MIRROR an expense
- * in `transactions` (paying a loan is real money leaving the household);
- * 'interest' rows are written by the lazy monthly accrual (or by admin
- * balance true-ups) and never mirror; 'charge' rows are the bank-style cuota
- * components (seguros, otros cargos, mora) written at each cuota close.
- * Engine rows ('interest'/'charge') are member-less and note-keyed.
+ * in `transactions` (paying a loan is real money leaving the household; a
+ * card payment mirrors its amortizing portion — the purchase itself was
+ * card debt); 'interest' rows are written by the lazy monthly accrual (or by
+ * admin balance true-ups) and never mirror; 'charge' rows are the bank-style
+ * cuota components (seguros, otros cargos, mora) written at each cuota
+ * close. Engine rows ('interest'/'charge') are member-less and note-keyed.
  */
 export const loanPayments = pgTable(
   "loan_payments",
