@@ -54,7 +54,13 @@ ask-on-risk (default). Forecast ~350–500 líneas changed con tests → probabl
 - [x] R3-001 fixeado (commit dba827169766): `capitalCents` se calcula antes de los checks; "Pago de tarjetas" se exige solo si `capitalCents > 0`; test de regresión renombrando la categoría (FK intacta). 42/42 loans suite, typecheck OK. RDD: assess medium 58 líneas, review_due false (under_budget).
 
 ## Next step
-Entrega: >400 líneas → decisión del usuario (ask-on-risk): single PR con size:exception vs chained PRs. Push/PR restan decisión humana.
+Entrega: cadena stacked-to-main elegida por el usuario (2026-10-01). Post-rebase shas: core=1ffb4a7b62a5, ui=0beae928bbd4, r3fix=9326a6668cd6, docs=e7bf2092cff0/3894f76a0609/2a8fe753442d.
+
+## Chain plan (stacked to main)
+- PR#0 `fix/update-outstanding-clock` (a6bfb62025fb, 15 líneas) → main. Baseline: test de accrual clock-dependent fallaba en main desde 2026-10-01; ahora inyectable `now`. 459/459 suite completa verde.
+- PR#1 `feat/saldo-cash-basis-core` (1ffb4a7b62a5, 485 líneas) → base PR#0. Núcleo cash-basis. **size:exception**: flip semántico indivisible (exclusión de compras card + espejo del pago deben landar juntos o el saldo pierde ambos lados); tests viajan con su unidad.
+- PR#2 `feat/saldo-solo-efectivo` (2a8fe753442d, 201 líneas) → base PR#1. UI consumers + fix R3-001 + docs.
+- Deploy: tras merge correr `npm run db:seed` (categoría sistema "Pago de tarjetas" — no viene por migración).
 
 ## Route declaration
 T1–T3 delegated (writer trigger: 2+ archivos no triviales; lectura-preparación-para-escribir pertenece al writer).
