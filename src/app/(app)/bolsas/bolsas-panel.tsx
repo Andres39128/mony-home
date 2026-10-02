@@ -5,6 +5,7 @@ import type { ContributionView, GoalView, RateReviewView } from "@/features/savi
 import {
   computeGoalProgress,
   computeInvestmentReturn,
+  formatFxRate,
   formatRatePercent,
   investmentValueCents,
   monthsUntilDeadline,
@@ -27,10 +28,17 @@ import {
 
 type BolsaAction = (state: FormState, formData: FormData) => Promise<FormState>;
 
+/** Datalist suggestions for the Moneda field (free-text input on top). */
+const COMMON_CURRENCIES = ["USD", "EUR", "USDT", "BRL", "PEN"] as const;
+
 interface Props {
   goals: GoalView[];
   members: { id: string; name: string }[];
   isAdmin: boolean;
+  /** The household's base currency (app_config) — what every total is in. */
+  baseCurrency: string;
+  /** Manual FX rates (F8): base units per 1 foreign unit. */
+  fxRates: Record<string, number>;
   patrimony: {
     savingsCents: number;
     investmentsCents: number;
@@ -278,9 +286,22 @@ function BolsaCard({
   );
 }
 
+/**
+ * Foreign-currency pill (F8): "USD · tasa 3.800" when a manual rate exists,
+ * "USD · sin tasa" when the patrimony can't convert it yet.
+ */
+function CurrencyBadge({ currency, rate }: { currency: string; rate?: number }) {
+  return (
+    <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-medium text-ink">
+      {currency} · {rate !== undefined ? `tasa ${formatFxRate(rate)}` : "sin tasa"}
+    </span>
+  );
+}
+
 function InvestmentCard({
   goal,
   isAdmin,
+  fxRates,
   contributionAction,
   valueAction,
   autoFocusContribution,
@@ -289,20 +310,32 @@ function InvestmentCard({
 }: {
   goal: GoalView;
   isAdmin: boolean;
+  fxRates: Record<string, number>;
   contributionAction: BolsaAction;
   valueAction: BolsaAction;
   autoFocusContribution: boolean;
   valueTourId?: string;
   entries: ContributionView[];
 }) {
-  const returnValue = computeInvestmentReturn(goal.netCents, goal.currentValueCents);
+  const foreign = goal.currency !== "" ? goal.currency : null;
+  const rate = foreign !== null ? fxRates[foreign] : undefined;
   const valueCents = investmentValueCents(goal.netCents, goal.currentValueCents);
+  // Base goals: value is base. Foreign + rate: return compares against the
+  // converted value (mixed units would lie). Foreign sin tasa: unknown — "—".
+  const convertedCents =
+    foreign !== null && rate !== undefined ? Math.round(valueCents * rate) : null;
+  const returnValue =
+    foreign === null || convertedCents !== null
+      ? computeInvestmentReturn(goal.netCents, convertedCents ?? goal.currentValueCents)
+      : null;
   const returnClass =
-    returnValue > 0
-      ? "rounded-md bg-sage/40 px-1.5 text-ink"
-      : returnValue < 0
-        ? "rounded-md bg-danger-fill/50 px-1.5 text-danger-text"
-        : "text-muted";
+    returnValue === null
+      ? "text-muted"
+      : returnValue > 0
+        ? "rounded-md bg-sage/40 px-1.5 text-ink"
+        : returnValue < 0
+          ? "rounded-md bg-danger-fill/50 px-1.5 text-danger-text"
+          : "text-muted";
 
   const [valueState, valueFormAction, valuePending] = useActionState(valueAction, {});
 
@@ -316,6 +349,10 @@ function InvestmentCard({
         <span className="font-medium text-ink">{goal.name}</span>
         <ScopeBadge scope={goal.scope} memberName={goal.memberName} />
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <RateBadge annualRateBp={goal.annualRateBp} mode={goal.accrualMode === "compound" ? "TEA" : "TNA"} />
+        {foreign !== null && <CurrencyBadge currency={foreign} rate={rate} />}
+      </div>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div>
           <p className="text-xs text-muted">Invertido neto</p>
@@ -326,14 +363,18 @@ function InvestmentCard({
         <div>
           <p className="text-xs text-muted">Valor actual</p>
           <p className="font-medium tabular-nums text-ink">
-            {formatCents(valueCents)}
+            {foreign !== null ? formatCents(valueCents, foreign) : formatCents(valueCents)}
           </p>
+          {convertedCents !== null && (
+            <p className="text-xs tabular-nums text-muted">
+              ≈ {formatCents(convertedCents)}
+            </p>
+          )}
         </div>
         <div>
           <p className="text-xs text-muted">Retorno</p>
           <p className={`font-medium tabular-nums ${returnClass}`}>
-            {returnValue > 0 ? "+" : ""}
-            {returnValue}%
+            {returnValue === null ? "—" : `${returnValue > 0 ? "+" : ""}${returnValue}%`}
           </p>
         </div>
         <div>
@@ -359,9 +400,9 @@ function InvestmentCard({
           <input
             name="currentValue"
             inputMode="decimal"
-            placeholder="Valor actual"
+            placeholder={`Valor actual${foreign !== null ? ` en ${foreign}` : ""}`}
             aria-label={`Valor actual de ${goal.name}`}
-            defaultValue={goal.currentValueCents === null ? undefined : formatCents(goal.currentValueCents)}
+            defaultValue={goal.currentValueCents === null ? undefined : formatCents(goal.currentValueCents, foreign ?? undefined)}
             className={`${inputClass} w-40 flex-1`}
           />
           <SubmitButton pending={valuePending} variant="secondary">
@@ -387,10 +428,12 @@ function InvestmentCard({
 function BolsaFields({
   state,
   members,
+  baseCurrency,
   goal,
 }: {
   state: FormState;
   members: { id: string; name: string }[];
+  baseCurrency: string;
   goal?: GoalView;
 }) {
   const [kind, setKind] = useState<"savings" | "investment">(goal?.kind ?? "savings");
@@ -470,10 +513,35 @@ function BolsaFields({
             name="currentValue"
             inputMode="decimal"
             placeholder="1.234,56"
-            defaultValue={goal?.currentValueCents != null ? formatCents(goal.currentValueCents) : undefined}
+            defaultValue={goal?.currentValueCents != null ? formatCents(goal.currentValueCents, goal.currency || undefined) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.currentValue} />
+        </label>
+      )}
+      {kind === "investment" && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Moneda del valor actual</span>
+          <input
+            name="currency"
+            list="bolsa-currency-options"
+            defaultValue={goal?.currency ?? ""}
+            placeholder={baseCurrency}
+            maxLength={3}
+            pattern="[A-Za-z]{3}"
+            title="Código de 3 letras, ej: USD"
+            className={`${inputClass} uppercase`}
+          />
+          <datalist id="bolsa-currency-options">
+            {COMMON_CURRENCIES.map((code) => (
+              <option key={code} value={code} />
+            ))}
+          </datalist>
+          <span className="text-xs text-muted">
+            Vacío = {baseCurrency} (la moneda de la casa). Con otra moneda, el
+            patrimonio convierte con la tasa manual de Configuración.
+          </span>
+          <FieldError message={state.fieldErrors?.currency} />
         </label>
       )}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -525,9 +593,11 @@ function BolsaFields({
 function CreateBolsaForm({
   action,
   members,
+  baseCurrency,
 }: {
   action: BolsaAction;
   members: { id: string; name: string }[];
+  baseCurrency: string;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   return (
@@ -537,7 +607,7 @@ function CreateBolsaForm({
       className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
     >
       <h2 className="font-semibold text-ink">Nueva bolsa</h2>
-      <BolsaFields state={state} members={members} />
+      <BolsaFields state={state} members={members} baseCurrency={baseCurrency} />
       <FormError state={state} />
       <SubmitButton pending={pending}>Crear bolsa</SubmitButton>
     </form>
@@ -547,12 +617,14 @@ function CreateBolsaForm({
 function EditBolsaForm({
   goal,
   members,
+  baseCurrency,
   updateAction,
   toggleAction,
   deleteAction,
 }: {
   goal: GoalView;
   members: { id: string; name: string }[];
+  baseCurrency: string;
   updateAction: BolsaAction;
   toggleAction: BolsaAction;
   deleteAction: BolsaAction;
@@ -580,7 +652,7 @@ function EditBolsaForm({
     >
       <form action={formAction} className="flex flex-col gap-4">
         <input type="hidden" name="id" value={goal.id} />
-        <BolsaFields state={state} members={members} goal={goal} />
+        <BolsaFields state={state} members={members} baseCurrency={baseCurrency} goal={goal} />
         <FormError state={state} />
         <OkMessage state={state} />
         <SubmitButton pending={pending}>Guardar cambios</SubmitButton>
@@ -648,6 +720,8 @@ export default function BolsasPanel({
   goals,
   members,
   isAdmin,
+  baseCurrency,
+  fxRates,
   patrimony,
   contributionsByGoal,
   pendingReviews,
@@ -663,6 +737,20 @@ export default function BolsasPanel({
   const savings = goals.filter((goal) => goal.kind === "savings");
   const investments = goals.filter((goal) => goal.kind === "investment");
 
+  // Patrimony strip honesty note: which foreign currencies actually got
+  // converted for the totals above (rate exists). Sorted for stable copy.
+  const convertedCurrencies = [...new Set(
+    investments
+      .filter((goal) => goal.currency !== "" && fxRates[goal.currency] !== undefined)
+      .map((goal) => goal.currency),
+  )].sort();
+  const conversionNote =
+    convertedCurrencies.length > 0
+      ? `Convierte ${convertedCurrencies
+          .map((code) => `${code} ×${formatFxRate(fxRates[code])}`)
+          .join(" · ")} a ${baseCurrency}`
+      : null;
+
   // One autoFocus + tour anchor across all cards: the first active goal wins.
   const firstActiveId = goals.find((goal) => goal.isActive)?.id;
 
@@ -675,9 +763,14 @@ export default function BolsasPanel({
         {[
           { label: "Patrimonio neto", cents: patrimony.totalCents, accent: true },
           { label: "Ahorro", cents: patrimony.savingsCents, accent: false },
-          { label: "Inversión", cents: patrimony.investmentsCents, accent: false },
+          {
+            label: "Inversión",
+            cents: patrimony.investmentsCents,
+            accent: false,
+            note: conversionNote,
+          },
           ...(patrimony.propertiesCents > 0
-            ? [{ label: "Inmuebles", cents: patrimony.propertiesCents, accent: false }]
+            ? [{ label: "Inmuebles", cents: patrimony.propertiesCents, accent: false, note: null }]
             : []),
         ].map((item) => (
           <article
@@ -694,6 +787,7 @@ export default function BolsasPanel({
             <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
               {formatCents(item.cents)}
             </p>
+            {item.note && <p className="mt-1 text-xs text-muted">{item.note}</p>}
           </article>
         ))}
       </div>
@@ -735,6 +829,7 @@ export default function BolsasPanel({
               key={goal.id}
               goal={goal}
               isAdmin={isAdmin}
+              fxRates={fxRates}
               contributionAction={contributionAction}
               valueAction={valueAction}
               autoFocusContribution={false}
@@ -752,13 +847,14 @@ export default function BolsasPanel({
 
       {isAdmin && (
         <>
-          <CreateBolsaForm action={createAction} members={members} />
+          <CreateBolsaForm action={createAction} members={members} baseCurrency={baseCurrency} />
           <div className="flex flex-col gap-3">
             {goals.map((goal) => (
               <EditBolsaForm
                 key={goal.id}
                 goal={goal}
                 members={members}
+                baseCurrency={baseCurrency}
                 updateAction={updateAction}
                 toggleAction={toggleAction}
                 deleteAction={deleteAction}

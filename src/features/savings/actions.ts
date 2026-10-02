@@ -30,6 +30,9 @@ function mapGoalError(error: string): FormState {
   if (error === "invalid_rate") {
     return { fieldErrors: { annualRate: "La TNA no es válida (máximo 1000%)." } };
   }
+  if (error === "invalid_currency") {
+    return { fieldErrors: { currency: "Solo las inversiones admiten otra moneda." } };
+  }
   if (error === "member_not_found") {
     return { fieldErrors: { memberId: "El integrante seleccionado no existe." } };
   }
@@ -58,6 +61,7 @@ function readGoalForm(formData: FormData) {
     institution: formData.get("institution") ?? "",
     annualRate: formData.get("annualRate") ?? "",
     accrualMode: formData.get("accrualMode") ?? "",
+    currency: formData.get("currency") ?? "",
   };
 }
 
