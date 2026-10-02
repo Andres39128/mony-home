@@ -102,7 +102,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* Desktop top bar (md+): brand, primary nav, admin dropdown, actions. */}
+      {/* Desktop top bar (md+): brand, primary nav, search, admin dropdown, actions. */}
       <header className="hidden border-b border-line bg-surface md:block">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-6">
@@ -110,6 +110,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <TopNavLinks />
           </div>
           <div className="flex items-center gap-3 text-sm">
+            {/* Global search (F6): a plain GET form — works without JS and
+                lands on /buscar?q=…, a shareable URL like every filter. */}
+            <search>
+              <form action="/buscar" method="get">
+                <input
+                  type="search"
+                  name="q"
+                  maxLength={100}
+                  placeholder="Buscar…"
+                  aria-label="Buscar en todo el hogar"
+                  className="min-h-11 w-40 rounded-lg border border-line bg-surface px-3 text-sm text-ink outline-none placeholder:text-muted focus:border-ink focus:ring-2 focus:ring-ink/10 lg:w-52"
+                />
+              </form>
+            </search>
             <TourLauncher />
             <span className="text-muted">
               {user.name} · {ROLE_LABELS[user.role]}
