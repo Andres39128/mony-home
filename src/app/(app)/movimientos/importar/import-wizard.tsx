@@ -319,9 +319,15 @@ export default function ImportWizard({
         </Card>
       )}
 
-      {step === 3 && state.preview && (
+      {/* Step 3 renders for BOTH outcomes: the preview form (preview set,
+          no summary yet) and the post-commit confirmation (summary set —
+          the action returns step 3 WITHOUT preview, so gating on preview
+          alone made the summary unreachable). */}
+      {step === 3 && (state.preview || state.summary) && (
         <Card className="flex flex-col gap-4 p-6">
-          {!state.summary && (
+        {/* Preview form: only when the classification is present and the
+            commit has not run yet. */}
+          {!state.summary && state.preview && (
             <>
               <p className="text-sm text-muted">
                 Los duplicados quedan excluidos salvo que marques la casilla; las
