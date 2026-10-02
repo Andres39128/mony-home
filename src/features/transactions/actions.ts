@@ -352,6 +352,12 @@ export async function importMovementsAction(
   const raw = String(formData.get("csv") ?? "");
   const step = String(formData.get("step") ?? "parse");
 
+  // Unknown steps never reach a DB write: the state machine rejects instead
+  // of falling through to the commit branch (client-controlled field).
+  if (step !== "parse" && step !== "preview" && step !== "import") {
+    return { error: "La importación se cerró de forma inesperada. Volvé a empezar." };
+  }
+
   // Paso 1 → 2: parse + detect + guess.
   if (step === "parse") {
     const parsed = parseImportCsv(raw);

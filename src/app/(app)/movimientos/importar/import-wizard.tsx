@@ -244,7 +244,16 @@ export default function ImportWizard({
                 <Toggle
                   name="type"
                   value={type}
-                  onChange={(value) => setType(value === "income" ? "income" : "expense")}
+                  onChange={(value) => {
+                    const next = value === "income" ? "income" : "expense";
+                    setType(next);
+                    // The category list is kind-scoped: keep the selection
+                    // valid when the type flips (a controlled select's
+                    // remount alone does NOT update state).
+                    setCategoryId(
+                      categories.find((category) => category.kind === next)?.id ?? "",
+                    );
+                  }}
                   options={[
                     { value: "expense", label: "Gasto" },
                     { value: "income", label: "Ingreso" },
