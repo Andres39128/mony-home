@@ -29,6 +29,7 @@ import { resolveMemberId } from "@/lib/authorization";
 import type { SessionUser } from "@/lib/auth";
 import { parseAmountCents, parsePositiveAmountCents } from "@/lib/money-errors";
 import { todayIso } from "@/lib/date";
+import { recordAudit, auditAmount } from "@/features/audit/service";
 import { getCardPurchaseInfo } from "@/features/loans/service";
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -547,7 +548,7 @@ export async function createTransaction(
   // racing past the checks. The optional receipt rides the same transaction
   // so the movement never exists without its declared image.
   try {
-    return await db.transaction<MovementResult>(async (tx) => {
+    const result = await db.transaction<MovementResult>(async (tx) => {
       const rows = await loadReferencedRows(tx, member.memberId, input);
       const ruleError = checkReferencedRows(rows, input);
       if (ruleError) return { ok: false, error: ruleError };
@@ -568,6 +569,17 @@ export async function createTransaction(
       if (input.receipt) await insertReceipt(tx, created.id, input.receipt);
       return { ok: true };
     });
+    if (result.ok) {
+      await recordAudit(
+        db,
+        user,
+        "transaction",
+        "",
+        "create",
+        `Movimiento creado: ${auditAmount(input.amount)}${input.note ? ` — ${input.note}` : ""}`,
+      );
+    }
+    return result;
   } catch (error) {
     // A referenced row deleted between the checks above and the insert.
     if (hasPgError(error, "23503")) return { ok: false, error: "not_found" };
@@ -589,7 +601,7 @@ export async function createQuickTransaction(
   if (!member.ok) return member;
 
   try {
-    return await db.transaction<MovementResult>(async (tx) => {
+    const result = await db.transaction<MovementResult>(async (tx) => {
       const [memberRow] = await tx
         .select({ isActive: users.isActive })
         .from(users)
@@ -617,6 +629,10 @@ export async function createQuickTransaction(
       await insertReceipt(tx, created.id, input.receipt);
       return { ok: true };
     });
+    if (result.ok) {
+      await recordAudit(db, user, "transaction", "", "create", "Captura rápida (pendiente de detalles)");
+    }
+    return result;
   } catch (error) {
     if (hasPgError(error, "23503")) return { ok: false, error: "not_found" };
     throw error;
@@ -639,7 +655,7 @@ export async function updateTransaction(
   // shape as create): full data always COMPLETES a pending row, and a
   // pending row must never stay pending once amount + category are set.
   try {
-    return await db.transaction<MovementResult>(async (tx) => {
+    const result = await db.transaction<MovementResult>(async (tx) => {
       const [existing] = await tx
         .select({
           memberId: transactions.memberId,
@@ -687,6 +703,17 @@ export async function updateTransaction(
       }
       return { ok: true };
     });
+    if (result.ok) {
+      await recordAudit(
+        db,
+        user,
+        "transaction",
+        id,
+        "update",
+        `Movimiento actualizado: ${auditAmount(input.amount)}${input.note ? ` — ${input.note}` : ""}`,
+      );
+    }
+    return result;
   } catch (error) {
     if (hasPgError(error, "23503")) return { ok: false, error: "not_found" };
     throw error;
@@ -714,6 +741,7 @@ export async function removeTransaction(
     .where(eq(transactions.id, id))
     .returning({ id: transactions.id });
   if (deleted.length === 0) return { ok: false, error: "not_found" };
+  await recordAudit(db, user, "transaction", id, "delete", "Movimiento eliminado");
   return { ok: true };
 }
 
@@ -810,7 +838,7 @@ export async function setOpeningBalance(
 
   const type = cents > 0 ? ("income" as const) : ("expense" as const);
   try {
-    return await db.transaction<OpeningBalanceResult>(async (tx) => {
+    const result = await db.transaction<OpeningBalanceResult>(async (tx) => {
       const [category] = await tx
         .select({ id: categories.id })
         .from(categories)
@@ -860,6 +888,17 @@ export async function setOpeningBalance(
       }
       return { ok: true };
     });
+    if (result.ok) {
+      await recordAudit(
+        db,
+        user,
+        "transaction",
+        "",
+        "update",
+        `Saldo inicial: ${auditAmount(input.amount)} (${input.date})`,
+      );
+    }
+    return result;
   } catch (error) {
     // The category row vanished between the lookup and the write (seed re-runs
     // with a wiped DB): same answer as the upfront check.

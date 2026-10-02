@@ -12,6 +12,7 @@ import { z } from "zod";
 import { expenseGroups, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import type { SessionUser } from "@/lib/auth";
+import { recordAudit } from "@/features/audit/service";
 
 export interface ExpenseGroupView {
   id: string;
@@ -84,6 +85,7 @@ export async function updateExpenseGroup(
     .where(eq(expenseGroups.id, id))
     .returning({ id: expenseGroups.id });
   if (updated.length === 0) return { ok: false, error: "group_not_found" };
+  await recordAudit(db, user, "group", id, "update", `Grupo actualizado: ${input.name}`);
   return { ok: true };
 }
 
@@ -100,6 +102,14 @@ export async function setExpenseGroupStatus(
     .where(eq(expenseGroups.id, id))
     .returning({ id: expenseGroups.id });
   if (updated.length === 0) return { ok: false, error: "group_not_found" };
+  await recordAudit(
+    db,
+    user,
+    "group",
+    id,
+    "update",
+    status === "closed" ? "Grupo cerrado" : "Grupo reabierto",
+  );
   return { ok: true };
 }
 
@@ -115,5 +125,6 @@ export async function removeExpenseGroup(
     .where(eq(expenseGroups.id, id))
     .returning({ id: expenseGroups.id });
   if (deleted.length === 0) return { ok: false, error: "group_not_found" };
+  await recordAudit(db, user, "group", id, "delete", "Grupo eliminado");
   return { ok: true };
 }

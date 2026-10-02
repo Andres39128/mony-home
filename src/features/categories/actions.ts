@@ -11,6 +11,7 @@ import {
   toggleCategoryActive,
   updateCategory,
 } from "@/features/categories/service";
+import { recordAudit } from "@/features/audit/service";
 import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden modificar categorías.";
@@ -43,13 +44,15 @@ export async function createCategoryAction(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  await requireUser();
+  const user = await requireUser();
 
   const parsed = categorySchema.safeParse(readCategoryForm(formData));
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error.issues) };
 
   const result = await createCategory(getDb(), parsed.data);
   if (!result.ok) return mapCategoryError(result.error);
+  // createCategory is actor-less (open to any member): the action owns the audit.
+  await recordAudit(getDb(), user, "category", result.id, "create", `Categoría creada: ${parsed.data.name}`);
   refresh();
   return { ok: true };
 }

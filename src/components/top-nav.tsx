@@ -19,6 +19,7 @@ const ADMIN_LINKS = [
   { href: "/categorias", label: "Categorías" },
   { href: "/grupos", label: "Grupos" },
   { href: "/configuracion", label: "Configuración" },
+  { href: "/auditoria", label: "Auditoría" },
 ] as const;
 
 function isActive(pathname: string, href: string) {

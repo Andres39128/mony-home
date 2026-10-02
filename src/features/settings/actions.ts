@@ -7,10 +7,12 @@ import { requireUser } from "@/features/auth/session";
 import {
   appSettingsSchema,
   fxRateSchema,
+  normalizeFxRate,
   setAppSettings,
   setFxRate,
 } from "@/lib/app-settings";
 import { fieldErrorsFrom, type FormState } from "@/lib/form-state";
+import { recordAudit } from "@/features/audit/service";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden cambiar la configuración.";
 
@@ -41,6 +43,14 @@ export async function setAppSettingsAction(
 
   const result = await setAppSettings(getDb(), user, parsed.data);
   if (!result.ok) return { error: "No se pudo guardar la configuración." };
+  await recordAudit(
+    getDb(),
+    user,
+    "settings",
+    "app",
+    "update",
+    `Configuración actualizada: ${parsed.data.currencyCode} · ${parsed.data.locale}`,
+  );
   refresh();
   return { ok: true };
 }
@@ -76,6 +86,14 @@ export async function setFxRateAction(
     if (result.error === "forbidden") return { error: ADMIN_REQUIRED_MESSAGE };
     return { error: "No se pudo guardar la tasa." };
   }
+  await recordAudit(
+    getDb(),
+    user,
+    "settings",
+    `fx:${parsed.data.code}`,
+    "update",
+    `Tasa de cambio actualizada: 1 ${parsed.data.code} = ${normalizeFxRate(parsed.data.rate)}`,
+  );
   refresh();
   return { ok: true };
 }

@@ -21,6 +21,7 @@ import { parsePositiveAmountCents } from "@/lib/money-errors";
 import { resolveMemberId } from "@/lib/authorization";
 import { ISO_CURRENCY_CODE_RE, getFxRates } from "@/lib/app-settings";
 import type { SessionUser } from "@/lib/auth";
+import { recordAudit, auditAmount } from "@/features/audit/service";
 import { todayIso } from "@/lib/date";
 import { listLoans, type LoanView } from "@/features/loans/service";
 import { catchUpAllInterest } from "./accrual";
@@ -382,6 +383,14 @@ export async function createGoal(
       currentValueCents: input.kind === "investment" ? value : null,
       valueUpdatedAt: input.kind === "investment" && value !== null ? new Date() : null,
     });
+    await recordAudit(
+      db,
+      user,
+      "goal",
+      "",
+      "create",
+      `Bolsa creada: ${input.name}${input.currency !== "" ? ` (${input.currency})` : ""}`,
+    );
     return { ok: true };
   } catch (error) {
     // Stale member option (deleted between render and submit).
@@ -430,6 +439,14 @@ export async function updateGoal(
       .where(eq(savingsGoals.id, id))
       .returning({ id: savingsGoals.id });
     if (updated.length === 0) return { ok: false, error: "goal_not_found" };
+    await recordAudit(
+      db,
+      user,
+      "goal",
+      id,
+      "update",
+      `Bolsa actualizada: ${input.name}${input.currency !== "" ? ` (${input.currency})` : ""}`,
+    );
     return { ok: true };
   } catch (error) {
     if (hasPgError(error, "23503")) return { ok: false, error: "member_not_found" };
@@ -464,6 +481,7 @@ export async function removeGoal(
       .where(eq(savingsGoals.id, id))
       .returning({ id: savingsGoals.id });
     if (deleted.length === 0) return { ok: false, error: "goal_not_found" };
+    await recordAudit(db, user, "goal", id, "delete", "Bolsa eliminada");
     return { ok: true };
   } catch (error) {
     // RESTRICT FK: savings_contributions.goal_id (23001 on PGlite, 23503 on PG 17).
@@ -555,7 +573,8 @@ export async function addContribution(
 
   // Contribution + mirror commit together (R1): stats never diverge from
   // the savings ledger. Interest rows never pass through here.
-  return db.transaction(async (tx) => {
+  let goalName = "";
+  const result = await db.transaction<ContributionResult>(async (tx) => {
     const [goal] = await tx
       .select({ name: savingsGoals.name, scope: savingsGoals.scope, isActive: savingsGoals.isActive })
       .from(savingsGoals)
@@ -563,6 +582,7 @@ export async function addContribution(
       .limit(1);
     if (!goal) return { ok: false, error: "goal_not_found" };
     if (!goal.isActive) return { ok: false, error: "goal_inactive" };
+    goalName = goal.name;
 
     const member = resolveMemberId(user, input.memberId);
     if (!member.ok) return member;
@@ -609,6 +629,17 @@ export async function addContribution(
       throw error;
     }
   });
+  if (result.ok) {
+    await recordAudit(
+      db,
+      user,
+      "contribution",
+      goalId,
+      input.kind === "deposit" ? "create" : "delete",
+      `${input.kind === "deposit" ? "Aporte a" : "Retiro de"} ${goalName}: ${auditAmount(input.amount)}`,
+    );
+  }
+  return result;
 }
 
 /** Full history (optionally one goal's), newest first. Feeds the /bolsas cards. */
@@ -735,6 +766,14 @@ export async function updateGoalValue(
       })
       .where(eq(savingsGoals.id, goalId));
   });
+  await recordAudit(
+    db,
+    user,
+    "goal",
+    goalId,
+    "valuation",
+    `Valoración actualizada: ${auditAmount(currentValue)}`,
+  );
   return { ok: true };
 }
 

@@ -50,6 +50,14 @@ export const dateFormatter = new Intl.DateTimeFormat("es-AR", {
   year: "numeric",
 });
 
+/** Shared es-AR date+time rendering (audit trail, "2 oct 9:45"). */
+export const dateTimeFormatter = new Intl.DateTimeFormat("es-AR", {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 /**
  * Date-only strings ('YYYY-MM-DD') parse as UTC; pin to local noon so
  * UTC-3 rendering never shifts the day backwards.

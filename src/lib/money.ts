@@ -168,6 +168,20 @@ export function formatCents(cents: number, currency: string = defaultCurrency): 
 }
 
 /**
+ * Exact-cent rendering (audit summaries): identical currency/locale to
+ * formatCents, but fraction digits bounded explicitly so zero-decimal
+ * currencies (COP on this ICU) never silently round a cent-precise amount.
+ */
+export function formatCentsExact(cents: number): string {
+  return new Intl.NumberFormat(defaultLocale, {
+    style: "currency",
+    currency: defaultCurrency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(centsToNumber(cents));
+}
+
+/**
  * Compact abbreviation for chart axes only (never for real amounts):
  * 1_540_000 cents → '15,4 k'. Exact values always go through formatCents.
  */
