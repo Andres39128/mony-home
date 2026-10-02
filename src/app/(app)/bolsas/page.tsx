@@ -2,6 +2,7 @@ import { getDb } from "@/db";
 import { requireUser } from "@/features/auth/session";
 import { getPatrimony, listContributions, listGoals, listPendingRateReviews } from "@/features/savings/service";
 import { listMembers } from "@/features/members/service";
+import { goalEtaLabels } from "@/features/insights/projections";
 import {
   addContributionAction,
   createGoalAction,
@@ -18,13 +19,15 @@ export default async function BolsasPage() {
   // listGoals FIRST: it triggers the lazy interest catch-up, so the history
   // query below is guaranteed to see the freshly materialized entries.
   const goals = await listGoals(getDb());
-  const [members, patrimony, contributions, pendingReviews] = await Promise.all([
+  const [members, patrimony, contributions, pendingReviews, etaLabels] = await Promise.all([
     listMembers(getDb()),
     // Reuse the goals fetched above (they already triggered the catch-up):
     // patrimony is pure aggregation over them, no second goals query.
     getPatrimony(getDb(), goals),
     listContributions(getDb()),
     listPendingRateReviews(getDb()),
+    // Derived projections (F4): one grouped contributions query, per-goal ETA copy.
+    goalEtaLabels(getDb(), goals),
   ]);
 
   // One query for every card's collapsible history, grouped here.
@@ -52,6 +55,7 @@ export default async function BolsasPage() {
         }}
         contributionsByGoal={contributionsByGoal}
         pendingReviews={pendingReviews}
+        etaLabels={etaLabels}
         createAction={createGoalAction}
         updateAction={updateGoalAction}
         toggleAction={toggleGoalAction}

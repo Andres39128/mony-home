@@ -36,6 +36,8 @@ interface Props {
   periodsByLoan: Record<string, LoanPeriodView[]>;
   /** Billing-cycle breakdowns for revolving cards, newest first. */
   cyclesByLoan: Record<string, CardCycleView[]>;
+  /** Derived payoff copy per loan id (null = not projectable: rotativo, sin cuota). */
+  payoffLabels: Record<string, string | null>;
   createAction: LoanAction;
   updateAction: LoanAction;
   toggleAction: LoanAction;
@@ -541,6 +543,7 @@ function LoanCard({
   tourIds,
   entries,
   periods,
+  payoffLabel,
 }: {
   loan: LoanView;
   paymentAction: LoanAction;
@@ -548,6 +551,7 @@ function LoanCard({
   tourIds?: { card?: string; interest?: string; payment?: string; history?: string };
   entries: PaymentView[];
   periods: LoanPeriodView[];
+  payoffLabel: string | null;
 }) {
   return (
     <li
@@ -585,6 +589,7 @@ function LoanCard({
         <ProgressBar pct={loan.paidPct} status={loan.paidPct >= 100 ? "over" : loan.paidPct >= 75 ? "warn" : "ok"} />
       </div>
       <DebtLine loan={loan} />
+      {payoffLabel && <p className="text-xs font-medium text-muted">{payoffLabel}</p>}
       {loan.amortizationMode === "bank" && <PeriodBreakdown periods={periods} />}
       <HistoryDetails entries={entries} tourId={tourIds?.history} />
       {loan.isActive && (
@@ -1037,6 +1042,7 @@ export default function LoansPanel({
   paymentsByLoan,
   periodsByLoan,
   cyclesByLoan,
+  payoffLabels,
   createAction,
   updateAction,
   toggleAction,
@@ -1119,6 +1125,7 @@ export default function LoansPanel({
               }
               entries={paymentsByLoan[loan.id] ?? []}
               periods={loan.amortizationMode === "bank" ? (periodsByLoan[loan.id] ?? []) : []}
+              payoffLabel={payoffLabels[loan.id] ?? null}
             />
           ))}
         </ul>

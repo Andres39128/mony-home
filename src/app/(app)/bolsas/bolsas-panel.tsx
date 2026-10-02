@@ -39,6 +39,8 @@ interface Props {
   };
   contributionsByGoal: Record<string, ContributionView[]>;
   pendingReviews: RateReviewView[];
+  /** Derived ETA copy per goal id (null = nothing to show: no target / inversión). */
+  etaLabels: Record<string, string | null>;
   createAction: BolsaAction;
   updateAction: BolsaAction;
   toggleAction: BolsaAction;
@@ -214,12 +216,14 @@ function BolsaCard({
   autoFocusContribution,
   tourId,
   entries,
+  etaLabel,
 }: {
   goal: GoalView;
   contributionAction: BolsaAction;
   autoFocusContribution: boolean;
   tourId?: string;
   entries: ContributionView[];
+  etaLabel: string | null;
 }) {
   const progress = computeGoalProgress(goal.netCents, goal.targetCents);
   return (
@@ -253,6 +257,7 @@ function BolsaCard({
           Acumulado: {formatCents(goal.netCents)}
         </p>
       )}
+      {etaLabel && <p className="text-xs font-medium text-muted">{etaLabel}</p>}
       <YieldLine goal={goal} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <DeadlineLabel deadline={goal.deadline} />
@@ -646,6 +651,7 @@ export default function BolsasPanel({
   patrimony,
   contributionsByGoal,
   pendingReviews,
+  etaLabels,
   createAction,
   updateAction,
   toggleAction,
@@ -713,6 +719,7 @@ export default function BolsasPanel({
               autoFocusContribution={goal.id === firstActiveId}
               tourId={goal.id === firstActiveId ? "bolsas-aporte" : undefined}
               entries={contributionsByGoal[goal.id] ?? []}
+              etaLabel={etaLabels[goal.id] ?? null}
             />
           ))}
         </ul>
