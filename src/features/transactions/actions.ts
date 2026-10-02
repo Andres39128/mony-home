@@ -18,9 +18,22 @@ import {
   removeTransaction,
   setOpeningBalance,
   updateTransaction,
+  UUID_RE,
 } from "@/features/transactions/service";
+import {
+  IMPORT_MAX_ROWS,
+  commitImport,
+  parseImportCsv,
+  previewImport,
+  type ImportGlobals,
+  type ImportMapping,
+  type ImportMutationError,
+  type ImportPreview,
+} from "@/features/transactions/import";
+import type { ParsedCsv } from "@/features/transactions/import";
 import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
+import { ForbiddenError, requireAdmin } from "@/lib/auth";
 
 /** FormState plus the category created inline from the movement form. */
 export interface InlineCategoryState extends FormState {
@@ -261,4 +274,125 @@ export async function createCategoryInlineAction(
   refresh();
 
   return { ok: true, categoryId: result.id, categoryName: parsed.data.name };
+}
+
+// ---------------------------------------------------------------------------
+// CSV import wizard (F5) — one action drives the three steps: the client
+// ships raw text + mapping indices only; the server parses (trust boundary).
+// ---------------------------------------------------------------------------
+
+/** Wizard state: each resolved step carries what the next one renders. */
+export interface ImportState extends FormState {
+  /** Step to render after the action resolves (1 = default). */
+  step?: 2 | 3;
+  /** Step-2 mapping payload (the raw text never round-trips from the server). */
+  parsed?: ParsedCsv;
+  /** Step-3 row classification. */
+  preview?: ImportPreview;
+  /** Final "Importados: N · Duplicados: M · Errores: K". */
+  summary?: string;
+}
+
+/** Spanish feedback for the import service's typed errors. */
+function mapImportError(error: ImportMutationError): string {
+  switch (error) {
+    case "too_large":
+      return "El archivo supera el máximo de 2 MB.";
+    case "too_many_rows":
+      return `El archivo supera el máximo de ${IMPORT_MAX_ROWS} filas por importación.`;
+    case "empty_file":
+      return "El CSV debe tener una fila de encabezado y al menos una fila de datos.";
+    case "forbidden":
+      return "Solo los administradores pueden importar movimientos.";
+    case "category_kind_mismatch":
+      return "La categoría no corresponde al tipo de movimiento elegido.";
+    case "member_inactive":
+      return "El integrante seleccionado está inactivo.";
+    case "not_found":
+      return "Alguno de los datos seleccionados ya no existe. Recarga e intenta de nuevo.";
+  }
+}
+
+function indexFrom(formData: FormData, key: string): number {
+  const value = Number(formData.get(key));
+  return Number.isInteger(value) && value >= 0 ? value : -1;
+}
+
+function readImportMapping(formData: FormData): ImportMapping {
+  const rawNote = formData.get("noteIndex");
+  const note = rawNote === null || rawNote === "" ? null : Number(rawNote);
+  return {
+    dateIndex: indexFrom(formData, "dateIndex"),
+    amountIndex: indexFrom(formData, "amountIndex"),
+    noteIndex: note !== null && Number.isInteger(note) && note >= 0 ? note : null,
+  };
+}
+
+function readImportGlobals(formData: FormData): ImportGlobals {
+  return {
+    type: formData.get("type") === "income" ? "income" : "expense",
+    categoryId: String(formData.get("categoryId") ?? ""),
+    memberId: String(formData.get("memberId") ?? ""),
+    scope: formData.get("scope") === "individual" ? "individual" : "common",
+  };
+}
+
+export async function importMovementsAction(
+  prev: ImportState,
+  formData: FormData,
+): Promise<ImportState> {
+  const user = await requireUser();
+  try {
+    requireAdmin(user);
+  } catch (error) {
+    if (error instanceof ForbiddenError) return { error: mapImportError("forbidden") };
+    throw error;
+  }
+
+  const raw = String(formData.get("csv") ?? "");
+  const step = String(formData.get("step") ?? "parse");
+
+  // Paso 1 → 2: parse + detect + guess.
+  if (step === "parse") {
+    const parsed = parseImportCsv(raw);
+    if (!parsed.ok) return { error: mapImportError(parsed.error) };
+    return { step: 2, parsed: parsed.parsed };
+  }
+
+  const mapping = readImportMapping(formData);
+  const globals = readImportGlobals(formData);
+  // Empty integrante = the acting admin (same default as the movement form).
+  const withMember: ImportGlobals = {
+    ...globals,
+    memberId: globals.memberId === "" ? user.id : globals.memberId,
+  };
+  // Guard the uuid cast: an untouched category select must fail as copy, not
+  // as a raw Postgres "invalid input syntax" crash.
+  if (!UUID_RE.test(withMember.categoryId)) {
+    return { step: prev.step, parsed: prev.parsed, error: "Elegí una categoría para la importación." };
+  }
+
+  // Paso 2 → 3: classify every row (no writes).
+  if (step === "preview") {
+    const preview = await previewImport(getDb(), raw, mapping, withMember);
+    if (!preview.ok) return { error: mapImportError(preview.error) };
+    return { step: 3, parsed: prev.parsed, preview: preview.preview };
+  }
+
+  // Paso 3 → commit: insert the accepted rows.
+  const result = await commitImport(
+    getDb(),
+    user,
+    raw,
+    mapping,
+    withMember,
+    formData.get("includeDuplicates") === "1",
+  );
+  if (!result.ok) return { error: mapImportError(result.error) };
+  refresh();
+  return {
+    step: 3,
+    parsed: prev.parsed,
+    summary: `Importados: ${result.importados} · Duplicados: ${result.duplicados} · Errores: ${result.errores}`,
+  };
 }

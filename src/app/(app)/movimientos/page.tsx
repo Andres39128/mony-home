@@ -139,6 +139,15 @@ export default async function MovimientosPage({
           >
             Exportar CSV
           </a>
+          {/* Admin-only wizard (F5); the target page re-checks the role. */}
+          {user.role === "admin" && (
+            <a
+              href="/movimientos/importar"
+              className="inline-flex min-h-11 items-center self-start rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base"
+            >
+              Importar CSV
+            </a>
+          )}
           <NewMovementFab
             tourId="movimientos-nuevo"
             desktopButton
