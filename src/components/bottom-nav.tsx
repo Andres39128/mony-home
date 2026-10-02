@@ -16,6 +16,7 @@ import {
   LogoutIcon,
   PouchIcon,
   RepeatIcon,
+  SearchIcon,
   SettingsIcon,
   SparklesIcon,
   TagIcon,
@@ -34,6 +35,7 @@ const TABS = [
 ] as const;
 
 const MENU_LINKS = [
+  { href: "/buscar", label: "Buscar", Icon: SearchIcon },
   { href: "/perfil", label: "Perfil", Icon: UserIcon },
   { href: "/prestamos", label: "Préstamos", Icon: CreditCardIcon },
   { href: "/recurrentes", label: "Recurrentes", Icon: RepeatIcon },

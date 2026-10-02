@@ -7,10 +7,31 @@ import { getAppSettings } from "@/lib/app-settings";
 import { setDefaultCurrency } from "@/lib/money";
 import CurrencyBoot from "@/components/currency-boot";
 import TourLauncher from "@/features/tour/tour-launcher";
-import { SparklesIcon } from "@/components/icons";
+import { BellIcon, SparklesIcon } from "@/components/icons";
 import { BottomNav } from "@/components/bottom-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TopNavLinks } from "@/components/top-nav";
+
+/**
+ * Notificaciones entry point. LINK-ONLY on purpose (F7 decision): deriving
+ * the badge here would run budgets.getMonth + listLoans + listGoals (~10
+ * queries, incl. two unbounded-history aggregations) on EVERY navigation —
+ * measured at ~9 ms even on in-memory PGlite with zero network, i.e. dozens
+ * of ms of serverless RTT — and it re-runs reads the dashboard, /bolsas and
+ * /prestamos already perform. The full list lives in /notificaciones.
+ */
+function NotificationsLink() {
+  return (
+    <Link
+      href="/notificaciones"
+      aria-label="Ir a Notificaciones"
+      title="Notificaciones"
+      className="inline-flex size-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-base"
+    >
+      <BellIcon className="size-5" />
+    </Link>
+  );
+}
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
@@ -90,6 +111,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-line bg-surface/95 px-4 py-2 backdrop-blur md:hidden">
         <AppMark />
         <div className="flex items-center">
+          <NotificationsLink />
           <Link
             href="/asistente"
             aria-label="Ir al Asistente"
@@ -102,7 +124,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* Desktop top bar (md+): brand, primary nav, admin dropdown, actions. */}
+      {/* Desktop top bar (md+): brand, primary nav, search, admin dropdown, actions. */}
       <header className="hidden border-b border-line bg-surface md:block">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-center gap-6">
@@ -110,6 +132,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <TopNavLinks />
           </div>
           <div className="flex items-center gap-3 text-sm">
+            {/* Global search (F6): a plain GET form — works without JS and
+                lands on /buscar?q=…, a shareable URL like every filter. */}
+            <search>
+              <form action="/buscar" method="get">
+                <input
+                  type="search"
+                  name="q"
+                  maxLength={100}
+                  placeholder="Buscar…"
+                  aria-label="Buscar en todo el hogar"
+                  className="min-h-11 w-40 rounded-lg border border-line bg-surface px-3 text-sm text-ink outline-none placeholder:text-muted focus:border-ink focus:ring-2 focus:ring-ink/10 lg:w-52"
+                />
+              </form>
+            </search>
+            <NotificationsLink />
             <TourLauncher />
             <span className="text-muted">
               {user.name} · {ROLE_LABELS[user.role]}
