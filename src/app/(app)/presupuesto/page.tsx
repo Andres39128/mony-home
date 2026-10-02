@@ -31,6 +31,24 @@ function remainingChipClass(remainingCents: number): string {
   return remainingCents < 0 ? "bg-danger-fill text-on-accent" : "bg-honey text-on-accent";
 }
 
+/**
+ * Arrastre chip: the NET rollover can be negative (past overspends debit
+ * the category) — same chip language as the remaining figure.
+ */
+function carryChipClass(carryCents: number): string {
+  return carryCents < 0 ? "bg-danger-fill text-on-accent" : "bg-honey text-on-accent";
+}
+
+/** Small "Arrastre: $X" chip, hidden when the category has no carry. */
+function CarryChip({ carryCents }: { carryCents: number }) {
+  if (carryCents === 0) return null;
+  return (
+    <span className={`w-fit rounded px-1 text-xs font-medium tabular-nums ${carryChipClass(carryCents)}`}>
+      Arrastre: {formatCents(carryCents)}
+    </span>
+  );
+}
+
 export default async function PresupuestoPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser();
   const params = await searchParams;
@@ -79,7 +97,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
       </div>
 
       <div data-tour="presupuesto-resumen" className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
           <Card className="flex flex-col gap-1 p-4">
             <h2 className="text-xs font-medium text-muted">Presupuestado</h2>
             <p className="text-xl font-semibold tabular-nums text-ink">
@@ -98,6 +116,19 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
               className={`w-fit rounded-lg px-2 py-0.5 text-xl font-semibold tabular-nums ${remainingChipClass(totals.remainingCents)}`}
             >
               {formatCents(totals.remainingCents)}
+            </p>
+          </Card>
+          {/* Rollover: plan + NET carry of prior months (F2, computed). */}
+          <Card className="flex flex-col gap-1 p-4">
+            <h2 className="text-xs font-medium text-muted">Disponible</h2>
+            <p
+              className={`w-fit rounded-lg px-2 py-0.5 text-xl font-semibold tabular-nums ${remainingChipClass(view.totals.availableCents)}`}
+            >
+              {formatCents(view.totals.availableCents)}
+            </p>
+            <p className="flex items-center gap-1 text-xs text-muted">
+              Arrastre: {formatCents(view.totals.carryCents)}
+              <CarryChip carryCents={view.totals.carryCents} />
             </p>
           </Card>
           <Card className="flex flex-col gap-1 p-4">
@@ -162,6 +193,10 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
                     <p className="text-xs tabular-nums text-muted">
                       {formatCents(row.spentCents)} de {formatCents(row.plannedCents)}
                     </p>
+                    <p className="flex flex-wrap items-center gap-1 text-xs tabular-nums text-muted">
+                      Disponible: {formatCents(row.availableCents)}
+                      <CarryChip carryCents={row.carryCents} />
+                    </p>
                     <ProgressBar pct={row.pct} status={row.status} />
                   </li>
                 ))}
@@ -177,7 +212,8 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
                     <th className="px-4 py-3 text-right font-medium">Presupuestado</th>
                     <th className="px-4 py-3 text-right font-medium">Gastado</th>
                     <th className="px-4 py-3 font-medium">Avance</th>
-                    <th className="px-6 py-3 text-right font-medium">Restante</th>
+                    <th className="px-4 py-3 text-right font-medium">Restante</th>
+                    <th className="px-6 py-3 text-right font-medium">Disponible</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -207,13 +243,25 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
                         <ProgressBar pct={row.pct} status={row.status} />
                       </td>
                       <td
-                        className={`px-6 py-3 text-right tabular-nums ${
+                        className={`px-4 py-3 text-right tabular-nums ${
                           row.remainingCents < 0
                             ? "font-medium text-danger-text"
                             : "text-muted"
                         }`}
                       >
                         {formatCents(row.remainingCents)}
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span
+                            className={`tabular-nums ${
+                              row.availableCents < 0 ? "font-medium text-danger-text" : "text-ink"
+                            }`}
+                          >
+                            {formatCents(row.availableCents)}
+                          </span>
+                          <CarryChip carryCents={row.carryCents} />
+                        </div>
                       </td>
                     </tr>
                   ))}

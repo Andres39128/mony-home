@@ -4,20 +4,22 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { recurringMovements, transactions, users, categories } from "@/db/schema";
+import { loans, recurringMovements, transactions, users, categories } from "@/db/schema";
 import { catchUpRecurringMovements } from "@/features/recurring/catch-up";
 import { removeRecurring } from "@/features/recurring/service";
 import type { SessionUser } from "@/lib/auth";
 
 /**
- * Lazy monthly materialization suite (PGlite, injectable `now`):
- * - one transaction per elapsed month, dated dayOfMonth,
- * - the CREATION MONTH never materializes (first materialization = the month
- *   after creation — savings' "creation day doesn't accrue" precedent),
- * - the current month waits for its dayOfMonth (no future-dated rows),
+ * Lazy materialization suite (PGlite, injectable `now`) for ALL frequencies:
+ * - monthly: one transaction per elapsed month, dated dayOfMonth,
+ * - weekly: one transaction per creation-weekday date (intra-month fresh),
+ * - annual: one per year on dayOfMonth of the creation month,
+ * - the CREATION occurrence never materializes ("base day doesn't accrue"),
+ * - the current period waits for its day (no future-dated rows),
  * - dayOfMonth caps at 28 because February is the shortest month: every
  *   month is guaranteed to have day 28, so no date clamping is ever needed
- *   (a 31-style day would need per-month clamping — the CHECK forbids it).
+ *   (a 31-style day would need per-month clamping — the CHECK forbids it),
+ * - card-funded rows carry payment_method/card_loan_id and respect the cupo.
  */
 
 function makeAdmin(row: { id: string; username: string; name: string; role: "admin" | "member" }): SessionUser {
@@ -277,5 +279,175 @@ describe("catchUpRecurringMovements (integration on PGlite)", () => {
 
     // Restore so later runs behave (state hygiene for the shared DB).
     await db.update(users).set({ isActive: true }).where(eq(users.id, ghost.id));
+  });
+
+  // ---------------------------------------------------------------------------
+  // F3: weekly + annual frequencies and card-funded materializations
+  // ---------------------------------------------------------------------------
+
+  it("weekly: materializes every creation-weekday occurrence since creation", async () => {
+    // 2026-07-08 is a Wednesday → occurrences are the following Wednesdays.
+    const recurring = await insertRecurring({
+      name: "Semanal",
+      frequency: "weekly",
+      createdAt: new Date("2026-07-08T12:00:00Z"),
+    });
+
+    const inserted = await catchUpRecurringMovements(appDb, new Date("2026-08-12T12:00:00Z"));
+    expect(inserted).toBe(5); // 07-15, 07-22, 07-29, 08-05, 08-12 (creation week skips)
+
+    const rows = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.recurringId, recurring.id))
+      .orderBy(asc(transactions.date));
+    expect(rows.map((row) => row.date)).toEqual([
+      "2026-07-15",
+      "2026-07-22",
+      "2026-07-29",
+      "2026-08-05",
+      "2026-08-12",
+    ]);
+  });
+
+  it("weekly: lands on its day mid-month, replays absorbed by the unique index", async () => {
+    const recurring = await insertRecurring({
+      name: "Semanalpro",
+      frequency: "weekly",
+      createdAt: new Date("2026-07-08T12:00:00Z"),
+    });
+    // First read on 2026-08-05: materializes through that Wednesday.
+    await catchUpRecurringMovements(appDb, new Date("2026-08-05T12:00:00Z"));
+
+    // A read one week later materializes ONLY the new occurrence — the
+    // replay of the open month's earlier dates inserts nothing.
+    const inserted = await catchUpRecurringMovements(appDb, new Date("2026-08-13T12:00:00Z"));
+    expect(inserted).toBe(1); // 08-12 (13th's read misses nothing else)
+
+    // Same-day re-read: steady state, nothing new.
+    const again = await catchUpRecurringMovements(appDb, new Date("2026-08-13T12:00:00Z"));
+    expect(again).toBe(0);
+
+    const rows = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.recurringId, recurring.id))
+      .orderBy(asc(transactions.date));
+    expect(rows.map((row) => row.date)).toEqual([
+      "2026-07-15",
+      "2026-07-22",
+      "2026-07-29",
+      "2026-08-05",
+      "2026-08-12",
+    ]);
+  });
+
+  it("annual: one occurrence per year on the creation month's dayOfMonth", async () => {
+    const recurring = await insertRecurring({
+      name: "Anual",
+      frequency: "annual",
+      dayOfMonth: 5,
+      createdAt: new Date("2026-03-10T12:00:00Z"),
+    });
+
+    // now = April 2028: the 2026 creation year never materializes; the
+    // 2028-03 anniversary landed (day 5 < April). The global count is not
+    // asserted — older monthlies in this shared DB backfill too.
+    await catchUpRecurringMovements(appDb, new Date("2028-04-10T12:00:00Z"));
+
+    const rows = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.recurringId, recurring.id))
+      .orderBy(asc(transactions.date));
+    expect(rows.map((row) => row.date)).toEqual(["2027-03-05", "2028-03-05"]);
+  });
+
+  it("annual: the current year waits for its dayOfMonth", async () => {
+    const recurring = await insertRecurring({
+      name: "Anual temprano",
+      frequency: "annual",
+      dayOfMonth: 25,
+      createdAt: new Date("2026-03-10T12:00:00Z"),
+    });
+    const rowsFor = async () =>
+      db.select().from(transactions).where(eq(transactions.recurringId, recurring.id));
+
+    // 2027-03-25 hasn't happened by 2027-03-10 → the 2027 anniversary
+    // must wait: nothing materializes for THIS recurring yet.
+    await catchUpRecurringMovements(appDb, new Date("2027-03-10T12:00:00Z"));
+    expect(await rowsFor()).toHaveLength(0);
+
+    await catchUpRecurringMovements(appDb, new Date("2027-03-25T12:00:00Z"));
+    const rows = await rowsFor();
+    expect(rows.map((row) => row.date)).toEqual(["2027-03-25"]);
+  });
+
+  it("card-paid: materialized rows carry the card and consume its cupo", async () => {
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa catch",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 50_000,
+      })
+      .returning();
+    const recurring = await insertRecurring({
+      name: "Con tarjeta",
+      paymentMethod: "card",
+      cardLoanId: card.id,
+      createdAt: new Date("2026-06-10T12:00:00Z"),
+    });
+
+    const inserted = await catchUpRecurringMovements(appDb, new Date("2026-08-10T12:00:00Z"));
+    expect(inserted).toBe(2); // Jul 5 + Aug 5
+
+    const rows = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.recurringId, recurring.id));
+    expect(rows.every((row) => row.paymentMethod === "card")).toBe(true);
+    expect(rows.every((row) => row.cardLoanId === card.id)).toBe(true);
+  });
+
+  it("card-paid: a batch above the cupo is skipped but the pointer advances (no backfill)", async () => {
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa llena",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 10_000,
+      })
+      .returning();
+    const recurring = await insertRecurring({
+      name: "Sin cupo",
+      paymentMethod: "card",
+      cardLoanId: card.id,
+      amountCents: 8_000,
+      createdAt: new Date("2026-06-10T12:00:00Z"),
+    });
+
+    // Jul 5 + Aug 5 = 16.000 > 10.000 cupo → the batch is rejected.
+    const inserted = await catchUpRecurringMovements(appDb, new Date("2026-08-10T12:00:00Z"));
+    expect(inserted).toBe(0);
+
+    const rows = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.recurringId, recurring.id));
+    expect(rows).toHaveLength(0);
+    const [pointer] = await db
+      .select({ last: recurringMovements.lastMaterializedMonth })
+      .from(recurringMovements)
+      .where(eq(recurringMovements.id, recurring.id));
+    expect(pointer.last).toBe("2026-08-01"); // advanced anyway
   });
 });

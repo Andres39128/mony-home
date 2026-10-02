@@ -1,11 +1,19 @@
 /**
- * Recurring movements service — monthly auto-materialized transactions
- * (rent, subscriptions, salary). Admin CRUD; materialization lives in
- * catch-up.ts (lazy, read-path driven, no cron).
+ * Recurring movements service — auto-materialized transactions (rent,
+ * subscriptions, salary) at a configured frequency: monthly (dayOfMonth),
+ * annual (dayOfMonth of the creation month) or weekly (creation weekday).
+ * Admin CRUD; materialization lives in catch-up.ts (lazy, read-path
+ * driven, no cron).
  *
  * Pure-ish functions over the DB (no Next.js imports) so they are testable
  * against PGlite. Amounts arrive as free text and ALWAYS go through the
  * shared money parser (R2) with movements-style ambiguity discrimination.
+ *
+ * Card-paid recurrings mirror the movements rules: only expenses may ride
+ * a card, and the target must be an ACTIVE REVOLVING card with enough
+ * cupo — validated here at the trust boundary with the SAME exported
+ * checkCardRules the movements service uses (no diverging copy). The DB
+ * CHECKs (0016) back the coherence up.
  *
  * Delete is always allowed: the FK on transactions.recurring_id is SET NULL,
  * so already-materialized movements stay in the ledger as plain movements.
@@ -13,34 +21,47 @@
  */
 import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { categories, recurringMovements, users } from "@/db/schema";
+import { categories, loans, recurringMovements, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import type { SessionUser } from "@/lib/auth";
 import { parsePositiveAmountCents } from "@/lib/money-errors";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { checkCardRules, UUID_RE } from "@/features/transactions/service";
+import { getCardPurchaseInfo } from "@/features/loans/service";
 
 // ---------------------------------------------------------------------------
 // Validation (trust boundary)
 // ---------------------------------------------------------------------------
 
-export const recurringSchema = z.object({
-  name: z.string().trim().min(1, "El nombre es obligatorio").max(64, "Máximo 64 caracteres"),
-  type: z.enum(["income", "expense"]),
-  /** Free-text AR-formatted amount ("1.234,56"); parsed to cents by the service. */
-  amount: z.string().trim().min(1, "El monto es obligatorio"),
-  categoryId: z.string().regex(UUID_RE, "Categoría inválida"),
-  memberId: z.string().regex(UUID_RE, "Integrante inválido"),
-  scope: z.enum(["individual", "common"]).default("common"),
-  /** Calendar day 1..28: February's shortest month guarantees it exists. */
-  dayOfMonth: z.coerce
-    .number({ message: "El día debe ser un número entre 1 y 28" })
-    .int("El día debe ser un número entre 1 y 28")
-    .min(1, "El día debe ser un número entre 1 y 28")
-    .max(28, "El día debe ser un número entre 1 y 28"),
-  note: z.union([z.string().trim().max(200, "Máximo 200 caracteres"), z.literal("")]),
-});
+export const recurringSchema = z
+  .object({
+    name: z.string().trim().min(1, "El nombre es obligatorio").max(64, "Máximo 64 caracteres"),
+    type: z.enum(["income", "expense"]),
+    /** Free-text AR-formatted amount ("1.234,56"); parsed to cents by the service. */
+    amount: z.string().trim().min(1, "El monto es obligatorio"),
+    categoryId: z.string().regex(UUID_RE, "Categoría inválida"),
+    memberId: z.string().regex(UUID_RE, "Integrante inválido"),
+    scope: z.enum(["individual", "common"]).default("common"),
+    /**
+     * Calendar day 1..28: February's shortest month guarantees it exists.
+     * Inert for weekly recurrings (they follow the creation weekday).
+     */
+    dayOfMonth: z.coerce
+      .number({ message: "El día debe ser un número entre 1 y 28" })
+      .int("El día debe ser un número entre 1 y 28")
+      .min(1, "El día debe ser un número entre 1 y 28")
+      .max(28, "El día debe ser un número entre 1 y 28"),
+    frequency: z.enum(["monthly", "weekly", "annual"]).default("monthly"),
+    /** How the materialized movement is paid; card requires cardId (below). */
+    paymentMethod: z.enum(["cash", "card"]).default("cash"),
+    /** The revolving card that funds this recurring; empty = cash. */
+    cardId: z.union([z.string().regex(UUID_RE, "Tarjeta inválida"), z.literal("")]).default(""),
+    note: z.union([z.string().trim().max(200, "Máximo 200 caracteres"), z.literal("")]),
+  })
+  .refine((v) => (v.paymentMethod === "card") === (v.cardId !== ""), {
+    message: "Los pagos con tarjeta requieren elegir la tarjeta.",
+    path: ["cardId"],
+  });
 
 export type RecurringInput = z.output<typeof recurringSchema>;
 
@@ -60,6 +81,11 @@ export interface RecurringView {
   memberName: string;
   scope: "individual" | "common";
   dayOfMonth: number;
+  frequency: "monthly" | "weekly" | "annual";
+  paymentMethod: "cash" | "card";
+  /** The funding card; null on cash recurrings. */
+  cardId: string | null;
+  cardName: string | null;
   note: string | null;
   isActive: boolean;
   /** 'YYYY-MM-01' — newest month already materialized; null = never. */
@@ -75,11 +101,16 @@ export type RecurringResult =
         | "ambiguous_amount"
         | "category_kind_mismatch"
         | "member_inactive"
+        | "card_requires_expense"
+        | "card_not_found"
+        | "card_inactive"
+        | "card_not_revolving"
+        | "card_limit_exceeded"
         | "not_found"
         | "forbidden";
     };
 
-/** Every recurring (active first), with category/member labels for the cards. */
+/** Every recurring (active first), with category/member/card labels. */
 export async function listRecurring(db: Database): Promise<RecurringView[]> {
   const rows = await db
     .select({
@@ -94,6 +125,10 @@ export async function listRecurring(db: Database): Promise<RecurringView[]> {
       memberName: users.name,
       scope: recurringMovements.scope,
       dayOfMonth: recurringMovements.dayOfMonth,
+      frequency: recurringMovements.frequency,
+      paymentMethod: recurringMovements.paymentMethod,
+      cardId: recurringMovements.cardLoanId,
+      cardName: loans.name,
       note: recurringMovements.note,
       isActive: recurringMovements.isActive,
       lastMaterializedMonth: recurringMovements.lastMaterializedMonth,
@@ -101,6 +136,8 @@ export async function listRecurring(db: Database): Promise<RecurringView[]> {
     .from(recurringMovements)
     .innerJoin(categories, eq(recurringMovements.categoryId, categories.id))
     .innerJoin(users, eq(recurringMovements.memberId, users.id))
+    // At most one funding card per recurring (unique id → no row fan-out).
+    .leftJoin(loans, eq(recurringMovements.cardLoanId, loans.id))
     .orderBy(
       sql`case when ${recurringMovements.isActive} then 0 else 1 end`,
       asc(recurringMovements.dayOfMonth),
@@ -136,6 +173,25 @@ async function checkReferences(
   return null;
 }
 
+/**
+ * Card-side rules for card-paid recurrings: active revolving card with
+ * enough cupo for the amount, expense-only. SAME exported rule the
+ * movements service applies (recurring owes it at the trust boundary; the
+ * catch-up re-checks at materialization time).
+ */
+async function checkCardFunding(
+  db: Database,
+  input: RecurringInput,
+  cents: number,
+): Promise<RecurringResult | null> {
+  if (input.paymentMethod !== "card") return null;
+  const card = await getCardPurchaseInfo(db, input.cardId);
+  if (!card.ok) return { ok: false, error: "card_not_found" };
+  const cardError = checkCardRules(input.type, card, cents);
+  if (cardError) return { ok: false, error: cardError };
+  return null;
+}
+
 function recurringValues(input: RecurringInput, cents: number) {
   return {
     name: input.name,
@@ -145,6 +201,9 @@ function recurringValues(input: RecurringInput, cents: number) {
     memberId: input.memberId,
     scope: input.scope,
     dayOfMonth: input.dayOfMonth,
+    frequency: input.frequency,
+    paymentMethod: input.paymentMethod,
+    cardLoanId: input.paymentMethod === "card" ? input.cardId : null,
     note: input.note ? input.note : null,
   };
 }
@@ -171,6 +230,8 @@ export async function createRecurring(
 
   const ruleError = await checkReferences(db, input);
   if (ruleError) return ruleError;
+  const cardError = await checkCardFunding(db, input, validated.cents);
+  if (cardError) return cardError;
 
   try {
     await db.insert(recurringMovements).values(recurringValues(input, validated.cents));
@@ -193,6 +254,8 @@ export async function updateRecurring(
 
   const ruleError = await checkReferences(db, input);
   if (ruleError) return ruleError;
+  const cardError = await checkCardFunding(db, input, validated.cents);
+  if (cardError) return cardError;
 
   try {
     const updated = await db

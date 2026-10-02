@@ -1210,3 +1210,131 @@ describe("migration 0015 (app_config)", () => {
     );
   });
 });
+
+describe("migration 0016 (recurring frequencies + card payment)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+  let memberId: string;
+  let expenseId: string;
+  let incomeId: string;
+  let cardId: string;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    const [user] = await db
+      .insert(users)
+      .values({ username: "u16", passwordHash: "h", name: "U16" })
+      .returning();
+    memberId = user.id;
+    const inserted = await db
+      .insert(categories)
+      .values([
+        { name: "C16 gasto", kind: "expense" },
+        { name: "C16 ingreso", kind: "income" },
+      ])
+      .returning();
+    expenseId = inserted[0].id;
+    incomeId = inserted[1].id;
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa 16",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 5_000_000,
+      })
+      .returning();
+    cardId = card.id;
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  // Factory, not a captured object: the ids only exist after beforeAll runs.
+  const base = () => ({
+    name: "Netflix",
+    type: "expense" as const,
+    amountCents: 10_000,
+    categoryId: expenseId,
+    memberId,
+    dayOfMonth: 5,
+  });
+
+  it("defaults existing-style rows to monthly frequency, cash payment, no card", async () => {
+    const [row] = await db.insert(recurringMovements).values({ ...base() }).returning();
+    expect(row.frequency).toBe("monthly");
+    expect(row.paymentMethod).toBe("cash");
+    expect(row.cardLoanId).toBeNull();
+  });
+
+  it("round-trips weekly and annual frequencies (enum values)", async () => {
+    const [weekly] = await db
+      .insert(recurringMovements)
+      .values({ ...base(), name: "Semanal", frequency: "weekly" })
+      .returning();
+    expect(weekly.frequency).toBe("weekly");
+    const [annual] = await db
+      .insert(recurringMovements)
+      .values({ ...base(), name: "Anual", frequency: "annual" })
+      .returning();
+    expect(annual.frequency).toBe("annual");
+  });
+
+  it("rejects frequency values outside the enum", async () => {
+    await expectPgError(
+      db.execute(
+        sql`insert into recurring_movements (name, type, amount_cents, category_id, member_id, day_of_month, frequency)
+            values ('Rara', 'expense', 100, ${expenseId}, ${memberId}, 5, 'daily')`,
+      ),
+      "22P02",
+    );
+  });
+
+  it("accepts a card-paid recurring and keeps cash ⇔ card coherent (CHECK both directions)", async () => {
+    const [row] = await db
+      .insert(recurringMovements)
+      .values({ ...base(), name: "Con tarjeta", paymentMethod: "card", cardLoanId: cardId })
+      .returning();
+    expect(row.paymentMethod).toBe("card");
+    expect(row.cardLoanId).toBe(cardId);
+
+    // card method without the loan id…
+    await expectPgError(
+      db.insert(recurringMovements).values({ ...base(), name: "Huérfana", paymentMethod: "card" }),
+      "23514",
+    );
+    // …and loan id without the card method.
+    await expectPgError(
+      db
+        .insert(recurringMovements)
+        .values({ ...base(), name: "Duplicada", cardLoanId: cardId }),
+      "23514",
+    );
+  });
+
+  it("rejects card payment on income recurrings (expense-only CHECK)", async () => {
+    await expectPgError(
+      db.insert(recurringMovements).values({
+        ...base(),
+        name: "Sueldo con tarjeta",
+        type: "income",
+        categoryId: incomeId,
+        paymentMethod: "card",
+        cardLoanId: cardId,
+      }),
+      "23514",
+    );
+  });
+
+  it("RESTRICTs card deletion while a recurring references it", async () => {
+    const [own] = await db
+      .insert(recurringMovements)
+      .values({ ...base(), name: "Anclada", paymentMethod: "card", cardLoanId: cardId })
+      .returning();
+    await expectPgError(db.delete(loans).where(eq(loans.id, own.cardLoanId!)), "23001");
+  });
+});

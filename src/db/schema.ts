@@ -52,6 +52,11 @@ export const loanKindEnum = pgEnum("loan_kind", ["credit_card", "investment_line
 export const loanPaymentKindEnum = pgEnum("loan_payment_kind", ["payment", "interest", "charge"]);
 export const loanAmortizationModeEnum = pgEnum("loan_amortization_mode", ["bank", "revolving"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["cash", "card"]);
+export const recurringFrequencyEnum = pgEnum("recurring_frequency", [
+  "monthly",
+  "weekly",
+  "annual",
+]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -585,10 +590,13 @@ export const loanPayments = pgTable(
 );
 
 /**
- * Recurring movements: monthly transactions the app materializes by itself
- * (rent, subscriptions, salary). The lazy catch-up engine
+ * Recurring movements: transactions the app materializes by itself (rent,
+ * subscriptions, salary) at their configured frequency — monthly (dayOfMonth
+ * each month), annual (dayOfMonth of the creation month each year) or weekly
+ * (every week on the ISO weekday of the creation date; dayOfMonth is INERT
+ * for weekly rows, kept only for the 1..28 CHECK). The lazy catch-up engine
  * (src/features/recurring/catch-up.ts) inserts one `transactions` row per
- * elapsed month on read paths; deleting a recurring keeps the already
+ * elapsed occurrence on read paths; deleting a recurring keeps the already
  * generated movements (FK is SET NULL). dayOfMonth caps at 28 because
  * February is the shortest month — every month is guaranteed to have that
  * day, so no date clamping ever happens.
@@ -607,8 +615,19 @@ export const recurringMovements = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     scope: scopeKindEnum("scope").notNull().default("common"),
-    /** Calendar day the movement lands on each month (1..28). */
+    /** Calendar day the movement lands on each month (1..28); inert for weekly. */
     dayOfMonth: integer("day_of_month").notNull(),
+    /** How often the movement recurs (weekly follows the creation weekday). */
+    frequency: recurringFrequencyEnum("frequency").notNull().default("monthly"),
+    /** How the materialized movement is paid: cash or a revolving credit card. */
+    paymentMethod: paymentMethodEnum("payment_method").notNull().default("cash"),
+    /**
+     * The revolving card funding this recurring; null ⇔ payment_method
+     * 'cash'. RESTRICT: deleting a card with recurrings attached would
+     * silently falsify what funds them — deactivate the card instead, same
+     * rule as transactions.card_loan_id.
+     */
+    cardLoanId: uuid("card_loan_id").references(() => loans.id, { onDelete: "restrict" }),
     note: text("note"),
     /** Paused recurrings stop materializing but keep their history. */
     isActive: boolean("is_active").notNull().default(true),
@@ -621,6 +640,17 @@ export const recurringMovements = pgTable(
     check(
       "recurring_movements_day_of_month_bounds",
       sql`${table.dayOfMonth} >= 1 AND ${table.dayOfMonth} <= 28`,
+    ),
+    // Card ⇔ loan: a card-paid recurring always names its card, a cash one
+    // never does (same atomic-fact CHECK as transactions).
+    check(
+      "recurring_movements_card_matches_loan",
+      sql`(${table.paymentMethod} = 'card') = (${table.cardLoanId} IS NOT NULL)`,
+    ),
+    // Only expenses may ride a card (refunds to the card are out of scope).
+    check(
+      "recurring_movements_card_expense_only",
+      sql`${table.paymentMethod} = 'cash' OR ${table.type} = 'expense'`,
     ),
   ],
 );

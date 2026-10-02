@@ -9,7 +9,7 @@ import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
 import { compressReceiptImage } from "@/lib/receipt-image";
 import { FALLBACK_COLOR } from "@/features/analytics/transform";
-import { FieldError, FormError, inputClass } from "@/components/forms";
+import { FieldError, FormError, inputClass, Toggle } from "@/components/forms";
 
 export type MovementAction = (state: FormState, formData: FormData) => Promise<FormState>;
 type InlineCategoryAction = (
@@ -49,44 +49,6 @@ function localToday(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
     now.getDate(),
   ).padStart(2, "0")}`;
-}
-
-/** Segmented radio control (tipo / ámbito) styled as a two-option toggle. */
-function Toggle({
-  name,
-  value,
-  onChange,
-  options,
-}: {
-  name: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-lg border border-line">
-      {options.map((option) => (
-        <label
-          key={option.value}
-          className={`cursor-pointer px-4 py-2 text-sm font-medium transition-colors ${
-            value === option.value
-              ? "bg-ink text-base"
-              : "bg-surface text-muted hover:bg-base"
-          }`}
-        >
-          <input
-            type="radio"
-            name={name}
-            value={option.value}
-            checked={value === option.value}
-            onChange={() => onChange(option.value)}
-            className="sr-only"
-          />
-          {option.label}
-        </label>
-      ))}
-    </div>
-  );
 }
 
 /**
