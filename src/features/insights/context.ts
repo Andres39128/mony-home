@@ -28,6 +28,12 @@ import {
 import { listGoals, getPatrimony } from "@/features/savings/service";
 import { formatRatePercent, investmentValueCents } from "@/features/savings/math";
 import { listLoans } from "@/features/loans/service";
+import {
+  PROJECTION_WINDOW_MONTHS,
+  goalEtaLabel,
+  loanPayoffLabel,
+  netContributionsByGoal,
+} from "@/features/insights/projections";
 
 /** Top spender categories detailed in the context; the rest roll into "otros". */
 export const TOP_CATEGORIES_LIMIT = 5;
@@ -146,6 +152,17 @@ export interface ContextTarjeta {
   isActive: boolean;
 }
 
+/**
+ * Derived projections (F4) — pre-formatted COPY strings, never raw numbers:
+ * the model narrates them, it never computes. `eta` null = no rhythm yet.
+ */
+export interface ContextProyecciones {
+  /** Savings goals WITH a target, in listGoals order. */
+  metas: { nombre: string; eta: string | null }[];
+  /** Bank loans with a projectable payoff (LOWER bound — interest accrues). */
+  deudas: { nombre: string; ultimaCuota: string }[];
+}
+
 export interface FinanceContext {
   /** 'YYYY-MM'. */
   month: string;
@@ -187,6 +204,8 @@ export interface FinanceContext {
   deudas: ContextDeuda[];
   /** Revolving credit cards — cupo, saldo and card finance facts. */
   tarjetas: ContextTarjeta[];
+  /** Derived projections (savings-goal ETAs + loan payoff bounds). */
+  proyecciones: ContextProyecciones;
   /** Total household debt (every loan + card, outstanding clamped at 0). */
   totalDebtCents: number;
   /** Net worth: savings + investments + mortgaged properties − debt. */
@@ -372,6 +391,21 @@ export async function buildFinanceContext(
   // queries): ahorro + inversiones + inmuebles − deuda.
   const patrimony = await getPatrimony(db, goals, loans);
 
+  // Proyecciones (F4): derived copy over the rows we already hold, plus ONE
+  // grouped contributions query — only when a goal with target exists.
+  const targetGoals = goals.filter((goal) => goal.kind === "savings" && goal.targetCents !== null);
+  const nets =
+    targetGoals.length > 0 ? await netContributionsByGoal(db, today) : new Map<string, number>();
+  const proyecciones: ContextProyecciones = {
+    metas: targetGoals.map((goal) => ({
+      nombre: goal.name,
+      eta: goalEtaLabel(goal, (nets.get(goal.id) ?? 0) / PROJECTION_WINDOW_MONTHS, today),
+    })),
+    deudas: loans
+      .map((loan) => ({ nombre: loan.name, ultimaCuota: loanPayoffLabel(loan, today) }))
+      .filter((entry): entry is { nombre: string; ultimaCuota: string } => entry.ultimaCuota !== null),
+  };
+
   return {
     month,
     monthLabel: monthLabel(month),
@@ -422,6 +456,7 @@ export async function buildFinanceContext(
     })),
     deudas,
     tarjetas,
+    proyecciones,
     totalDebtCents,
     patrimonio: {
       ahorroCents: patrimony.savingsCents,
@@ -642,6 +677,21 @@ export function toPromptContext(ctx: FinanceContext): Record<string, unknown> {
       estado: tarjeta.isActive ? "activa" : "inactiva",
     })),
     deuda_total: ar(ctx.totalDebtCents),
+    // Derived projections as copy strings; omitted entirely when empty so
+    // the prompt never invites the model to interpolate or estimate.
+    proyecciones:
+      ctx.proyecciones.metas.length === 0 && ctx.proyecciones.deudas.length === 0
+        ? undefined
+        : {
+            metas: ctx.proyecciones.metas.map((meta) => ({
+              nombre: meta.nombre,
+              eta: meta.eta ?? "sin ritmo de aportes todavía",
+            })),
+            deudas: ctx.proyecciones.deudas.map((deuda) => ({
+              nombre: deuda.nombre,
+              ultima_cuota_estimada: deuda.ultimaCuota,
+            })),
+          },
     patrimonio: {
       ahorro: ar(ctx.patrimonio.ahorroCents),
       inversiones: ar(ctx.patrimonio.inversionesCents),

@@ -317,6 +317,12 @@ const promptOf = (ctx: Awaited<ReturnType<typeof buildFinanceContext>>) =>
     tarjetas: Record<string, unknown>[];
     deuda_total: string;
     patrimonio: Record<string, string>;
+    proyecciones:
+      | {
+          metas: { nombre: string; eta: string }[];
+          deudas: { nombre: string; ultima_cuota_estimada: string }[];
+        }
+      | undefined;
   };
 
 /**
@@ -400,6 +406,17 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
         paymentMethod: "card", cardLoanId: cardId,
       },
     ]);
+
+    // Projection fixture: a targeted savings goal (F4). One deposit in the
+    // trailing window → rhythm 50.000/6 ≈ 8.333/mes from a 50.000 net.
+    const [fondo] = await db
+      .insert(savingsGoals)
+      .values({ name: "Fondo", kind: "savings", scope: "common", targetCents: 100_000 })
+      .returning();
+    await db.insert(savingsContributions).values({
+      goalId: fondo.id, memberId, kind: "deposit", amountCents: 50_000, date: "2026-09-10",
+    });
+
     await db.insert(loanPayments).values([
       { loanId: cardId, memberId: null, kind: "interest", amountCents: 5_000, date: "2026-09-20", note: "Interés de ciclo" },
       { loanId: cardId, memberId, kind: "payment", amountCents: 40_000, date: "2026-09-20" },
@@ -525,5 +542,22 @@ describe("insights context — deudas, tarjetas y medios de pago", () => {
     expect(prompt.tarjetas[0].saldo_a_favor).toBe("$ 350,00");
     expect(prompt.tarjetas[0].cupo_disponible).toBe("$ 10.000,00");
     expect(prompt.deuda_total).toBe("$ 7.000,00");
+  });
+
+  it("projects goal ETAs and the bank-loan payoff bound (F4)", async () => {
+    const ctx = await buildFinanceContext(appDb, "2026-09", "2026-09-26");
+    // Fondo: 50.000 net + rhythm 50.000/6 → crosses 100.000 at month 7 (abr 2027).
+    // Apartamento: 200.000 / cuota 20.000 = 10 months (jul 2027), a LOWER bound.
+    expect(ctx.proyecciones).toEqual({
+      metas: [{ nombre: "Fondo", eta: "A este ritmo: ~abr 2027" }],
+      deudas: [{ nombre: "Apartamento", ultimaCuota: "Última cuota estimada: ~jul 2027" }],
+    });
+    const prompt = promptOf(ctx);
+    expect(prompt.proyecciones).toEqual({
+      metas: [{ nombre: "Fondo", eta: "A este ritmo: ~abr 2027" }],
+      deudas: [
+        { nombre: "Apartamento", ultima_cuota_estimada: "Última cuota estimada: ~jul 2027" },
+      ],
+    });
   });
 });

@@ -17,6 +17,7 @@ import {
   updateLoanAction,
   updateOutstandingAction,
 } from "@/features/loans/actions";
+import { loanPayoffLabels } from "@/features/insights/projections";
 import LoansPanel from "./loans-panel";
 
 export default async function PrestamosPage() {
@@ -59,6 +60,8 @@ export default async function PrestamosPage() {
     (total, loan) => total + Math.max(loan.outstandingCents, 0),
     0,
   );
+  // Derived payoff bounds (F4): pure over the views already fetched.
+  const payoffLabels = loanPayoffLabels(loans);
 
   return (
     <section className="flex flex-col gap-6">
@@ -73,6 +76,7 @@ export default async function PrestamosPage() {
         paymentsByLoan={paymentsByLoan}
         periodsByLoan={periodsByLoan}
         cyclesByLoan={cyclesByLoan}
+        payoffLabels={payoffLabels}
         createAction={createLoanAction}
         updateAction={updateLoanAction}
         toggleAction={toggleLoanAction}
