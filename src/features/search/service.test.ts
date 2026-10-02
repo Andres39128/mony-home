@@ -146,6 +146,24 @@ describe("globalSearch (integration on PGlite)", () => {
     expect((await globalSearch(appDb, "súper m")).movements).toHaveLength(1);
   });
 
+  it("escapes the backslash itself (doubling branch, R3-002)", async () => {
+    await expense({ note: "ruta \\ shared", date: "2026-09-06" });
+    // The literal backslash matches; an unescaped pattern would let the
+    // following char act as an escape for the LIKE parser.
+    const hit = await globalSearch(appDb, "a \\ s");
+    expect(hit.movements).toHaveLength(1);
+  });
+
+  it("keeps a deterministic order at the limit (R3-001: subset is alphabetical)", async () => {
+    for (const name of ["zzeta", "abeto", "marco"]) {
+      await db.insert(savingsGoals).values({ name: `ord ${name}`, kind: "savings", scope: "common" });
+    }
+    const { bolsas } = await globalSearch(appDb, "ord ");
+    expect(bolsas.map((b) => b.name)).toEqual(
+      [...bolsas.map((b) => b.name)].sort((a, b) => a.localeCompare(b, "es")),
+    );
+  });
+
   it("excludes pending quick-capture rows", async () => {
     const { movements } = await globalSearch(appDb, "Pendiente");
     expect(movements).toHaveLength(0);

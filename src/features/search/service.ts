@@ -118,12 +118,17 @@ export async function globalSearch(db: Database, raw: string): Promise<SearchRes
 
   return {
     movements,
+    // Deterministic order before the slice: alphabetical by name, then id —
+    // the inherited list order is not a contract, so the visible subset at
+    // the limit must not depend on it (R3-001).
     bolsas: goals
       .filter((goal) => matchesQuery([goal.name], q))
+      .sort((a, b) => a.name.localeCompare(b.name, "es") || a.id.localeCompare(b.id))
       .slice(0, SEARCH_GROUP_LIMIT)
       .map((goal) => ({ id: goal.id, name: goal.name, kind: goal.kind, netCents: goal.netCents })),
     prestamos: loans
       .filter((loan) => matchesQuery([loan.name, loan.entity], q))
+      .sort((a, b) => a.name.localeCompare(b.name, "es") || a.id.localeCompare(b.id))
       .slice(0, SEARCH_GROUP_LIMIT)
       .map((loan) => ({
         id: loan.id,

@@ -158,6 +158,9 @@ export async function deriveNotifications(
   const severityRank = { warn: 0, info: 1 } as const;
   return items.sort(
     (a, b) =>
-      severityRank[a.severity] - severityRank[b.severity] || a.title.localeCompare(b.title, "es"),
+      severityRank[a.severity] - severityRank[b.severity] ||
+      a.title.localeCompare(b.title, "es") ||
+      // Same title+severity (two cards named alike): deterministic by id.
+      a.id.localeCompare(b.id),
   );
 }
