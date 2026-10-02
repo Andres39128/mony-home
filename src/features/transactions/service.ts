@@ -479,13 +479,15 @@ function movementValues(input: MovementInput, memberId: string, cents: number) {
  * REVOLVING card, only expenses may ride a card, and the purchase must fit
  * the cupo. `addedCents` is what THIS movement adds to the card's debt
  * (full amount on create or a card switch; the delta on a same-card edit).
+ * Exported so the recurring catch-up validates card-paid materializations
+ * with the SAME rule (no diverging copy).
  */
-function checkCardRules(
-  input: MovementInput,
+export function checkCardRules(
+  type: "income" | "expense",
   card: Extract<Awaited<ReturnType<typeof getCardPurchaseInfo>>, { ok: true }>,
   addedCents: number,
-): MovementMutationError | null {
-  if (input.type !== "expense") return "card_requires_expense";
+): "card_requires_expense" | "card_inactive" | "card_not_revolving" | "card_limit_exceeded" | null {
+  if (type !== "expense") return "card_requires_expense";
   if (!card.isActive) return "card_inactive";
   if (!card.isRevolving) return "card_not_revolving";
   if (card.availableCents !== null && addedCents > card.availableCents) {
@@ -552,7 +554,7 @@ export async function createTransaction(
       if (input.paymentMethod === "card") {
         const card = await getCardPurchaseInfo(tx, input.cardId);
         if (!card.ok) return { ok: false, error: "card_not_found" };
-        const cardError = checkCardRules(input, card, cents);
+        const cardError = checkCardRules(input.type, card, cents);
         if (cardError) return { ok: false, error: cardError };
       }
       if (input.receipt) {
@@ -664,7 +666,7 @@ export async function updateTransaction(
         // switch consumes the full new amount on the new card.
         const sameCard = existing.cardLoanId === input.cardId;
         const addedCents = sameCard ? cents - existing.amountCents : cents;
-        const cardError = checkCardRules(input, card, Math.max(addedCents, 0));
+        const cardError = checkCardRules(input.type, card, Math.max(addedCents, 0));
         if (cardError) return { ok: false, error: cardError };
       }
       if (input.receipt) {

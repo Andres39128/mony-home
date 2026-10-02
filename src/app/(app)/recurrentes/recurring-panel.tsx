@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import type { CategoryView } from "@/features/categories/service";
 import type { RecurringView } from "@/features/recurring/service";
+import type { CardOption } from "@/features/transactions/form-options";
 import type { FormState } from "@/lib/form-state";
 import { formatCents } from "@/lib/money";
 import { ScopeBadge } from "@/components/badges";
@@ -15,16 +16,20 @@ import {
   IconEditButton,
   OkMessage,
   SubmitButton,
+  Toggle,
   inputClass,
 } from "@/components/forms";
 import { Sheet } from "@/components/sheet";
 
 type RecurringAction = (state: FormState, formData: FormData) => Promise<FormState>;
+type Frequency = "monthly" | "weekly" | "annual";
 
 interface Props {
   recurring: RecurringView[];
   categories: CategoryView[];
   members: { id: string; name: string; isActive: boolean }[];
+  /** Active revolving cards offered as payment method for expenses. */
+  cards: CardOption[];
   isAdmin: boolean;
   createAction: RecurringAction;
   updateAction: RecurringAction;
@@ -38,20 +43,33 @@ const DAY_CHIP = "rounded-full bg-line px-2 py-0.5 text-xs font-medium text-ink"
 const AMOUNT_INCOME = "rounded-lg bg-sage px-2 py-0.5 font-medium text-on-accent";
 const AMOUNT_EXPENSE = "rounded-lg bg-danger-fill px-2 py-0.5 font-medium text-on-accent";
 
+const FREQUENCY_LABELS: Record<Frequency, string> = {
+  monthly: "Mensual",
+  weekly: "Semanal",
+  annual: "Anual",
+};
+
 /** Fields shared by the create and edit forms. Category options follow the
- * selected type (only matching-kind categories are selectable). */
+ * selected type (only matching-kind categories are selectable); the payment
+ * method block mirrors the movement form (card = expenses with cards only). */
 function RecurringFields({
   state,
   categories,
   members,
+  cards,
   recurring,
 }: {
   state: FormState;
   categories: CategoryView[];
   members: { id: string; name: string; isActive: boolean }[];
+  cards: CardOption[];
   recurring?: RecurringView;
 }) {
   const [type, setType] = useState<"income" | "expense">(recurring?.type ?? "expense");
+  const [frequency, setFrequency] = useState<Frequency>(recurring?.frequency ?? "monthly");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">(
+    recurring?.paymentMethod ?? "cash",
+  );
   const matchingCategories = categories.filter((category) => category.kind === type);
 
   return (
@@ -96,20 +114,45 @@ function RecurringFields({
         <FieldError message={state.fieldErrors?.amount} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-muted">Día del mes</span>
+        <span className="font-medium text-muted">Frecuencia</span>
         <select
-          name="dayOfMonth"
-          defaultValue={recurring?.dayOfMonth ?? 1}
+          name="frequency"
+          value={frequency}
+          onChange={(event) => setFrequency(event.target.value as Frequency)}
           className={inputClass}
         >
-          {DAY_CHOICES.map((day) => (
-            <option key={day} value={day}>
-              Día {day} (todos los meses tienen día {day})
-            </option>
-          ))}
+          <option value="monthly">Mensual</option>
+          <option value="weekly">Semanal</option>
+          <option value="annual">Anual</option>
         </select>
-        <FieldError message={state.fieldErrors?.dayOfMonth} />
+        <FieldError message={state.fieldErrors?.frequency} />
       </label>
+      {frequency === "weekly" ? (
+        <div className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">Día de la semana</span>
+          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-muted">
+            Se registra cada semana, el mismo día en que creaste el recurrente.
+          </p>
+        </div>
+      ) : (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-muted">
+            {frequency === "annual" ? "Día del aniversario" : "Día del mes"}
+          </span>
+          <select
+            name="dayOfMonth"
+            defaultValue={recurring?.dayOfMonth ?? 1}
+            className={inputClass}
+          >
+            {DAY_CHOICES.map((day) => (
+              <option key={day} value={day}>
+                Día {day} (todos los meses tienen día {day})
+              </option>
+            ))}
+          </select>
+          <FieldError message={state.fieldErrors?.dayOfMonth} />
+        </label>
+      )}
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-muted">Categoría</span>
         <select
@@ -154,6 +197,51 @@ function RecurringFields({
         </select>
         <FieldError message={state.fieldErrors?.scope} />
       </label>
+      {/* Medio de pago: card only exists for expenses with cards configured;
+          otherwise the cash default rides the hidden inputs. */}
+      {type === "expense" && cards.length > 0 ? (
+        <>
+          <div className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-muted">Medio de pago</span>
+            <Toggle
+              name="paymentMethod"
+              value={paymentMethod}
+              onChange={(value) => setPaymentMethod(value as "cash" | "card")}
+              options={[
+                { value: "cash", label: "Efectivo" },
+                { value: "card", label: "Tarjeta" },
+              ]}
+            />
+            <FieldError message={state.fieldErrors?.paymentMethod} />
+          </div>
+          {paymentMethod === "card" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-muted">Tarjeta de crédito</span>
+              <select name="cardId" defaultValue={recurring?.cardId ?? ""} required className={inputClass}>
+                <option value="" disabled>
+                  Selecciona una tarjeta…
+                </option>
+                {cards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.name} — disponible {formatCents(card.availableCents)}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-muted">
+                Cada ocurrencia consume el cupo de la tarjeta.
+              </span>
+              <FieldError message={state.fieldErrors?.cardId} />
+            </label>
+          ) : (
+            <input type="hidden" name="cardId" value="" />
+          )}
+        </>
+      ) : (
+        <>
+          <input type="hidden" name="paymentMethod" value="cash" />
+          <input type="hidden" name="cardId" value="" />
+        </>
+      )}
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-muted">Nota (opcional)</span>
         <input
@@ -173,15 +261,17 @@ function CreateRecurringForm({
   action,
   categories,
   members,
+  cards,
 }: {
   action: RecurringAction;
   categories: CategoryView[];
   members: { id: string; name: string; isActive: boolean }[];
+  cards: CardOption[];
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   return (
     <form action={formAction} className="flex flex-col gap-4">
-      <RecurringFields state={state} categories={categories} members={members} />
+      <RecurringFields state={state} categories={categories} members={members} cards={cards} />
       <FormError state={state} />
       <OkMessage state={state} text="Recurrencia creada." />
       <SubmitButton pending={pending}>Crear recurrente</SubmitButton>
@@ -197,12 +287,14 @@ function EditRecurringForm({
   recurring,
   categories,
   members,
+  cards,
   updateAction,
   toggleAction,
 }: {
   recurring: RecurringView;
   categories: CategoryView[];
   members: { id: string; name: string; isActive: boolean }[];
+  cards: CardOption[];
   updateAction: RecurringAction;
   toggleAction: RecurringAction;
 }) {
@@ -217,6 +309,7 @@ function EditRecurringForm({
           state={state}
           categories={categories}
           members={members}
+          cards={cards}
           recurring={recurring}
         />
         <FormError state={state} />
@@ -238,6 +331,7 @@ export default function RecurringPanel({
   recurring,
   categories,
   members,
+  cards,
   isAdmin,
   createAction,
   updateAction,
@@ -277,7 +371,14 @@ export default function RecurringPanel({
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <ScopeBadge scope={item.scope} />
-                  <span className={DAY_CHIP}>Día {item.dayOfMonth}</span>
+                  {/* Monthly is the default shape — the day chip already says it. */}
+                  {item.frequency !== "monthly" && (
+                    <span className={DAY_CHIP}>{FREQUENCY_LABELS[item.frequency]}</span>
+                  )}
+                  {item.frequency !== "weekly" && (
+                    <span className={DAY_CHIP}>Día {item.dayOfMonth}</span>
+                  )}
+                  {item.cardName && <span className={DAY_CHIP}>{item.cardName}</span>}
                   <ActiveBadge active={item.isActive} />
                 </div>
               </div>
@@ -328,7 +429,12 @@ export default function RecurringPanel({
       {isAdmin && (
         <>
           <Sheet open={creating} onClose={() => setCreating(false)} title="Nuevo recurrente">
-            <CreateRecurringForm action={createAction} categories={categories} members={members} />
+            <CreateRecurringForm
+              action={createAction}
+              categories={categories}
+              members={members}
+              cards={cards}
+            />
           </Sheet>
           <Sheet
             open={editing !== null}
@@ -340,6 +446,7 @@ export default function RecurringPanel({
                 recurring={editing}
                 categories={categories}
                 members={members}
+                cards={cards}
                 updateAction={updateAction}
                 toggleAction={toggleAction}
               />

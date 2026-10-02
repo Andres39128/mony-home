@@ -28,6 +28,21 @@ function mapRecurringError(error: string): FormState {
   if (error === "member_inactive") {
     return { fieldErrors: { memberId: "El integrante seleccionado está inactivo." } };
   }
+  if (error === "card_requires_expense") {
+    return { fieldErrors: { paymentMethod: "Solo los gastos pueden pagarse con tarjeta." } };
+  }
+  if (error === "card_not_found") {
+    return { fieldErrors: { cardId: "La tarjeta ya no existe. Recarga e intenta de nuevo." } };
+  }
+  if (error === "card_inactive") {
+    return { fieldErrors: { cardId: "La tarjeta está inactiva." } };
+  }
+  if (error === "card_not_revolving") {
+    return { fieldErrors: { cardId: "Ese préstamo no es una tarjeta de crédito." } };
+  }
+  if (error === "card_limit_exceeded") {
+    return { fieldErrors: { cardId: "El monto excede el cupo disponible de la tarjeta." } };
+  }
   if (error === "not_found") {
     return { error: "Alguno de los datos seleccionados ya no existe. Recarga e intenta de nuevo." };
   }
@@ -44,6 +59,9 @@ function readRecurringForm(formData: FormData) {
     memberId: formData.get("memberId") ?? "",
     scope: formData.get("scope") ?? "common",
     dayOfMonth: formData.get("dayOfMonth"),
+    frequency: formData.get("frequency") ?? "monthly",
+    paymentMethod: formData.get("paymentMethod") ?? "cash",
+    cardId: formData.get("cardId") ?? "",
     note: formData.get("note") ?? "",
   };
 }
