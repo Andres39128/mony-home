@@ -7,10 +7,31 @@ import { getAppSettings } from "@/lib/app-settings";
 import { setDefaultCurrency } from "@/lib/money";
 import CurrencyBoot from "@/components/currency-boot";
 import TourLauncher from "@/features/tour/tour-launcher";
-import { SparklesIcon } from "@/components/icons";
+import { BellIcon, SparklesIcon } from "@/components/icons";
 import { BottomNav } from "@/components/bottom-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TopNavLinks } from "@/components/top-nav";
+
+/**
+ * Notificaciones entry point. LINK-ONLY on purpose (F7 decision): deriving
+ * the badge here would run budgets.getMonth + listLoans + listGoals (~10
+ * queries, incl. two unbounded-history aggregations) on EVERY navigation —
+ * measured at ~9 ms even on in-memory PGlite with zero network, i.e. dozens
+ * of ms of serverless RTT — and it re-runs reads the dashboard, /bolsas and
+ * /prestamos already perform. The full list lives in /notificaciones.
+ */
+function NotificationsLink() {
+  return (
+    <Link
+      href="/notificaciones"
+      aria-label="Ir a Notificaciones"
+      title="Notificaciones"
+      className="inline-flex size-11 items-center justify-center rounded-lg text-ink transition-colors hover:bg-base"
+    >
+      <BellIcon className="size-5" />
+    </Link>
+  );
+}
 
 const ROLE_LABELS = { admin: "Administrador", member: "Miembro" } as const;
 
@@ -90,6 +111,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-40 flex items-center justify-between gap-2 border-b border-line bg-surface/95 px-4 py-2 backdrop-blur md:hidden">
         <AppMark />
         <div className="flex items-center">
+          <NotificationsLink />
           <Link
             href="/asistente"
             aria-label="Ir al Asistente"
@@ -124,6 +146,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 />
               </form>
             </search>
+            <NotificationsLink />
             <TourLauncher />
             <span className="text-muted">
               {user.name} · {ROLE_LABELS[user.role]}
