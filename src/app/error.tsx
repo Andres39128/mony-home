@@ -5,6 +5,7 @@
 // re-renders the segment).
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 
 /**
  * Segment-level error boundary. Renders inside the root layout, so the
@@ -19,8 +20,9 @@ export default function Error({
   retry: () => void;
 }) {
   useEffect(() => {
-    // Observability sink for now; swap for the reporting service when one exists.
     console.error(error);
+    // No-op until the client SDK initializes (NEXT_PUBLIC_SENTRY_DSN set).
+    Sentry.captureException(error);
   }, [error]);
 
   return (

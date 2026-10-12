@@ -6,6 +6,7 @@
 // here — use the React <title> component instead.
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 import { themeInitScript } from "@/lib/theme-init";
 import "./globals.css";
 
@@ -18,6 +19,8 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error(error);
+    // No-op until the client SDK initializes (NEXT_PUBLIC_SENTRY_DSN set).
+    Sentry.captureException(error);
   }, [error]);
 
   return (

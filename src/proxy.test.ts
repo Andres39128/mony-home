@@ -4,16 +4,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { config, proxy } from "./proxy";
 import { themeInitScript } from "@/lib/theme-init";
 
-// The matcher string is the full exclusion regex Next applies to pathnames:
+// The matcher string is the exclusion regex Next applies to pathnames:
 // a path that MATCHES it gets the proxy (session gate); one that does not
-// match is served directly with no session check.
-const matcher = new RegExp(config.matcher[0]);
+// match is served directly with no session check. Next compiles it via
+// path-to-regexp into an ANCHORED, case-insensitive pattern
+// (^...[/?#]?$ — verified against next/dist/esm/lib/try-to-parse-path.js);
+// anchoring matters because unanchored .test() would let "/api/health"
+// match from its second slash and wrongly re-gate it.
+const matcher = new RegExp(`^(?:${config.matcher[0]})[/?#]?$`, "i");
 
 describe("proxy matcher", () => {
   it("still gates app routes and API endpoints", () => {
     for (const path of ["/", "/login", "/movimientos", "/api/receipts"]) {
       expect(matcher.test(path), path).toBe(true);
     }
+  });
+
+  it("never gates /api/health (public uptime-monitor target)", () => {
+    // If the matcher gated it, the proxy would redirect monitors to /login
+    // and the login page's 200 would hide real outages.
+    expect(matcher.test("/api/health")).toBe(false);
   });
 
   it("never gates the service worker, manifest or static PWA assets", () => {
@@ -130,5 +140,27 @@ describe("proxy CSP", () => {
     const response = proxy(new NextRequest("http://localhost/"));
     expect(response.status).toBe(307);
     expect(cspOf(response)).toMatch(NONCE);
+  });
+
+  it("allows the Sentry ingest origin only when a public DSN is set", () => {
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://o42.ingest.sentry.io/450123");
+    try {
+      const csp = cspOf(proxy(new NextRequest("http://localhost/login")));
+      expect(directives(csp).get("connect-src")).toEqual([
+        "'self'",
+        "https://o42.ingest.sentry.io",
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    // Malformed DSN: CSP falls back to 'self' instead of throwing.
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "not-a-url");
+    try {
+      const csp = cspOf(proxy(new NextRequest("http://localhost/login")));
+      expect(directives(csp).get("connect-src")).toEqual(["'self'"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -14,6 +14,22 @@ import { themeInitScript } from "@/lib/theme-init";
 const themeScriptHash = `'sha256-${createHash("sha256").update(themeInitScript).digest("base64")}'`;
 
 /**
+ * Sentry ingest origin derived from the public DSN: the browser SDK POSTs
+ * envelopes to the DSN's origin, so connect-src must allow it. Returns
+ * undefined (CSP stays 'self'-only) when error reporting is off; a
+ * malformed DSN also yields undefined rather than 500ing every request.
+ */
+function sentryIngestOrigin(): string | undefined {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+  if (!dsn) return undefined;
+  try {
+    return new URL(dsn).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Per the bundled CSP guide (docs: content-security-policy), the header must
  * be set on BOTH the request (Next.js parses it during SSR, extracts the
  * nonce via the 'nonce-{value}' pattern and auto-attaches it to its
@@ -22,6 +38,7 @@ const themeScriptHash = `'sha256-${createHash("sha256").update(themeInitScript).
  */
 function buildCsp(nonce: string) {
   const isDev = process.env.NODE_ENV === "development";
+  const sentryOrigin = sentryIngestOrigin();
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' ${themeScriptHash} 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
@@ -37,7 +54,7 @@ function buildCsp(nonce: string) {
       : ["style-src-elem 'self'", "style-src-attr 'unsafe-inline'"]),
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    "connect-src 'self'",
+    `connect-src 'self'${sentryOrigin ? ` ${sentryOrigin}` : ""}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -88,10 +105,12 @@ export const config = {
   // PWA assets are excluded: pre-auth visitors (login page) still need the
   // manifest, icons and apple-touch icon for installability, and the service
   // worker (/sw.js) plus its /offline.html fallback must be fetchable with no
-  // session. Everything app-related stays gated. `icon`/`apple-icon` (no
-  // extension) are the Next file-convention routes for src/app/icon.svg and
-  // src/app/apple-icon.png.
+  // session. /api/health is the public uptime-monitor target: gating it would
+  // redirect monitors to /login, whose 200 would hide real outages. It still
+  // answers 503 itself when the database is down. Everything app-related
+  // stays gated. `icon`/`apple-icon` (no extension) are the Next
+  // file-convention routes for src/app/icon.svg and src/app/apple-icon.png.
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.webmanifest|offline\\.html|icon\\.svg|icon-[\\w-]+\\.png|logo-line\\.svg|icon$|apple-icon).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.webmanifest|offline\\.html|icon\\.svg|icon-[\\w-]+\\.png|logo-line\\.svg|icon$|apple-icon|api/health$).*)",
   ],
 };
