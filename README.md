@@ -39,6 +39,8 @@ the config with an invalid state throws an error naming the offending variable.
    | `LLM_MODEL` | Model id, e.g. `openrouter/free` |
    | `ASSISTANT_DAILY_LIMIT` | Per-user daily quota (default `8`) |
    | `APP_NAME` | App name, also sent to OpenRouter as attribution |
+   | `SENTRY_DSN` | *Optional.* Server-side Sentry DSN — empty = error reporting disabled |
+   | `NEXT_PUBLIC_SENTRY_DSN` | *Optional.* Browser-side Sentry DSN — empty = error reporting disabled (must be set at build time) |
 
    `DIRECT_URL` (port `5432`) is only needed locally/CI for migrations —
    Vercel never runs migrations, so it does not need it.
@@ -82,6 +84,60 @@ uploads it as a workflow artifact retained for **90 days**.
    psql "$SUPABASE_DB_URL" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
    psql "$SUPABASE_DB_URL" -f backup-YYYY-MM-DD.sql
    ```
+
+### Rollback
+
+Vercel keeps every production deployment, so reverting the **code** is
+instant: Dashboard → Deployments → previous deployment → **Promote**, or
+`vercel rollback` from a linked checkout.
+
+**Rolling back the deploy does NOT roll back the database.** Migrations run
+manually (`npm run db:migrate` against `DIRECT_URL`) and are never executed
+by Vercel, so promoting an older deployment leaves the schema at the newest
+migration. Before rolling back:
+
+1. Check whether a migration shipped between the two deployments. Older code
+   querying renamed/dropped columns breaks against the newer schema — if the
+   migration is backward-compatible, the rollback is safe.
+2. If a migration itself is the cause of the incident, falling back to the
+   restore procedure in [Backups](#backups) (into a fresh database) is the
+   escape hatch — note it discards everything written after that backup.
+
+### Monitoring
+
+**Health endpoint.** `GET /api/health` is public (no login) and checks the
+database: `200 {"status":"ok"}` means app + database reachable;
+`503 {"status":"unavailable"}` means the database is down. Point an uptime
+monitor's HTTP check at `https://<your-domain>/api/health` to catch outages
+between backups.
+
+**Backup dead-man switch.** The `backup` and `backup-verify` workflows ping a
+heartbeat URL **only when they succeed** — a failed *or never-run* workflow
+stays silent and the monitor alerts after its grace period. To wire it:
+
+1. Create a heartbeat-type check in your uptime monitor (e.g. healthchecks.io)
+   and copy its ping URL.
+2. Store it as the `HEARTBEAT_URL` GitHub secret (unset = heartbeat disabled):
+   ```bash
+   gh secret set HEARTBEAT_URL
+   ```
+3. Set the check's grace period above the workflow cadences (e.g. 1 day, so
+   both the weekly backup and the monthly drill fit inside it).
+
+**Monthly restore drill.** The `backup-verify` workflow (1st of each month,
+06:30 UTC, also on manual dispatch) downloads the newest backup artifact and
+replays it into a throwaway in-memory database, asserting the core tables
+hold data — proving backups restore, not just exist. Artifacts expire after
+90 days, so the monthly cadence stays inside the retention window.
+
+**Alert test** (run once after wiring the heartbeat):
+
+1. Force one failure: temporarily break `SUPABASE_DB_URL` (or unset it) and
+   dispatch `backup` manually — no ping is sent, so the monitor must alert
+   once its grace period elapses.
+2. Force one success: restore the secret and dispatch `backup` again — the
+   monitor must show the ping received (which clears the alert).
+3. Clean up: delete the failed run's artifacts (if any) and reset the check.
 
 ### Assistant model swap
 
