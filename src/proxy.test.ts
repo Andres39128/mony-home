@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import { config, proxy } from "./proxy";
+import { SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 import { themeInitScript } from "@/lib/theme-init";
 
 // The matcher string is the exclusion regex Next applies to pathnames:
@@ -39,6 +40,22 @@ describe("proxy matcher", () => {
     ]) {
       expect(matcher.test(path), path).toBe(false);
     }
+  });
+});
+
+describe("proxy session gate", () => {
+  it("redirects cookieless visitors on app routes to /login", () => {
+    const response = proxy(new NextRequest("http://localhost/movimientos"));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://localhost/login");
+  });
+
+  it("renders /login even with a session cookie — a stale cookie must never trap the user", () => {
+    const request = new NextRequest("http://localhost/login", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=stale-token` },
+    });
+    const response = proxy(request);
+    expect(response.status).toBe(200);
   });
 });
 

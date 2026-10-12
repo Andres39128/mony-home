@@ -65,7 +65,9 @@ function buildCsp(nonce: string) {
 /**
  * Cheap edge gate ONLY — no DB here (postgres.js cannot run in the proxy).
  * Presence of the cookie is checked, never its validity: real validation
- * happens server-side in the (app) layout via requireUser().
+ * happens server-side in the (app) layout via requireUser(). /login always
+ * renders — never bounce cookie-bearing visitors away from it (stale-cookie
+ * trap, see NOTE at the gate below).
  *
  * Also issues the per-request CSP nonce (fresh nonce per request; reading
  * x-nonce via headers() in the root layout opts every route into dynamic
@@ -87,9 +89,10 @@ export function proxy(request: NextRequest) {
   if (!hasSessionCookie && !isLogin) {
     return withCsp(NextResponse.redirect(new URL("/login", request.url)), csp);
   }
-  if (hasSessionCookie && isLogin) {
-    return withCsp(NextResponse.redirect(new URL("/", request.url)), csp);
-  }
+  // NOTE: /login renders even with a session cookie. Bouncing cookie-bearing
+  // visitors away from /login used to trap anyone holding a stale session:
+  // requireUser() cannot delete cookies during renders, so the / ↔ /login
+  // redirects looped forever and the app never loaded.
   return withCsp(
     NextResponse.next({ request: { headers: requestHeaders } }),
     csp,
