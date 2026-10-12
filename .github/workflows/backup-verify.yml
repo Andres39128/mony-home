@@ -1,0 +1,45 @@
+name: backup-verify
+
+# Monthly restore drill: downloads the newest backup artifact and replays it
+# into a throwaway in-memory Postgres (scripts/verify-backup.mjs), proving
+# the backups are restorable, not just present.
+#
+# Backup artifacts expire after 90 days; the monthly cadence keeps every
+# drill comfortably inside that retention window while weekly backups keep
+# succeeding.
+
+on:
+  schedule:
+    - cron: "30 6 1 * *" # 1st of every month, 06:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read # GITHUB_TOKEN needs this to list workflow runs and download artifacts
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - run: npm ci
+      # STRICT=1 makes a missing/unauthenticated gh fail the run instead of
+      # printing manual steps; GH_TOKEN authenticates the gh CLI calls the
+      # script makes (verify-backup.mjs never reads GITHUB_TOKEN directly).
+      - name: Restore drill (latest backup artifact)
+        env:
+          BACKUP_VERIFY_STRICT: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run backup:verify
+
+      # Dead-man switch, same contract as backup.yml: pinged ONLY on success.
+      - name: Heartbeat (dead-man switch)
+        if: env.HEARTBEAT_URL != ''
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: curl -fsS --retry 3 "$HEARTBEAT_URL"

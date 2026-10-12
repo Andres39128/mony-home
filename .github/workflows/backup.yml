@@ -67,3 +67,12 @@ jobs:
           path: backup-*.sql.gz
           retention-days: 90
           if-no-files-found: error
+
+      # Dead-man switch: pinged ONLY after every prior step succeeded, so a
+      # failed (or never-run) workflow stays silent and the uptime monitor
+      # alerts after its grace period. No-op until HEARTBEAT_URL is set.
+      - name: Heartbeat (dead-man switch)
+        if: env.HEARTBEAT_URL != ''
+        env:
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: curl -fsS --retry 3 "$HEARTBEAT_URL"
