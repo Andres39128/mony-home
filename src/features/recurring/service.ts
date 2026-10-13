@@ -25,6 +25,7 @@ import { categories, loans, recurringMovements, users } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError } from "@/db/pg-errors";
 import type { SessionUser } from "@/lib/auth";
+import { recordAudit, auditAmount } from "@/features/audit/service";
 import { parsePositiveAmountCents } from "@/lib/money-errors";
 import { checkCardRules, UUID_RE } from "@/features/transactions/service";
 import { getCardPurchaseInfo } from "@/features/loans/service";
@@ -235,6 +236,14 @@ export async function createRecurring(
 
   try {
     await db.insert(recurringMovements).values(recurringValues(input, validated.cents));
+    await recordAudit(
+      db,
+      user,
+      "recurring",
+      "",
+      "create",
+      `Recurrente creado: ${input.name} (${auditAmount(input.amount)})`,
+    );
     return { ok: true };
   } catch (error) {
     // A referenced row deleted between the checks and the insert.
@@ -264,6 +273,14 @@ export async function updateRecurring(
       .where(eq(recurringMovements.id, id))
       .returning({ id: recurringMovements.id });
     if (updated.length === 0) return { ok: false, error: "not_found" };
+    await recordAudit(
+      db,
+      user,
+      "recurring",
+      id,
+      "update",
+      `Recurrente actualizado: ${input.name} (${auditAmount(input.amount)})`,
+    );
     return { ok: true };
   } catch (error) {
     if (hasPgError(error, "23503")) return { ok: false, error: "not_found" };
@@ -288,6 +305,7 @@ export async function toggleRecurringActive(
     .where(eq(recurringMovements.id, id))
     .returning({ id: recurringMovements.id });
   if (updated.length === 0) return { ok: false, error: "not_found" };
+  await recordAudit(db, user, "recurring", id, "toggle", "Estado del recurrente cambiado");
   return { ok: true };
 }
 
@@ -306,5 +324,6 @@ export async function removeRecurring(
     .where(eq(recurringMovements.id, id))
     .returning({ id: recurringMovements.id });
   if (deleted.length === 0) return { ok: false, error: "not_found" };
+  await recordAudit(db, user, "recurring", id, "delete", "Recurrente eliminado");
   return { ok: true };
 }

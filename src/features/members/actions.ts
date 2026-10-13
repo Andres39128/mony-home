@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 
 import { cookies } from "next/headers";
 import { getDb } from "@/db";
-import { ForbiddenError, hashToken, requireAdmin } from "@/lib/auth";
+import { ForbiddenError, hashToken, requireAdmin, type SessionUser } from "@/lib/auth";
 import { SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 import { requireUser } from "@/features/auth/session";
 import {
@@ -19,17 +19,21 @@ import {
   updateOwnName,
   type MemberFormState,
 } from "@/features/members/service";
+import { recordAudit } from "@/features/audit/service";
 
 const ADMIN_REQUIRED_MESSAGE = "Solo los administradores pueden gestionar integrantes.";
 
 /**
- * Authorization gate shared by every mutating action.
- * UI hiding is never trusted: the guard runs server-side on each call.
+ * Authorization gate shared by every mutating action: returns the acting
+ * admin (also the audit actor — member services are actor-less) or the
+ * Spanish denial state. UI hiding is never trusted: the guard runs
+ * server-side on each call.
  */
-async function requireAdminOrError(): Promise<MemberFormState | null> {
+async function requireAdminUser(): Promise<SessionUser | MemberFormState> {
+  const user = await requireUser();
   try {
-    requireAdmin(await requireUser());
-    return null;
+    requireAdmin(user);
+    return user;
   } catch (error) {
     if (error instanceof ForbiddenError) return { error: ADMIN_REQUIRED_MESSAGE };
     throw error;
@@ -49,8 +53,8 @@ export async function createMemberAction(
   _prev: MemberFormState,
   formData: FormData,
 ): Promise<MemberFormState> {
-  const denied = await requireAdminOrError();
-  if (denied) return denied;
+  const admin = await requireAdminUser();
+  if (!("id" in admin)) return admin;
 
   const parsed = createMemberSchema.safeParse({
     username: formData.get("username"),
@@ -67,6 +71,15 @@ export async function createMemberAction(
     }
     return { error: "No se pudo crear el integrante." };
   }
+  // createMember is actor-less: the action owns the audit.
+  await recordAudit(
+    getDb(),
+    admin,
+    "member",
+    "",
+    "create",
+    `Integrante creado: ${parsed.data.name} (${parsed.data.role})`,
+  );
   refresh();
   return { ok: true };
 }
@@ -75,8 +88,8 @@ export async function updateMemberAction(
   _prev: MemberFormState,
   formData: FormData,
 ): Promise<MemberFormState> {
-  const denied = await requireAdminOrError();
-  if (denied) return denied;
+  const admin = await requireAdminUser();
+  if (!("id" in admin)) return admin;
 
   const id = formData.get("id");
   if (typeof id !== "string" || id.length === 0) return { error: "Integrante inválido." };
@@ -91,6 +104,15 @@ export async function updateMemberAction(
 
   const result = await updateMember(getDb(), id, parsed.data);
   if (!result.ok) return { error: "No se pudo guardar el integrante." };
+  // updateMember is actor-less: the action owns the audit (never logs secrets).
+  await recordAudit(
+    getDb(),
+    admin,
+    "member",
+    id,
+    "update",
+    `Integrante actualizado: ${parsed.data.name} (${parsed.data.role}${parsed.data.isActive ? "" : ", inactivo"}${parsed.data.newPassword ? ", contraseña restablecida" : ""})`,
+  );
   refresh();
   return { ok: true };
 }
@@ -99,8 +121,8 @@ export async function deleteMemberAction(
   _prev: MemberFormState,
   formData: FormData,
 ): Promise<MemberFormState> {
-  const denied = await requireAdminOrError();
-  if (denied) return denied;
+  const admin = await requireAdminUser();
+  if (!("id" in admin)) return admin;
 
   const id = formData.get("id");
   if (typeof id !== "string" || id.length === 0) return { error: "Integrante inválido." };
@@ -114,6 +136,7 @@ export async function deleteMemberAction(
     }
     return { error: "No se pudo eliminar el integrante." };
   }
+  await recordAudit(getDb(), admin, "member", id, "delete", "Integrante eliminado");
   refresh();
   return { ok: true };
 }

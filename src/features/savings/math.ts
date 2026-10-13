@@ -52,6 +52,14 @@ export function formatRatePercent(rateBp: number): string {
 }
 
 /**
+ * Manual FX rate → badge copy ("3800 → 3.800", "4200,5 → 4.200,5"). Wide
+ * fraction budget so low-unit rates (e.g. stablecoin pairs) stay readable.
+ */
+export function formatFxRate(rate: number): string {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 6 }).format(rate);
+}
+
+/**
  * Whole months from today until the deadline month; negative when overdue,
  * null when there is no deadline. Month granularity on purpose ("vence en
  * N meses" — day precision would make the copy jitter daily).

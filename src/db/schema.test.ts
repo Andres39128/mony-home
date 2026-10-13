@@ -4,6 +4,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import {
   appConfig,
+  auditLog,
   budgets,
   categories,
   expenseGroups,
@@ -1336,5 +1337,85 @@ describe("migration 0016 (recurring frequencies + card payment)", () => {
       .values({ ...base(), name: "Anclada", paymentMethod: "card", cardLoanId: cardId })
       .returning();
     await expectPgError(db.delete(loans).where(eq(loans.id, own.cardLoanId!)), "23001");
+  });
+});
+
+describe("migration 0017 (multi-currency + audit trail)", () => {
+  let db: PgliteDatabase;
+  let client: PGlite;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("defaults existing-style goals to the base currency ('') and accepts 3-letter codes", async () => {
+    const [implicit] = await db
+      .insert(savingsGoals)
+      .values({ name: "Sin moneda", kind: "investment", scope: "common" })
+      .returning();
+    expect(implicit.currency).toBe("");
+    const [explicit] = await db
+      .insert(savingsGoals)
+      .values({ name: "ETF", kind: "investment", scope: "common", currency: "USD" })
+      .returning();
+    expect(explicit.currency).toBe("USD");
+  });
+
+  it("rejects currency values outside '' | ^[A-Z]{3}$ via CHECK", async () => {
+    for (const bad of ["usd", "USDD", "US D", "us"]) {
+      await expectPgError(
+        db.insert(savingsGoals).values({ name: "Mala", kind: "investment", scope: "common", currency: bad }),
+        "23514",
+      );
+    }
+  });
+
+  it("stores audit rows with defaults and RESTRICTs actor deletion", async () => {
+    const [actor] = await db
+      .insert(users)
+      .values({ username: "auditor", passwordHash: "h", name: "Auditor", role: "admin" })
+      .returning();
+    const [row] = await db
+      .insert(auditLog)
+      .values({ actorId: actor.id, entity: "transaction", entityId: "", action: "create", summary: "Movimiento creado: $15.000 Super" })
+      .returning();
+    expect(row.id).toBeDefined();
+    expect(row.createdAt).toBeInstanceOf(Date);
+    expect(row.summary).toBe("Movimiento creado: $15.000 Super");
+
+    // Summary is optional.
+    const [bare] = await db
+      .insert(auditLog)
+      .values({ actorId: actor.id, entity: "goal", entityId: "x", action: "delete" })
+      .returning();
+    expect(bare.summary).toBeNull();
+
+    // RESTRICT: the actor of history can never be silently deleted.
+    await expectPgError(db.delete(users).where(eq(users.id, actor.id)), "23001");
+  });
+
+  it("created the (created_at desc) and (entity, entity_id) indexes", async () => {
+    const indexes = await db.execute(
+      sql`select indexname from pg_indexes where tablename = 'audit_log'`,
+    );
+    const names = indexes.rows.map((row) => row.indexname);
+    expect(names).toContain("audit_log_created_at_index");
+    expect(names).toContain("audit_log_entity_entity_id_index");
+  });
+
+  it("locks the audit log down from the PostgREST surface (deny-all RLS)", async () => {
+    const [rel] = await db.execute(
+      sql`select relrowsecurity as enabled from pg_class where relname = 'audit_log'`,
+    ).then((result) => result.rows);
+    expect(rel.enabled).toBe(true);
+    const [policy] = await db.execute(
+      sql`select cmd, roles from pg_policies where tablename = 'audit_log' and policyname = 'audit_deny_api'`,
+    ).then((result) => result.rows);
+    expect(policy.cmd).toBe("ALL");
+    expect(policy.roles).toEqual(["anon", "authenticated"]);
   });
 });

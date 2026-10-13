@@ -19,7 +19,9 @@ import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import { parseAmountToCents } from "@/lib/money";
 import { parsePositiveAmountCents } from "@/lib/money-errors";
 import { resolveMemberId } from "@/lib/authorization";
+import { ISO_CURRENCY_CODE_RE, getFxRates } from "@/lib/app-settings";
 import type { SessionUser } from "@/lib/auth";
+import { recordAudit, auditAmount } from "@/features/audit/service";
 import { todayIso } from "@/lib/date";
 import { listLoans, type LoanView } from "@/features/loans/service";
 import { catchUpAllInterest } from "./accrual";
@@ -58,6 +60,19 @@ export const goalSchema = z
     annualRate: optionalAmount,
     /** Interest mode (savings goals with a rate); empty string = default 'simple'. */
     accrualMode: z.union([z.enum(["simple", "compound"]), z.literal("")]).default(""),
+    /**
+     * Currency of an investment's current value (F8): '' = base currency,
+     * otherwise an uppercase 3-letter code. Lowercase input is uppercased
+     * server-side; investments only (refine below + service check).
+     */
+    currency: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .refine((v) => v === "" || ISO_CURRENCY_CODE_RE.test(v), {
+        message: "Usá el código de moneda de 3 letras (ej: USD)",
+      })
+      .default(""),
   })
   .refine((v) => v.scope !== "individual" || v.memberId !== "", {
     message: "Las bolsas individuales requieren un integrante.",
@@ -74,6 +89,10 @@ export const goalSchema = z
   .refine((v) => v.kind !== "investment" || (v.target === "" && v.deadline === ""), {
     message: "Las inversiones no llevan objetivo ni plazo.",
     path: ["target"],
+  })
+  .refine((v) => v.currency === "" || v.kind === "investment", {
+    message: "Solo las inversiones admiten otra moneda.",
+    path: ["currency"],
   });
 
 export type GoalInput = z.output<typeof goalSchema>;
@@ -116,6 +135,11 @@ export interface GoalView {
   accrualMode: "simple" | "compound" | null;
   /** 'YYYY-MM-01' — month the rate was last reviewed (review banner flag). */
   rateReviewedMonth: string | null;
+  /**
+   * Currency the investment's current value is denominated in (F8);
+   * '' = the household's base currency.
+   */
+  currency: string;
   /** Sum of interest entries — what the goal has generated so far. */
   interestTotalCents: number;
   isActive: boolean;
@@ -141,8 +165,16 @@ export interface PatrimonyBreakdown {
   id: string;
   name: string;
   kind: "savings" | "investment";
-  /** Savings: net accumulated; investments: current value (net fallback). */
+  /**
+   * In BASE currency: foreign investment values are converted with their
+   * fx rate; a missing rate leaves the raw (foreign-denominated) amount
+   * at face value — flagged by fxRate === null + currency !== ''.
+   */
   valueCents: number;
+  /** Goal's own currency ('' = base). */
+  currency: string;
+  /** Rate applied to reach valueCents; null = base goal or missing rate ("sin tasa"). */
+  fxRate: number | null;
 }
 
 export interface Patrimony {
@@ -185,6 +217,7 @@ export async function listGoals(db: Database): Promise<GoalView[]> {
       annualRateBp: savingsGoals.annualRateBp,
       accrualMode: savingsGoals.accrualMode,
       rateReviewedMonth: savingsGoals.rateReviewedMonth,
+      currency: savingsGoals.currency,
       isActive: savingsGoals.isActive,
       net: sql<string | null>`coalesce(sum(case ${savingsContributions.kind} when 'deposit' then ${savingsContributions.amountCents} when 'withdrawal' then -${savingsContributions.amountCents} else ${savingsContributions.amountCents} end), 0)`,
       interestTotal: sql<string | null>`coalesce(sum(case when ${savingsContributions.kind} = 'interest' then ${savingsContributions.amountCents} else 0 end), 0)`,
@@ -256,6 +289,10 @@ function goalValues(input: GoalInput, targetCents: number | null, rateBp: number
     targetCents: input.kind === "savings" ? targetCents : null,
     deadline: input.kind === "savings" && input.deadline !== "" ? input.deadline : null,
     institution: input.institution !== "" ? input.institution : null,
+    // '' = base currency; the investment-only + shape rules are enforced
+    // upstream (schema refine + checkKindFields), so savings goals always
+    // land '' and codes always land uppercase (CHECK savings_goals_currency_shape).
+    currency: input.currency.toUpperCase(),
     annualRateBp: rateBp,
     // Mode only applies to savings goals with a rate; unset defaults to 'simple'
     // (the historical rate/12 semantics). Investments accrue nothing.
@@ -283,6 +320,7 @@ export type GoalResult =
         | "invalid_target"
         | "invalid_current_value"
         | "invalid_rate"
+        | "invalid_currency"
         | "member_not_found"
         | "goal_not_found"
         | "has_contributions"
@@ -299,6 +337,13 @@ function checkKindFields(input: GoalInput): GoalResult | null {
   }
   if (input.kind === "investment" && (input.target !== "" || input.deadline !== "")) {
     return { ok: false, error: "invalid_target" };
+  }
+  // Investments only (F8), uppercase 3-letter shape: mirrors the schema
+  // refine + regex for direct callers (the action path arrives already
+  // normalized by zod; the service never trusts that).
+  const currency = input.currency.toUpperCase();
+  if (currency !== "" && (input.kind !== "investment" || !ISO_CURRENCY_CODE_RE.test(currency))) {
+    return { ok: false, error: "invalid_currency" };
   }
   return null;
 }
@@ -338,6 +383,14 @@ export async function createGoal(
       currentValueCents: input.kind === "investment" ? value : null,
       valueUpdatedAt: input.kind === "investment" && value !== null ? new Date() : null,
     });
+    await recordAudit(
+      db,
+      user,
+      "goal",
+      "",
+      "create",
+      `Bolsa creada: ${input.name}${input.currency !== "" ? ` (${input.currency})` : ""}`,
+    );
     return { ok: true };
   } catch (error) {
     // Stale member option (deleted between render and submit).
@@ -386,6 +439,14 @@ export async function updateGoal(
       .where(eq(savingsGoals.id, id))
       .returning({ id: savingsGoals.id });
     if (updated.length === 0) return { ok: false, error: "goal_not_found" };
+    await recordAudit(
+      db,
+      user,
+      "goal",
+      id,
+      "update",
+      `Bolsa actualizada: ${input.name}${input.currency !== "" ? ` (${input.currency})` : ""}`,
+    );
     return { ok: true };
   } catch (error) {
     if (hasPgError(error, "23503")) return { ok: false, error: "member_not_found" };
@@ -420,6 +481,7 @@ export async function removeGoal(
       .where(eq(savingsGoals.id, id))
       .returning({ id: savingsGoals.id });
     if (deleted.length === 0) return { ok: false, error: "goal_not_found" };
+    await recordAudit(db, user, "goal", id, "delete", "Bolsa eliminada");
     return { ok: true };
   } catch (error) {
     // RESTRICT FK: savings_contributions.goal_id (23001 on PGlite, 23503 on PG 17).
@@ -511,7 +573,8 @@ export async function addContribution(
 
   // Contribution + mirror commit together (R1): stats never diverge from
   // the savings ledger. Interest rows never pass through here.
-  return db.transaction(async (tx) => {
+  let goalName = "";
+  const result = await db.transaction<ContributionResult>(async (tx) => {
     const [goal] = await tx
       .select({ name: savingsGoals.name, scope: savingsGoals.scope, isActive: savingsGoals.isActive })
       .from(savingsGoals)
@@ -519,6 +582,7 @@ export async function addContribution(
       .limit(1);
     if (!goal) return { ok: false, error: "goal_not_found" };
     if (!goal.isActive) return { ok: false, error: "goal_inactive" };
+    goalName = goal.name;
 
     const member = resolveMemberId(user, input.memberId);
     if (!member.ok) return member;
@@ -565,6 +629,17 @@ export async function addContribution(
       throw error;
     }
   });
+  if (result.ok) {
+    await recordAudit(
+      db,
+      user,
+      "contribution",
+      goalId,
+      input.kind === "deposit" ? "create" : "delete",
+      `${input.kind === "deposit" ? "Aporte a" : "Retiro de"} ${goalName}: ${auditAmount(input.amount)}`,
+    );
+  }
+  return result;
 }
 
 /** Full history (optionally one goal's), newest first. Feeds the /bolsas cards. */
@@ -691,6 +766,14 @@ export async function updateGoalValue(
       })
       .where(eq(savingsGoals.id, goalId));
   });
+  await recordAudit(
+    db,
+    user,
+    "goal",
+    goalId,
+    "valuation",
+    `Valoración actualizada: ${auditAmount(currentValue)}`,
+  );
   return { ok: true };
 }
 
@@ -704,6 +787,12 @@ export async function updateGoalValue(
  * goals — deactivating a tracker does not withdraw the money — and inactive
  * loans — deactivating a debt does not forgive it.
  *
+ * Foreign-currency investments (F8) convert at their manual fx rate
+ * (app_config 'fx:CODE' → base units per 1 foreign unit). HONESTY RULE:
+ * a missing/invalid rate never invents a conversion — the goal counts at
+ * face value (the raw foreign-denominated amount) and carries
+ * fxRate === null so the UI can badge it "sin tasa".
+ *
  * `goals` accepts a precomputed listGoals() result and `loans` a precomputed
  * listLoans() result, so callers that already ran the lazy catch-ups (e.g.
  * /bolsas, the assistant context) don't pay for second queries.
@@ -715,6 +804,7 @@ export async function getPatrimony(
 ): Promise<Patrimony> {
   goals ??= await listGoals(db);
   loans ??= await listLoans(db);
+  const fxRates = await getFxRates(db);
   // A saldo a favor never subtracts, plus the
   // property side — both computed over the rows we already hold.
   const debtCents = loans.reduce(
@@ -725,15 +815,21 @@ export async function getPatrimony(
     (total, loan) => total + (loan.propertyValueCents ?? 0),
     0,
   );
-  const breakdown: PatrimonyBreakdown[] = goals.map((goal) => ({
-    id: goal.id,
-    name: goal.name,
-    kind: goal.kind,
-    valueCents:
+  const breakdown: PatrimonyBreakdown[] = goals.map((goal) => {
+    const rawCents =
       goal.kind === "investment"
         ? investmentValueCents(goal.netCents, goal.currentValueCents)
-        : goal.netCents,
-  }));
+        : goal.netCents;
+    const rate = goal.currency === "" ? null : (fxRates[goal.currency] ?? null);
+    return {
+      id: goal.id,
+      name: goal.name,
+      kind: goal.kind,
+      currency: goal.currency,
+      fxRate: rate,
+      valueCents: rate === null ? rawCents : Math.round(rawCents * rate),
+    };
+  });
   const savingsCents = breakdown
     .filter((goal) => goal.kind === "savings")
     .reduce((total, goal) => total + goal.valueCents, 0);

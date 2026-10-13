@@ -27,6 +27,7 @@ import {
   type GoalInput,
 } from "@/features/savings/service";
 import { transactionTotals } from "@/features/transactions/service";
+import { setFxRate } from "@/lib/app-settings";
 import { todayIso } from "@/lib/date";
 import type { SessionUser } from "@/lib/auth";
 
@@ -48,6 +49,7 @@ const savingsInput: GoalInput = {
   institution: "",
   annualRate: "",
   accrualMode: "",
+  currency: "",
 };
 
 const investmentInput: GoalInput = {
@@ -61,6 +63,7 @@ const investmentInput: GoalInput = {
   institution: "",
   annualRate: "",
   accrualMode: "",
+  currency: "",
 };
 
 /** Empty date mirrors the zod transform: "" → today. */
@@ -778,5 +781,101 @@ describe("patrimony with mortgaged property (integration on PGlite)", () => {
     expect(patrimony.debtCents).toBe(200_000);
     // The apartment's equity (800k − 200k) is the household's real capital.
     expect(patrimony.totalCents).toBe(700_000);
+  });
+});
+
+/**
+ * Foreign-currency investments (F8): the currency field rides the goal
+ * form (investments only), and patrimony converts at the manual fx rate —
+ * honestly skipping goals whose rate is missing ("sin tasa").
+ */
+describe("multi-currency investments (integration on PGlite)", () => {
+  let db: PgliteDatabase;
+  let appDb: Database;
+  let client: PGlite;
+  let admin: SessionUser;
+
+  beforeAll(async () => {
+    ({ db, client } = await createTestDb());
+    appDb = db as unknown as Database;
+    const [row] = await db
+      .insert(users)
+      .values({ username: "root", name: "Root", passwordHash: "x", role: "admin" })
+      .returning();
+    admin = { id: row.id, username: row.username, name: row.name, role: row.role };
+
+    expect(await setFxRate(appDb, admin, "USD", "3800")).toEqual({ ok: true });
+    // EUR has NO rate on purpose — the "sin tasa" face-value path.
+    // Goals: base savings, USD investment valued at US$ 1.000, EUR investment.
+    expect(await createGoal(appDb, admin, { ...savingsInput, name: "Base", target: "500" })).toEqual({
+      ok: true,
+    });
+    expect(
+      await createGoal(appDb, admin, {
+        ...investmentInput,
+        name: "ETF USD",
+        currentValue: "1000",
+        currency: "usd", // lowercase on purpose: uppercased server-side
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      await createGoal(appDb, admin, {
+        ...investmentInput,
+        name: "Fondo EUR",
+        currentValue: "2000",
+        currency: "EUR",
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it("validates the investment-only currency rule (schema + service)", () => {
+    // Savings goals never carry a currency (friendly field error).
+    const parsed = goalSchema.safeParse({ ...savingsInput, currency: "USD" });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((i) => i.path[0] === "currency")).toBe(true);
+    }
+    // Free text beyond the 3-letter shape fails too.
+    expect(goalSchema.safeParse({ ...investmentInput, currency: "DOLAR" }).success).toBe(false);
+  });
+
+  it("mirrors the rule at service level for direct callers", async () => {
+    expect(
+      await createGoal(appDb, admin, { ...savingsInput, name: "Trampa", currency: "USD" }),
+    ).toEqual({ ok: false, error: "invalid_currency" });
+  });
+
+  it("persists the currency (uppercased) and exposes it in views", async () => {
+    const goals = await listGoals(appDb);
+    const etf = goals.find((g) => g.name === "ETF USD")!;
+    expect(etf.currency).toBe("USD");
+    expect(goals.find((g) => g.name === "Base")!.currency).toBe("");
+    // A savings goal never grows one, even via update with a blank flip.
+    const base = goals.find((g) => g.name === "Base")!;
+    expect(
+      await updateGoal(appDb, admin, base.id, { ...savingsInput, name: "Base", currency: "USD" }),
+    ).toEqual({ ok: false, error: "invalid_currency" });
+  });
+
+  it("converts patrimony at the manual rate and skips missing rates at face value", async () => {
+    const patrimony = await getPatrimony(appDb);
+    const etf = patrimony.goals.find((g) => g.name === "ETF USD")!;
+    const eur = patrimony.goals.find((g) => g.name === "Fondo EUR")!;
+    const base = patrimony.goals.find((g) => g.name === "Base")!;
+
+    // US$ 1.000 = 100.000 cents × 3800 → 380.000.000 cents ($ 3.800.000).
+    expect(etf).toMatchObject({ currency: "USD", fxRate: 3800, valueCents: 380_000_000 });
+    // EUR: no fx:EUR → honest face value, flagged "sin tasa".
+    expect(eur).toMatchObject({ currency: "EUR", fxRate: null, valueCents: 200_000 });
+    // Base goal untouched ('' + no rate): patrimony values it by NET (no
+    // contributions yet → 0), never by target.
+    expect(base).toMatchObject({ currency: "", fxRate: null, valueCents: 0 });
+
+    expect(patrimony.investmentsCents).toBe(380_200_000);
+    expect(patrimony.savingsCents).toBe(0);
   });
 });

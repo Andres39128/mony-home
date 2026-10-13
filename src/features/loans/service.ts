@@ -25,6 +25,7 @@ import { parseAmountCents, parsePositiveAmountCents } from "@/lib/money-errors";
 import { resolveMemberId } from "@/lib/authorization";
 import type { SessionUser } from "@/lib/auth";
 import { dayIndexOfIso, isoOfDayIndex, todayIso } from "@/lib/date";
+import { recordAudit, auditAmount } from "@/features/audit/service";
 import { catchUpAllLoanInterest } from "./accrual";
 import { FIRE_INSURANCE_NOTE, LIFE_INSURANCE_NOTE, MORA_NOTE } from "./accrual";
 import { allocateWaterfall } from "./amortization";
@@ -733,6 +734,7 @@ export async function createLoan(
 
   try {
     await db.insert(loans).values(bank.values);
+    await recordAudit(db, user, "loan", "", "create", `Préstamo creado: ${input.name}`);
     return { ok: true };
   } catch (error) {
     // Stale member option (deleted between render and submit).
@@ -768,6 +770,7 @@ export async function updateLoan(
       .where(eq(loans.id, id))
       .returning({ id: loans.id });
     if (updated.length === 0) return { ok: false, error: "loan_not_found" };
+    await recordAudit(db, user, "loan", id, "update", `Préstamo actualizado: ${input.name}`);
     return { ok: true };
   } catch (error) {
     if (hasPgError(error, "23503")) return { ok: false, error: "member_not_found" };
@@ -802,6 +805,7 @@ export async function removeLoan(
       .where(eq(loans.id, id))
       .returning({ id: loans.id });
     if (deleted.length === 0) return { ok: false, error: "loan_not_found" };
+    await recordAudit(db, user, "loan", id, "delete", "Préstamo eliminado");
     return { ok: true };
   } catch (error) {
     // RESTRICT FK: loan_payments.loan_id (23001 on PGlite, 23503 on PG 17).
@@ -952,7 +956,9 @@ export async function addLoanPayment(
   if (cents === "ambiguous_amount") return { ok: false, error: "ambiguous_amount" };
   if (cents === "invalid_amount") return { ok: false, error: "invalid_amount" };
 
-  return db.transaction(async (tx) => {
+  // Hoisted for the post-commit audit row (F9).
+  let loanName = "";
+  const result = await db.transaction<PaymentResult>(async (tx) => {
     const [loan] = await tx
       .select({ name: loans.name, scope: loans.scope, isActive: loans.isActive })
       .from(loans)
@@ -960,6 +966,7 @@ export async function addLoanPayment(
       .limit(1);
     if (!loan) return { ok: false, error: "loan_not_found" };
     if (!loan.isActive) return { ok: false, error: "loan_inactive" };
+    loanName = loan.name;
 
     const member = resolveMemberId(user, input.memberId);
     if (!member.ok) return member;
@@ -996,6 +1003,17 @@ export async function addLoanPayment(
       throw error;
     }
   });
+  if (result.ok) {
+    await recordAudit(
+      db,
+      user,
+      "loan_payment",
+      loanId,
+      "payment",
+      `Pago de préstamo ${loanName}: ${auditAmount(input.amount)}`,
+    );
+  }
+  return result;
 }
 
 export type CardPaymentResult =
@@ -1048,7 +1066,9 @@ export async function addCardPayment(
     interestCents = parsed;
   }
 
-  return db.transaction(async (tx) => {
+  // Hoisted for the post-commit audit row (F9).
+  let cardName = "";
+  const result = await db.transaction<CardPaymentResult>(async (tx) => {
     const [loan] = await tx
       .select({
         name: loans.name,
@@ -1065,6 +1085,7 @@ export async function addCardPayment(
     if (loan.amortizationMode !== "revolving") {
       return { ok: false, error: "loan_not_revolving" };
     }
+    cardName = loan.name;
 
     const member = resolveMemberId(user, input.memberId);
     if (!member.ok) return member;
@@ -1168,6 +1189,17 @@ export async function addCardPayment(
       throw error;
     }
   });
+  if (result.ok) {
+    await recordAudit(
+      db,
+      user,
+      "loan_payment",
+      loanId,
+      "card-payment",
+      `Pago de tarjeta ${cardName}: ${auditAmount(input.amount)}`,
+    );
+  }
+  return result;
 }
 
 export type LedgerEntryResult =
@@ -1324,6 +1356,14 @@ export async function updateOutstanding(
       });
     }
   });
+  await recordAudit(
+    db,
+    user,
+    "loan",
+    loanId,
+    "update",
+    `Saldo ajustado: ${auditAmount(newOutstanding)}`,
+  );
   return { ok: true };
 }
 

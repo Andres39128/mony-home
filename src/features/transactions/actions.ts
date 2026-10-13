@@ -34,6 +34,7 @@ import type { ParsedCsv } from "@/features/transactions/import";
 import { fieldErrorsFrom, idFrom, type FormState } from "@/lib/form-state";
 import { amountFieldError } from "@/lib/money-errors";
 import { ForbiddenError, requireAdmin } from "@/lib/auth";
+import { recordAudit } from "@/features/audit/service";
 
 /** FormState plus the category created inline from the movement form. */
 export interface InlineCategoryState extends FormState {
@@ -254,7 +255,7 @@ export async function createCategoryInlineAction(
   _prev: InlineCategoryState,
   formData: FormData,
 ): Promise<InlineCategoryState> {
-  await requireUser();
+  const user = await requireUser();
 
   const parsed = categorySchema.safeParse({
     name: formData.get("categoryName"),
@@ -270,6 +271,9 @@ export async function createCategoryInlineAction(
       ? { fieldErrors: { name: "Ya existe una categoría con ese nombre." } }
       : { error: "No se pudo crear la categoría." };
   }
+
+  // createCategory is actor-less (open to any member): the action owns the audit.
+  await recordAudit(getDb(), user, "category", result.id, "create", `Categoría creada: ${parsed.data.name}`);
 
   refresh();
 

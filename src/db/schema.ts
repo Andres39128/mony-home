@@ -288,6 +288,14 @@ export const savingsGoals = pgTable(
      * investments, which accrue nothing — manual valuation only).
      */
     accrualMode: accrualModeEnum("accrual_mode"),
+    /**
+     * Currency the investment's current value is DENOMINATED in (F8).
+     * '' = the household's base currency (app_config.currencyCode) — the
+     * historical state of every pre-0017 row. Investments only (enforced by
+     * the savings service, where kind and currency change together);
+     * '' or an uppercase 3-letter code (CHECK savings_goals_currency_shape).
+     */
+    currency: text("currency").notNull().default(""),
     /** 'YYYY-MM-01' — month the rate was last reviewed; drives the review banner. */
     rateReviewedMonth: date("rate_reviewed_month", { mode: "string" }),
     isActive: boolean("is_active").notNull().default(true),
@@ -309,6 +317,10 @@ export const savingsGoals = pgTable(
     check(
       "savings_goals_annual_rate_bp_bounds",
       sql`${table.annualRateBp} IS NULL OR (${table.annualRateBp} >= 0 AND ${table.annualRateBp} <= 100000)`,
+    ),
+    check(
+      "savings_goals_currency_shape",
+      sql`${table.currency} = '' OR ${table.currency} ~ '^[A-Z]{3}$'`,
     ),
   ],
 );
@@ -668,3 +680,31 @@ export const appConfig = pgTable("app_config", {
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Append-only mutation trail (migration 0017, roadmap F9). One row per
+ * audited mutation: who (actor), what (entity + entity_id + action) and a
+ * short human-readable summary. entity_id is text on purpose: creates log
+ * before a generated id is handy and import batches log one batch-level
+ * row. Writes are best-effort post-commit (src/features/audit/service.ts) —
+ * the audit never blocks or rolls back the mutation it describes. RLS
+ * deny-all, same as every table.
+ */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    actorId: uuid("actor_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    entity: text("entity").notNull(),
+    entityId: text("entity_id").notNull(),
+    action: text("action").notNull(),
+    summary: text("summary"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("audit_log_created_at_index").on(table.createdAt),
+    index("audit_log_entity_entity_id_index").on(table.entity, table.entityId),
+  ],
+);

@@ -34,6 +34,7 @@ import {
   transactionTotals,
 } from "@/features/transactions/service";
 import type { SessionUser } from "@/lib/auth";
+import { recordAudit } from "@/features/audit/service";
 import { computeProgress, monthBounds, type ProgressStatus } from "@/features/budgets/progress";
 
 export interface BudgetRowView {
@@ -237,6 +238,14 @@ export async function setForMonth(
     await tx.delete(budgets).where(eq(budgets.month, bounds.start));
     if (values.length > 0) await tx.insert(budgets).values(values);
   });
+  await recordAudit(
+    db,
+    user,
+    "budget",
+    bounds.start,
+    "set",
+    `Presupuesto ${month}: ${planned.size} ${planned.size === 1 ? "categoría" : "categorías"}`,
+  );
   return { ok: true };
 }
 
@@ -279,5 +288,13 @@ export async function copyFromPreviousMonth(
     await tx.delete(budgets).where(eq(budgets.month, bounds.start));
     await tx.insert(budgets).values(previous.map((row) => ({ month: bounds.start, ...row })));
   });
+  await recordAudit(
+    db,
+    user,
+    "budget",
+    bounds.start,
+    "set",
+    `Presupuesto copiado de ${previousMonth(month)} a ${month}: ${previous.length} categorías`,
+  );
   return { ok: true };
 }

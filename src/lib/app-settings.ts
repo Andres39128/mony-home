@@ -8,7 +8,7 @@
  * the seed runs or the table is missing entirely.
  */
 import { cache } from "react";
-import { sql } from "drizzle-orm";
+import { like, sql } from "drizzle-orm";
 import { z } from "zod";
 // Relative on purpose: the seed CLI (`npm run db:seed`) runs plain node ESM,
 // which does not resolve the `@/` alias — only Next/vitest do. Any module the
@@ -28,12 +28,15 @@ export interface AppSettings {
 /** Code-level fallbacks: what the app uses before any seed/admin write. */
 export const DEFAULT_APP_SETTINGS: AppSettings = { currencyCode: "COP", locale: "es-CO" };
 
+/** Shared currency-code shape (settings, fx rates, goal currency). */
+export const ISO_CURRENCY_CODE_RE = /^[A-Z]{3}$/;
+
 /** Validation shared by the Configuración action, the service and seed env. */
 export const appSettingsSchema = z.object({
   currencyCode: z
     .string()
     .trim()
-    .regex(/^[A-Z]{3}$/, "Usá el código ISO de 3 letras (ej: COP)"),
+    .regex(ISO_CURRENCY_CODE_RE, "Usá el código ISO de 3 letras (ej: COP)"),
   locale: z
     .string()
     .trim()
@@ -92,5 +95,95 @@ export async function setAppSettings(
   const parsed = appSettingsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid_input" };
   await upsertAppConfig(db, parsed.data);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Manual FX rates (roadmap F8) — same key/value table, no schema change.
+// ---------------------------------------------------------------------------
+
+/** app_config key prefix for FX rates: 'fx:USD' = one US dollar's worth. */
+export const FX_KEY_PREFIX = "fx:";
+
+/**
+ * DIRECTION (the one rule to remember): `fx:USD = 3800` means ONE unit of
+ * USD is worth 3800 units of the BASE currency — i.e. the rate MULTIPLIES a
+ * foreign amount into base. Rates are decimal multipliers, NOT cents: they
+ * are stored as dot-decimal strings exactly as validated ("3800.5"), and
+ * consumers convert with Math.round(cents × rate) — float64 handles the
+ * products, the round absorbs sub-cent drift.
+ */
+export const FX_RATE_RE = /^[0-9]+([.,][0-9]+)?$/;
+
+/** Stored form of a validated rate: dot-decimal, as typed. */
+export function normalizeFxRate(rate: string): string {
+  return rate.replace(",", ".");
+}
+
+/** Validation shared by the Configuración action and the service. */
+export const fxRateSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(ISO_CURRENCY_CODE_RE, "Usá el código de 3 letras (ej: USD)"),
+  rate: z
+    .string()
+    .trim()
+    .regex(FX_RATE_RE, "Usá un número positivo (ej: 3800 o 3800,5)")
+    // The regex alone admits "0"; a zero/empty rate is meaningless.
+    .refine((r) => Number(normalizeFxRate(r)) > 0, "La tasa debe ser mayor a cero"),
+});
+
+export type FxRateMutationError = "forbidden" | "invalid_input" | "base_currency";
+
+/**
+ * Every stored FX rate keyed by currency code ('USD' → 3800.5). One read
+ * per request (React cache — patrimony and the settings page share it).
+ * Hand-edited garbage degrades silently: rows with invalid codes or
+ * non-numeric/non-positive values are skipped, never crash a render.
+ */
+export const getFxRates = cache(async (db: Database): Promise<Record<string, number>> => {
+  let rows: { key: string; value: string }[];
+  try {
+    rows = await db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(like(appConfig.key, `${FX_KEY_PREFIX}%`));
+  } catch (error) {
+    // 42P01 undefined_table: pre-migration deploy — no rates instead of a crash.
+    if (hasPgError(error, "42P01")) return {};
+    throw error;
+  }
+  const rates: Record<string, number> = {};
+  for (const row of rows) {
+    const code = row.key.slice(FX_KEY_PREFIX.length);
+    const rate = Number(row.value);
+    if (ISO_CURRENCY_CODE_RE.test(code) && Number.isFinite(rate) && rate > 0) {
+      rates[code] = rate;
+    }
+  }
+  return rates;
+});
+
+/** Admin-only upsert of one rate; refuses the base currency (a base 'fx:' key is meaningless). */
+export async function setFxRate(
+  db: Database,
+  user: SessionUser,
+  code: string,
+  rate: string,
+): Promise<{ ok: true } | { ok: false; error: FxRateMutationError }> {
+  if (user.role !== "admin") return { ok: false, error: "forbidden" };
+  const parsed = fxRateSchema.safeParse({ code, rate });
+  if (!parsed.success) return { ok: false, error: "invalid_input" };
+  const settings = await getAppSettings(db);
+  if (settings.currencyCode === parsed.data.code) return { ok: false, error: "base_currency" };
+  await db
+    .insert(appConfig)
+    .values({ key: `${FX_KEY_PREFIX}${parsed.data.code}`, value: normalizeFxRate(parsed.data.rate) })
+    // Same contract as upsertAppConfig: every write refreshes updated_at.
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value: sql`excluded.value`, updatedAt: sql`now()` },
+    });
   return { ok: true };
 }

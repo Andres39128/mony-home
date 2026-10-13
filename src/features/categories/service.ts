@@ -15,6 +15,7 @@ import { budgets, categories } from "@/db/schema";
 import type { Database } from "@/db";
 import { hasPgError, hasPgFkError } from "@/db/pg-errors";
 import type { SessionUser } from "@/lib/auth";
+import { recordAudit } from "@/features/audit/service";
 
 export interface CategoryView {
   id: string;
@@ -112,6 +113,7 @@ export async function updateCategory(
       .where(eq(categories.id, id))
       .returning({ id: categories.id });
     if (updated.length === 0) return { ok: false, error: "category_not_found" };
+    await recordAudit(db, user, "category", id, "update", `Categoría actualizada: ${input.name}`);
     return { ok: true };
   } catch (error) {
     if (hasPgError(error, "23505")) return { ok: false, error: "name_taken" };
@@ -132,6 +134,7 @@ export async function toggleCategoryActive(
     .where(eq(categories.id, id))
     .returning({ id: categories.id });
   if (updated.length === 0) return { ok: false, error: "category_not_found" };
+  await recordAudit(db, user, "category", id, "toggle", "Estado de la categoría cambiado");
   return { ok: true };
 }
 
@@ -153,6 +156,7 @@ export async function removeCategory(
         .returning({ id: categories.id });
     });
     if (deleted.length === 0) return { ok: false, error: "category_not_found" };
+    await recordAudit(db, user, "category", id, "delete", "Categoría eliminada");
     return { ok: true };
   } catch (error) {
     // RESTRICT FK: transactions.category_id (budgets rows are cascaded above).

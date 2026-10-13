@@ -26,6 +26,7 @@ import { ForbiddenError, requireAdmin } from "@/lib/auth";
 import { dayIndexOfIso, isoOfDayIndex } from "@/lib/date";
 import { AMBIGUOUS_AMOUNT_MESSAGE, INVALID_AMOUNT_MESSAGE, parseAmountCents } from "@/lib/money-errors";
 import { detectDelimiter, parseCsv, type CsvDelimiter } from "@/lib/csv";
+import { recordAudit } from "@/features/audit/service";
 
 /** Hard size cap for the pasted/uploaded file (same cap as receipts). */
 export const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
@@ -407,6 +408,17 @@ export async function commitImport(
         })),
       );
     });
+  }
+  // ONE batch-level audit row (F9): the import is one mutation, not N.
+  if (accepted.length > 0) {
+    await recordAudit(
+      db,
+      user,
+      "import",
+      "",
+      "materialize-batch",
+      `Importación CSV: ${accepted.length} ${accepted.length === 1 ? "movimiento" : "movimientos"}`,
+    );
   }
   return {
     ok: true,

@@ -13,6 +13,7 @@ import {
   HelpIcon,
   HomeIcon,
   LayersIcon,
+  ListIcon,
   LogoutIcon,
   PouchIcon,
   RepeatIcon,
@@ -44,6 +45,7 @@ const MENU_LINKS = [
   { href: "/categorias", label: "Categorías", Icon: TagIcon },
   { href: "/grupos", label: "Grupos", Icon: LayersIcon },
   { href: "/configuracion", label: "Configuración", Icon: SettingsIcon },
+  { href: "/auditoria", label: "Auditoría", Icon: ListIcon },
 ] as const;
 
 function isActive(pathname: string, href: string) {
