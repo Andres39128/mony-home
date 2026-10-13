@@ -7,7 +7,7 @@ import type {
   LoanView,
   PaymentView,
 } from "@/features/loans/service";
-import { formatCents, formatPerMillon } from "@/lib/money";
+import { formatCents, formatCentsForInput, formatPerMillon } from "@/lib/money";
 import { asLocalDate } from "@/lib/date";
 import { LedgerHistory } from "@/components/ledger-history";
 import type { FormState } from "@/lib/form-state";
@@ -399,7 +399,7 @@ function CardPaymentForm({
           placeholder="Total pagado"
           required
           aria-label={`Total pagado de ${card.name}`}
-          defaultValue={formatCents(Math.max(card.outstandingCents, 0))}
+          defaultValue={formatCentsForInput(Math.max(card.outstandingCents, 0))}
           className={`${inputClass} w-32 flex-1`}
         />
         <SubmitButton pending={pending}>Pagar</SubmitButton>
@@ -658,7 +658,7 @@ function BankFields({ state, loan }: { state: FormState; loan?: LoanView }) {
             name="fixedCuota"
             inputMode="decimal"
             placeholder="2.628.000,00"
-            defaultValue={loan?.fixedCuotaCents != null ? formatCents(loan.fixedCuotaCents) : undefined}
+            defaultValue={loan?.fixedCuotaCents != null ? formatCentsForInput(loan.fixedCuotaCents) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.fixedCuota} />
@@ -691,7 +691,7 @@ function BankFields({ state, loan }: { state: FormState; loan?: LoanView }) {
             name="propertyValue"
             inputMode="decimal"
             placeholder="339.802.600,00"
-            defaultValue={loan?.propertyValueCents != null ? formatCents(loan.propertyValueCents) : undefined}
+            defaultValue={loan?.propertyValueCents != null ? formatCentsForInput(loan.propertyValueCents) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.propertyValue} />
@@ -702,7 +702,7 @@ function BankFields({ state, loan }: { state: FormState; loan?: LoanView }) {
             name="insuredBase"
             inputMode="decimal"
             placeholder="204.993.414,80"
-            defaultValue={loan?.insuredBaseCents != null ? formatCents(loan.insuredBaseCents) : undefined}
+            defaultValue={loan?.insuredBaseCents != null ? formatCentsForInput(loan.insuredBaseCents) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.insuredBase} />
@@ -713,7 +713,7 @@ function BankFields({ state, loan }: { state: FormState; loan?: LoanView }) {
             name="otherCharges"
             inputMode="decimal"
             placeholder="0,00"
-            defaultValue={loan?.otherChargesCents != null ? formatCents(loan.otherChargesCents) : undefined}
+            defaultValue={loan?.otherChargesCents != null ? formatCentsForInput(loan.otherChargesCents) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.otherCharges} />
@@ -770,7 +770,7 @@ function RevolvingFields({ state, loan }: { state: FormState; loan?: LoanView })
             placeholder="5.000.000,00"
             required
             defaultValue={
-              loan?.creditLimitCents != null ? formatCents(loan.creditLimitCents) : undefined
+              loan?.creditLimitCents != null ? formatCentsForInput(loan.creditLimitCents) : undefined
             }
             className={inputClass}
           />
@@ -783,7 +783,7 @@ function RevolvingFields({ state, loan }: { state: FormState; loan?: LoanView })
             inputMode="decimal"
             placeholder="25.000,00"
             defaultValue={
-              loan?.managementFeeCents != null ? formatCents(loan.managementFeeCents) : undefined
+              loan?.managementFeeCents != null ? formatCentsForInput(loan.managementFeeCents) : undefined
             }
             className={inputClass}
           />
@@ -899,7 +899,7 @@ function LoanFields({
             inputMode="decimal"
             placeholder={mode === "revolving" ? "0,00" : "1.234,56"}
             required
-            defaultValue={loan?.principalCents != null ? formatCents(loan.principalCents) : undefined}
+            defaultValue={loan?.principalCents != null ? formatCentsForInput(loan.principalCents) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.principal} />
@@ -1003,7 +1003,7 @@ function EditLoanForm({
           inputMode="decimal"
           placeholder="Saldo real"
           aria-label={`Saldo real de ${loan.name}`}
-          defaultValue={formatCents(Math.max(loan.outstandingCents, 0))}
+          defaultValue={formatCentsForInput(Math.max(loan.outstandingCents, 0))}
           className={`${inputClass} w-40 flex-1`}
         />
         <SubmitButton pending={outstandingPending} variant="secondary">

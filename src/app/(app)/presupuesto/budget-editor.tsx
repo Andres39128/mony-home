@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import type { FormState } from "@/lib/form-state";
-import { formatCents } from "@/lib/money";
+import { formatCents, formatCentsForInput } from "@/lib/money";
 import {
   EditDetails,
   FieldError,
@@ -55,7 +55,7 @@ export default function BudgetEditor({ month, rows, setAction, copyAction }: Pro
               <span className="font-medium text-muted">{row.categoryName}</span>
               <input
                 name={`amounts.${row.categoryId}`}
-                defaultValue={row.plannedCents === 0 ? "" : formatCents(row.plannedCents)}
+                defaultValue={row.plannedCents === 0 ? "" : formatCentsForInput(row.plannedCents)}
                 inputMode="decimal"
                 placeholder="Sin presupuestar"
                 className={`${inputClass} min-h-11`}

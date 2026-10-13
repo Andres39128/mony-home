@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { AmbiguousAmountError, centsToNumber, formatCents, formatCentsCompact, MoneyParseError, parseAmountToCents, percentage, setDefaultCurrency } from "@/lib/money";
+import { AmbiguousAmountError, centsToNumber, formatCents, formatCentsCompact, formatCentsForInput, MoneyParseError, parseAmountToCents, percentage, setDefaultCurrency } from "@/lib/money";
 
 describe("parseAmountToCents", () => {
   it("parses plain integers", () => {
@@ -92,6 +92,35 @@ describe("parseAmountToCents", () => {
       }
     },
   );
+});
+
+describe("formatCentsForInput", () => {
+  afterEach(() => {
+    setDefaultCurrency("COP", "es-CO");
+  });
+
+  it("round-trips through parseAmountToCents for every configured locale", () => {
+    // The bug this pins: formatCents under COP/es-CO renders 123400 cents
+    // as "$ 1.234" (0 fraction digits), which the parser rejects as
+    // ambiguous BY DESIGN. Edit-form prefill must emit unambiguous text.
+    for (const [currency, locale] of [
+      ["COP", "es-CO"],
+      ["ARS", "es-AR"],
+      ["USD", "en-US"],
+    ] as const) {
+      setDefaultCurrency(currency, locale);
+      for (const cents of [0, 99900, 123400, 123450, 100000, 98765432100]) {
+        expect(parseAmountToCents(formatCentsForInput(cents))).toBe(cents);
+      }
+    }
+  });
+
+  it("emits no currency symbol and no grouping — editable plain text", () => {
+    setDefaultCurrency("COP", "es-CO");
+    const text = formatCentsForInput(123450);
+    expect(text).not.toContain("$");
+    expect(text).toMatch(/^\d+[.,]\d{2}$/); // one decimal separator, 2 digits
+  });
 });
 
 describe("centsToNumber", () => {

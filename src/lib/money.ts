@@ -168,6 +168,22 @@ export function formatCents(cents: number, currency: string = defaultCurrency): 
 }
 
 /**
+ * Prefill text for amount INPUTS — the inverse of parseAmountToCents.
+ * formatCents is display-oriented and can emit the parser's one rejected
+ * shape ("$ 1.234" under COP/es-CO, 0 fraction digits → AmbiguousAmountError
+ * on resubmit). Plain number, exactly 2 decimals, no grouping, no symbol:
+ * a single decimal separator with a non-3-digit trailing group is always
+ * read as decimals, in every locale.
+ */
+export function formatCentsForInput(cents: number): string {
+  return new Intl.NumberFormat(defaultLocale, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  }).format(centsToNumber(cents));
+}
+
+/**
  * Compact abbreviation for chart axes only (never for real amounts):
  * 1_540_000 cents → '15,4 k'. Exact values always go through formatCents.
  */

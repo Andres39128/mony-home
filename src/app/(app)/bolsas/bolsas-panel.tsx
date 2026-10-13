@@ -12,7 +12,7 @@ import {
 import type { FormState } from "@/lib/form-state";
 import { dateFormatter } from "@/lib/date";
 import { LedgerHistory } from "@/components/ledger-history";
-import { formatCents } from "@/lib/money";
+import { formatCents, formatCentsForInput } from "@/lib/money";
 import { ProgressBar } from "@/components/progress";
 import { RateBadge, ScopeBadge } from "@/components/badges";
 import {
@@ -361,7 +361,7 @@ function InvestmentCard({
             inputMode="decimal"
             placeholder="Valor actual"
             aria-label={`Valor actual de ${goal.name}`}
-            defaultValue={goal.currentValueCents === null ? undefined : formatCents(goal.currentValueCents)}
+            defaultValue={goal.currentValueCents === null ? undefined : formatCentsForInput(goal.currentValueCents)}
             className={`${inputClass} w-40 flex-1`}
           />
           <SubmitButton pending={valuePending} variant="secondary">
@@ -448,7 +448,7 @@ function BolsaFields({
               name="target"
               inputMode="decimal"
               placeholder="1.234,56"
-              defaultValue={goal?.targetCents != null ? formatCents(goal.targetCents) : undefined}
+              defaultValue={goal?.targetCents != null ? formatCentsForInput(goal.targetCents) : undefined}
               className={inputClass}
             />
             <FieldError message={state.fieldErrors?.target} />
@@ -470,7 +470,7 @@ function BolsaFields({
             name="currentValue"
             inputMode="decimal"
             placeholder="1.234,56"
-            defaultValue={goal?.currentValueCents != null ? formatCents(goal.currentValueCents) : undefined}
+            defaultValue={goal?.currentValueCents != null ? formatCentsForInput(goal.currentValueCents) : undefined}
             className={inputClass}
           />
           <FieldError message={state.fieldErrors?.currentValue} />
