@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, loans, transactions, users } from "@/db/schema";
+import { budgets, categories, loanPayments, loans, transactions, users } from "@/db/schema";
 import {
   copyFromPreviousMonth,
   getMonth,
@@ -251,6 +251,15 @@ describe("budgets service (integration on PGlite)", () => {
       .where(
         and(eq(transactions.categoryId, transporteId), lt(transactions.date, "2026-08-01")),
       );
+    // Card-payment ledger rows RESTRICT the loan delete (their mirror
+    // transactions cascade here) — a failed sibling that left rows behind
+    // must not break this cleanup.
+    await db.delete(loanPayments).where(
+      inArray(
+        loanPayments.loanId,
+        db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Visa carry")),
+      ),
+    );
     await db.delete(loans).where(eq(loans.name, "Visa carry"));
     for (const month of ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]) {
       await setForMonth(appDb, admin, month, []);
@@ -271,7 +280,7 @@ describe("budgets service (integration on PGlite)", () => {
     await cleanupCarryFixture();
   });
 
-  it("carry: positive after under-spend; card purchases never drag", async () => {
+  it("carry: positive after under-spend; card purchases count in their month and drag", async () => {
     await cleanupCarryFixture();
     await setForMonth(appDb, admin, "2026-02", [{ categoryId: transporteId, amount: "1.000,00" }]);
     await db.insert(transactions).values({
@@ -293,7 +302,8 @@ describe("budgets service (integration on PGlite)", () => {
       view.totals.plannedCents + view.totals.carryCents,
     );
 
-    // A card purchase is DEBT, not budget execution: it must not drag.
+    // Budget execution includes card purchases: 250 card + 400 cash in
+    // February's category spend AND totals.
     const [card] = await db
       .insert(loans)
       .values({
@@ -315,11 +325,148 @@ describe("budgets service (integration on PGlite)", () => {
       paymentMethod: "card",
       cardLoanId: card.id,
     });
-    const afterCard = await getMonth(appDb, "2026-04");
-    expect(
-      afterCard?.rows.find((item) => item.categoryId === transporteId)?.carryCents,
-    ).toBe(60_000);
+    const february = await getMonth(appDb, "2026-02");
+    expect(february?.rows.find((item) => item.categoryId === transporteId)?.spentCents).toBe(
+      65_000, // 40.000 cash + 25.000 card
+    );
+    expect(february?.totals.spentCents).toBe(65_000);
 
+    // The same card purchase debits April's carry (600 − 250).
+    const afterCard = await getMonth(appDb, "2026-04");
+    expect(afterCard).not.toBeNull();
+    if (!afterCard) return;
+    const carryRow = afterCard.rows.find((item) => item.categoryId === transporteId)!;
+    expect(carryRow.carryCents).toBe(35_000);
+    expect(carryRow.availableCents).toBe(85_000); // 500 + 350
+
+    await cleanupCarryFixture();
+  });
+
+  it("excludes card-payment capital mirrors; interest, fee and loan-payment mirrors still count", async () => {
+    await cleanupCarryFixture();
+    const [pagoTarjetas, interesTarjetas, cuotaManejo, pagoPrestamos] = await db
+      .insert(categories)
+      .values([
+        { name: "Pago de tarjetas", kind: "expense", color: "#ef4444" },
+        { name: "Intereses de tarjetas", kind: "expense", color: "#f59e0b" },
+        { name: "Cuota de manejo de tarjetas", kind: "expense", color: "#f59e0b" },
+        { name: "Pago de préstamos", kind: "expense", color: "#64748b" },
+      ])
+      .returning();
+
+    const [card] = await db
+      .insert(loans)
+      .values({
+        name: "Visa carry",
+        kind: "credit_card",
+        entity: "Banco",
+        scope: "common",
+        principalCents: 0,
+        amortizationMode: "revolving",
+        creditLimitCents: 1_000_000,
+      })
+      .returning();
+
+    // May: a card purchase (the real category spend) plus the card's
+    // payment — capital 450 (excluded mirror: amortizes debt the purchase
+    // already booked), interest 50 and fee 30 (count: new money out) — and
+    // an unrelated loan payment 200 (counts: real cash outflow).
+    // Transporte (not Super) so cleanupCarryFixture's date-bounded delete
+    // also covers this purchase — a mid-test failure can never leave the
+    // card referencing a purchase the next cleanup's loan delete hits.
+    const [purchase] = await db
+      .insert(transactions)
+      .values({
+        date: "2026-05-02",
+        amountCents: 40_000,
+        type: "expense",
+        categoryId: transporteId,
+        memberId,
+        paymentMethod: "card",
+        cardLoanId: card.id,
+      })
+      .returning({ id: transactions.id });
+    const ledgerRows = await db
+      .insert(loanPayments)
+      .values([
+        { loanId: card.id, memberId, kind: "payment", amountCents: 45_000, date: "2026-05-20" },
+        {
+          loanId: card.id,
+          memberId: null,
+          kind: "interest",
+          amountCents: 5_000,
+          date: "2026-05-20",
+          note: "Interés de ciclo",
+        },
+        {
+          loanId: card.id,
+          memberId: null,
+          kind: "charge",
+          amountCents: 3_000,
+          date: "2026-05-20",
+          note: "Cuota de manejo",
+        },
+        { loanId: card.id, memberId, kind: "payment", amountCents: 20_000, date: "2026-05-21" },
+      ])
+      .returning({ id: loanPayments.id });
+    const [capitalPayment, interest, fee, loanPayment] = ledgerRows;
+    await db.insert(transactions).values([
+      {
+        date: "2026-05-20",
+        amountCents: 45_000,
+        type: "expense",
+        categoryId: pagoTarjetas.id,
+        memberId,
+        loanPaymentId: capitalPayment.id,
+      },
+      {
+        date: "2026-05-20",
+        amountCents: 5_000,
+        type: "expense",
+        categoryId: interesTarjetas.id,
+        memberId,
+        loanPaymentId: interest.id,
+      },
+      {
+        date: "2026-05-20",
+        amountCents: 3_000,
+        type: "expense",
+        categoryId: cuotaManejo.id,
+        memberId,
+        loanPaymentId: fee.id,
+      },
+      {
+        date: "2026-05-21",
+        amountCents: 20_000,
+        type: "expense",
+        categoryId: pagoPrestamos.id,
+        memberId,
+        loanPaymentId: loanPayment.id,
+      },
+    ]);
+
+    const view = await getMonth(appDb, "2026-05");
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const rows = new Map(view.rows.map((row) => [row.categoryName, row]));
+    // The purchase counts in its real category; the capital mirror does not.
+    expect(rows.get("Transporte")?.spentCents).toBe(40_000);
+    expect(rows.get("Pago de tarjetas")?.spentCents).toBe(0);
+    // Finance costs and loan payments are real new money out — they count.
+    expect(rows.get("Intereses de tarjetas")?.spentCents).toBe(5_000);
+    expect(rows.get("Cuota de manejo de tarjetas")?.spentCents).toBe(3_000);
+    expect(rows.get("Pago de préstamos")?.spentCents).toBe(20_000);
+    expect(view.totals.spentCents).toBe(68_000); // 400 + 50 + 30 + 200
+
+    // Cleanup: purchase first (cardLoanId RESTRICT), then the ledger rows
+    // (their mirrors cascade via loanPaymentId; loanId itself is RESTRICT),
+    // then the loan and the fixture categories.
+    await db.delete(transactions).where(eq(transactions.id, purchase.id));
+    await db.delete(loanPayments).where(eq(loanPayments.loanId, card.id));
+    await db.delete(loans).where(eq(loans.id, card.id));
+    await db.delete(categories).where(
+      inArray(categories.id, [pagoTarjetas.id, interesTarjetas.id, cuotaManejo.id, pagoPrestamos.id]),
+    );
     await cleanupCarryFixture();
   });
 

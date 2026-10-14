@@ -8,10 +8,13 @@
  * inside a single DB transaction. ALL mutations are admin-only, enforced
  * here at service level — UI hiding is never trusted.
  *
- * "Spent" is the SUM of CASH expense transactions for the category within
- * the calendar month (inclusive bounds from monthBounds) — cash-basis like
- * every gasto figure: card purchases are card debt, not budget execution.
- * Household income and expense context REUSES
+ * "Spent" follows the BUDGET-EXECUTION basis (transactions.budgetExecution):
+ * completed expenses of the period paid cash OR card — every card purchase
+ * counts as spent in its real category, in the month it happened — EXCLUDING
+ * the card-payment capital mirrors under "Pago de tarjetas" (paying the card
+ * amortizes debt the purchase already booked; counting both would double the
+ * budget). Cash-flow figures elsewhere (saldo, transactionTotals, analytics
+ * breakdowns) stay cash-basis. Household income and expense context REUSES
  * transactions.transactionTotals (never duplicated).
  *
  * Rollover (roadmap F2): every row also carries the NET carry of its
@@ -28,11 +31,11 @@ import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { parseAmountToCents, percentage } from "@/lib/money";
 import {
-  cashOnly,
-  completedOnly,
+  budgetExecution,
   filtersWhere,
   transactionTotals,
 } from "@/features/transactions/service";
+import { findMirrorCategoryId } from "@/features/loans/service";
 import type { SessionUser } from "@/lib/auth";
 import { recordAudit } from "@/features/audit/service";
 import { computeProgress, monthBounds, type ProgressStatus } from "@/features/budgets/progress";
@@ -92,6 +95,7 @@ export async function getMonth(
 ): Promise<BudgetMonthView | null> {
   const bounds = monthBounds(month);
   if (!bounds) return null;
+  const mirrorCategoryId = await cardPaymentMirrorCategoryId(db);
 
   const [categoryRows, budgetRows, spentRows, carryPlannedRows, carrySpentRows, context] =
     await Promise.all([
@@ -107,10 +111,11 @@ export async function getMonth(
       db
         .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
         .from(transactions)
-        // Cash-basis execution: completed cash expenses of the month (the
-        // shared builders apply the identical bounds/pending/cash rules the
-        // analytics aggregates use — no diverging copy).
-        .where(completedOnly(cashOnly(filtersWhere({ month, type: "expense" }))))
+        // Budget-execution basis: completed cash AND card expenses of the
+        // month, minus the card-payment capital mirrors (double-count
+        // guard) — the shared builder applies the identical rule every
+        // budget aggregate uses, no diverging copy.
+        .where(budgetExecution(mirrorCategoryId, filtersWhere({ month, type: "expense" })))
         .groupBy(transactions.categoryId),
       // Rollover aggregates, bounded to every month STRICTLY before this one
       // (no lower bound needed: nothing exists before the history start).
@@ -119,14 +124,16 @@ export async function getMonth(
         .from(budgets)
         .where(lt(budgets.month, bounds.start))
         .groupBy(budgets.categoryId),
-      // The carry's "spent" side uses the SAME cash-basis rule as the
-      // month's execution figure — completed cash expenses only.
+      // The carry's "spent" side uses the SAME budget-execution basis as
+      // the month's execution figure — card purchases drag, capital
+      // mirrors do not.
       db
         .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
         .from(transactions)
         .where(
-          completedOnly(
-            cashOnly(and(eq(transactions.type, "expense"), lt(transactions.date, bounds.start))),
+          budgetExecution(
+            mirrorCategoryId,
+            and(eq(transactions.type, "expense"), lt(transactions.date, bounds.start)),
           ),
         )
         .groupBy(transactions.categoryId),
@@ -137,7 +144,7 @@ export async function getMonth(
   const spentByCategory = new Map(spentRows.map((row) => [row.categoryId, Number(row.spent ?? 0)]));
 
   // Net carry per category: total prior plan (0 for unbudgeted months —
-  // the documented rule) minus total prior cash spend.
+  // the documented rule) minus total prior budget-execution spend.
   const carryByCategory = new Map<string, number>();
   for (const row of carryPlannedRows) {
     carryByCategory.set(row.categoryId, Number(row.planned ?? 0));
@@ -182,6 +189,22 @@ export async function getMonth(
     context: { incomeCents: context.incomeCents, expenseCents: context.expenseCents },
     overCount: rows.filter((row) => row.status === "over").length,
   };
+}
+
+/**
+ * Id of the system category "Pago de tarjetas". Budget execution EXCLUDES
+ * its loan-payment mirrors (the amortizing capital of a card payment): the
+ * card purchase already booked that money in its real category the month
+ * it happened — counting the payment again would double the budget. Null
+ * when the category does not exist (seed not run): card payments fail
+ * without it, so no mirror can exist and there is nothing to exclude.
+ * Shared with analytics.cumulativeBudgetVsActual so both stay on the same
+ * basis (it is budget-vs-actual, like the /presupuesto page).
+ */
+export async function cardPaymentMirrorCategoryId(db: Database): Promise<string | null> {
+  // findMirrorCategoryId is typed for a transaction client (its loans
+  // callers run inside one); a one-read transaction satisfies it cast-free.
+  return db.transaction((tx) => findMirrorCategoryId(tx, "Pago de tarjetas"));
 }
 
 /** Returns null when the free-text amount cannot be parsed (typed error path). */
