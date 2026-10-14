@@ -12,17 +12,17 @@
  * are CASH-BASIS: they compose transactions.cashOnly so "Gastos" means cash
  * spent (card purchases are card debt, shown apart). The ONE exception is
  * cumulativeBudgetVsActual: budget-vs-actual uses the budget-execution
- * basis (transactions.budgetExecution — cash AND card, minus card-payment
- * capital mirrors) so the curve matches the /presupuesto page. Money is
+ * basis (every completed expense, cash AND card) so the curve matches the
+ * /presupuesto page; its UNFILTERED curves exclude the settlement category
+ * ("Pago de tarjetas") exactly like the budget totals do. Money is
  * ALWAYS integer cents; percentages via money.percentage (2 decimals, 0 on
  * divide-by-zero).
  */
-import { and, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { and, desc, eq, gte, lte, ne, sql, sum } from "drizzle-orm";
 import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { percentage } from "@/lib/money";
 import {
-  budgetExecution,
   cashOnly,
   completedOnly,
   filtersWhere,
@@ -145,10 +145,12 @@ export interface CumulativeBudgetPoint {
  * the filter month when it falls in that year (else December — the page
  * always passes the selected month, so no future-zero spam). A month with
  * no budget row contributes 0 to the planned curve; the actual curve uses
- * the BUDGET-EXECUTION basis (transactions.budgetExecution: cash AND card
- * expenses, minus card-payment capital mirrors) honoring the movement
- * filters — the same numbers the /presupuesto page shows, not the
- * cash-basis gasto. The budget plan side
+ * the BUDGET-EXECUTION basis (every completed expense, cash AND card)
+ * honoring the movement filters — the same numbers the /presupuesto page
+ * shows, not the cash-basis gasto. "Fila sí, total no": when NO category
+ * filter is set, BOTH curves exclude the settlement category (the row card
+ * payments fill — capital mirrors of money the purchase already booked);
+ * an explicit categoryId filter wins unchanged. The budget plan side
  * honors the category filter (plans are per category); member/scope/group
  * have no meaning for a plan and are ignored there.
  * No data at all → [] (the chart shows its empty state).
@@ -181,7 +183,13 @@ export async function cumulativeBudgetVsActual(
           // budgets.month is stored as the month's first-day date.
           gte(budgets.month, `${firstMonth}-01`),
           lte(budgets.month, `${endMonth}-01`),
-          filters.categoryId ? eq(budgets.categoryId, filters.categoryId) : undefined,
+          // Unfiltered curves exclude the settlement category like the
+          // budget totals; an explicit categoryId filter wins unchanged.
+          filters.categoryId
+            ? eq(budgets.categoryId, filters.categoryId)
+            : mirrorCategoryId
+              ? ne(budgets.categoryId, mirrorCategoryId)
+              : undefined,
         ),
       )
       .groupBy(budgets.month),
@@ -192,13 +200,15 @@ export async function cumulativeBudgetVsActual(
       })
       .from(transactions)
       .where(
-        budgetExecution(
-          mirrorCategoryId,
+        completedOnly(
           and(
             eq(transactions.type, "expense"),
             gte(transactions.date, `${firstMonth}-01`),
             lte(transactions.date, endBounds.end),
             filtersWhere({ ...filters, month: undefined, type: undefined }),
+            !filters.categoryId && mirrorCategoryId
+              ? ne(transactions.categoryId, mirrorCategoryId)
+              : undefined,
           ),
         ),
       )

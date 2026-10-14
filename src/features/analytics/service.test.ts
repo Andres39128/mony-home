@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { createTestDb } from "@/db/test-utils";
@@ -210,12 +211,52 @@ describe("analytics service (integration on PGlite)", () => {
       ]);
     });
 
-    it("uses the budget-execution basis: card purchases count as actual", async () => {
-      // The fixture's 7.000 card purchase (Super, 2026-03) never hits the
-      // cash-basis aggregates (see expensesByCategory) but IS budget
-      // execution — the curve must match what the /presupuesto page shows.
+    it("uses the budget-execution basis and excludes the settlement category from unfiltered curves; an explicit filter wins", async () => {
+      // Fila sí, total no: the settlement row ("Pago de tarjetas", filled
+      // by card-payment capital mirrors) stays out of BOTH unfiltered
+      // curves — planned and actual — exactly like the budget page totals.
+      // The fixture's 7.000 card purchase (Super, 2026-03) still counts.
+      const [pagoTarjetas] = await db
+        .insert(categories)
+        .values({ name: "Pago de tarjetas", kind: "expense", color: "#ef4444" })
+        .returning();
+      await db.insert(transactions).values({
+        date: "2026-03-18",
+        amountCents: 12_000,
+        type: "expense",
+        categoryId: pagoTarjetas.id,
+        memberId: mateId,
+        scope: "common",
+      });
+      await db
+        .insert(budgets)
+        .values({ month: "2026-03-01", categoryId: pagoTarjetas.id, amountCents: 15_000 });
+
       const points = await cumulativeBudgetVsActual(appDb, 2026, { month: "2026-03" });
-      expect(points.at(-1)?.actualCumCents).toBe(50_000); // 15.000 Jan + 35.000 Mar
+      // 15.000 Super plan (settlement's 15.000 out); 50.000 execution —
+      // 15.000 Jan + 28.000 Mar cash + 7.000 card — (settlement's 12.000 out).
+      expect(points.at(-1)).toEqual({
+        month: "2026-03",
+        plannedCumCents: 15_000,
+        actualCumCents: 50_000,
+      });
+
+      // An explicit categoryId filter wins unchanged: the settlement
+      // category alone shows its own plan and spend.
+      const settlement = await cumulativeBudgetVsActual(appDb, 2026, {
+        month: "2026-03",
+        categoryId: pagoTarjetas.id,
+      });
+      expect(settlement.at(-1)).toEqual({
+        month: "2026-03",
+        plannedCumCents: 15_000,
+        actualCumCents: 12_000,
+      });
+
+      // Cleanup: the shared fixture must not shift for sibling tests.
+      await db.delete(transactions).where(eq(transactions.categoryId, pagoTarjetas.id));
+      await db.delete(budgets).where(eq(budgets.categoryId, pagoTarjetas.id));
+      await db.delete(categories).where(eq(categories.id, pagoTarjetas.id));
     });
 
     it("stops at the filter month — no future-zero spam", async () => {
