@@ -53,7 +53,7 @@ export interface BudgetRowView {
   status: ProgressStatus;
   /** Net accumulated plan − spent of every month STRICTLY before this one. */
   carryCents: number;
-  /** plannedCents + carryCents — the money honestly left to spend. */
+  /** plannedCents + carryCents − spentCents — the money honestly left to spend. */
   availableCents: number;
 }
 
@@ -170,7 +170,7 @@ export async function getMonth(
       plannedCents,
       spentCents,
       carryCents,
-      availableCents: plannedCents + carryCents,
+      availableCents: plannedCents + carryCents - spentCents,
       ...computeProgress(plannedCents, spentCents),
     };
   });
@@ -194,7 +194,7 @@ export async function getMonth(
       spentCents: totalsSpentCents,
       pct: percentage(totalsSpentCents, totalsPlannedCents),
       carryCents: totalsCarryCents,
-      availableCents: totalsPlannedCents + totalsCarryCents,
+      availableCents: totalsPlannedCents + totalsCarryCents - totalsSpentCents,
     },
     context: { incomeCents: context.incomeCents, expenseCents: context.expenseCents },
     overCount: rows.filter((row) => row.status === "over").length,

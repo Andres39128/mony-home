@@ -150,7 +150,7 @@ describe("insights context (integration on PGlite)", () => {
         spentCents: 306_000,
         pct: 204,
         carryCents: -363_000,
-        availableCents: -213_000,
+        availableCents: -519_000, // 150.000 − 363.000 − 306.000
       },
     });
   });

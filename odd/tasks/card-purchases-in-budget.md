@@ -97,6 +97,21 @@ spent aggregation becomes dead and is removed.
 - [x] T8 Full `npm run test`, `npm run typecheck`, `npm run lint`; work-unit
       commit on fix/budget-card-payment-row.
 
+## Adjustment round 3 (2026-10-14, user decision after totals review)
+
+Pre-existing defect found while reviewing the five KPI cards: "Disponible" =
+planned + carry WITHOUT subtracting the month's spend, overstating what is
+actually left. New formula: available = planned + carry − spent (= remaining +
+carry), at row level AND totals level. Card-credit-limit availableCents in
+loans/transactions is a different concept — untouched. User authorized direct
+commit to main and push.
+
+- [x] T9 TDD: flip availableCents assertions (budgets/service.test.ts rows
+      ~125, 277-279, 300-301, 340, 482, 495, 540, 562, 582; insights/
+      context.test.ts ~153) to planned+carry−spent; RED; then fix
+      budgets/service.ts:173 and :197 + doc comments (BudgetRowView.available,
+      module header mention); GREEN; full checks; work-unit commit on main.
+
 ## Acceptance criteria
 
 - A card purchase in month M with category C increases C's spent (and totals) in M's
@@ -162,3 +177,16 @@ spent aggregation becomes dead and is removed.
   before the category delete (budgets FK is RESTRICT). All checks green
   (594 tests, typecheck, lint). Work-unit commit:
   `fix(budgets): card payments fill their budget row, excluded from totals`.
+- 2026-10-14 Round 3 TDD RED: three numeric flips — roundtrip totals
+  available 130.916 (150.050 − 19.134), mirror-test settlement row
+  −5.000 (500 − 100 carry − 450 spent) and totals −40.000 (280 − 680),
+  insights summary budget available −519.000 (150.000 − 363.000 − 306.000);
+  formula-encoding assertions (spent 0 in their month) rewritten to
+  planned+carry−spent. RED confirmed: exactly those 3 tests failed.
+  Verified insights:477 (985.000) is the CARD credit availability
+  (ctx.tarjetas, cupo − saldo) and page.tsx:192 a static zero fallback —
+  both untouched, different concept/same word.
+- 2026-10-14 Round 3 GREEN: budgets/service.ts row (~:173) and totals
+  (~:197) availableCents now subtract spent; BudgetRowView.available doc
+  updated. All checks green (594 tests, typecheck, lint). Work-unit commit
+  on main: `fix(budgets): disponible subtracts the month's spend`.

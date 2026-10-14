@@ -122,7 +122,7 @@ describe("budgets service (integration on PGlite)", () => {
       spentCents: 19134,
       pct: 12.75,
       carryCents: 0,
-      availableCents: 150050,
+      availableCents: 130916, // 150.050 + 0 − 19.134
     });
     // Context comes from transactions.totals (income ignored for expense sums).
     expect(view.context).toEqual({ incomeCents: 1000000, expenseCents: 19134 });
@@ -276,7 +276,10 @@ describe("budgets service (integration on PGlite)", () => {
     expect(row.carryCents).toBe(0);
     expect(row.availableCents).toBe(100_000);
     expect(view.totals.carryCents).toBe(0);
-    expect(view.totals.availableCents).toBe(view.totals.plannedCents);
+    // Disponible = planned + carry − spent (no spend in this first month).
+    expect(view.totals.availableCents).toBe(
+      view.totals.plannedCents + view.totals.carryCents - view.totals.spentCents,
+    );
     await cleanupCarryFixture();
   });
 
@@ -297,9 +300,9 @@ describe("budgets service (integration on PGlite)", () => {
     if (!view) return;
     const row = view.rows.find((item) => item.categoryId === transporteId)!;
     expect(row.carryCents).toBe(60_000); // 1.000 − 400
-    expect(row.availableCents).toBe(110_000); // 500 + 600
+    expect(row.availableCents).toBe(110_000); // 500 + 600 − 0 (no April spend)
     expect(view.totals.availableCents).toBe(
-      view.totals.plannedCents + view.totals.carryCents,
+      view.totals.plannedCents + view.totals.carryCents - view.totals.spentCents,
     );
 
     // Budget execution includes card purchases: 250 card + 400 cash in
@@ -337,7 +340,7 @@ describe("budgets service (integration on PGlite)", () => {
     if (!afterCard) return;
     const carryRow = afterCard.rows.find((item) => item.categoryId === transporteId)!;
     expect(carryRow.carryCents).toBe(35_000);
-    expect(carryRow.availableCents).toBe(85_000); // 500 + 350
+    expect(carryRow.availableCents).toBe(85_000); // 500 + 350 − 0 (no April spend)
 
     await cleanupCarryFixture();
   });
@@ -479,7 +482,7 @@ describe("budgets service (integration on PGlite)", () => {
       pct: 90,
       remainingCents: 5_000,
       carryCents: -10_000,
-      availableCents: 40_000,
+      availableCents: -5_000, // 500 − 100 carry − 450 spent
       status: "warn",
     });
     // Finance costs and loan payments are real new money out — they count.
@@ -492,7 +495,7 @@ describe("budgets service (integration on PGlite)", () => {
       plannedCents: 28_000, // 50 + 30 + 200; settlement's 500 excluded
       spentCents: 68_000, // 400 + 50 + 30 + 200; settlement's 450 excluded
       carryCents: 0, // settlement's −100 excluded
-      availableCents: 28_000,
+      availableCents: -40_000, // 280 + 0 − 680 spent
     });
 
     // Cleanup: purchase first (cardLoanId RESTRICT), then the ledger rows
