@@ -10,8 +10,11 @@
  * Movement-side conditions come from transactions.filtersWhere — ONE place
  * builds transaction WHERE clauses for the whole app. Expense aggregations
  * are CASH-BASIS: they compose transactions.cashOnly so "Gastos" means cash
- * spent (card purchases are card debt, shown apart). Money is ALWAYS
- * integer cents; percentages via money.percentage (2 decimals, 0 on
+ * spent (card purchases are card debt, shown apart). The ONE exception is
+ * cumulativeBudgetVsActual: budget-vs-actual uses the budget-execution
+ * basis (transactions.budgetExecution — cash AND card, minus card-payment
+ * capital mirrors) so the curve matches the /presupuesto page. Money is
+ * ALWAYS integer cents; percentages via money.percentage (2 decimals, 0 on
  * divide-by-zero).
  */
 import { and, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
@@ -19,13 +22,14 @@ import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { percentage } from "@/lib/money";
 import {
+  budgetExecution,
   cashOnly,
   completedOnly,
   filtersWhere,
   type TransactionFilters,
 } from "@/features/transactions/service";
 import { monthBounds } from "@/features/budgets/progress";
-import { previousMonth } from "@/features/budgets/service";
+import { cardPaymentMirrorCategoryId, previousMonth } from "@/features/budgets/service";
 
 export interface CategoryExpenseSlice {
   categoryId: string;
@@ -140,9 +144,11 @@ export interface CumulativeBudgetPoint {
  * Cumulative planned-vs-actual expense for ONE calendar year, January up to
  * the filter month when it falls in that year (else December — the page
  * always passes the selected month, so no future-zero spam). A month with
- * no budget row contributes 0 to the planned curve; the actual curve sums
- * CASH expense transactions (card purchases are card debt, not budget
- * execution) honoring the movement filters. The budget plan side
+ * no budget row contributes 0 to the planned curve; the actual curve uses
+ * the BUDGET-EXECUTION basis (transactions.budgetExecution: cash AND card
+ * expenses, minus card-payment capital mirrors) honoring the movement
+ * filters — the same numbers the /presupuesto page shows, not the
+ * cash-basis gasto. The budget plan side
  * honors the category filter (plans are per category); member/scope/group
  * have no meaning for a plan and are ignored there.
  * No data at all → [] (the chart shows its empty state).
@@ -164,6 +170,7 @@ export async function cumulativeBudgetVsActual(
 
   const months: string[] = [endMonth];
   while (months[0] !== firstMonth) months.unshift(previousMonth(months[0]));
+  const mirrorCategoryId = await cardPaymentMirrorCategoryId(db);
 
   const [plannedRows, actualRows] = await Promise.all([
     db
@@ -185,11 +192,14 @@ export async function cumulativeBudgetVsActual(
       })
       .from(transactions)
       .where(
-        and(
-          eq(transactions.type, "expense"),
-          gte(transactions.date, `${firstMonth}-01`),
-          lte(transactions.date, endBounds.end),
-          completedOnly(cashOnly(filtersWhere({ ...filters, month: undefined, type: undefined }))),
+        budgetExecution(
+          mirrorCategoryId,
+          and(
+            eq(transactions.type, "expense"),
+            gte(transactions.date, `${firstMonth}-01`),
+            lte(transactions.date, endBounds.end),
+            filtersWhere({ ...filters, month: undefined, type: undefined }),
+          ),
         ),
       )
       .groupBy(sql`to_char(${transactions.date}, 'YYYY-MM')`),

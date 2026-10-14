@@ -83,7 +83,9 @@ describe("analytics service (integration on PGlite)", () => {
       { date: "2026-03-02", amountCents: 20_000, type: "expense", categoryId: superCat.id, memberId: mateId, scope: "common", groupId: vacaciones.id },
       { date: "2026-03-15", amountCents: 8_000, type: "expense", categoryId: ocio.id, memberId: anaId, scope: "common" },
       { date: "2026-03-30", amountCents: 60_000, type: "income", categoryId: sueldo.id, memberId: mateId, scope: "common" },
-      // 2026-03 card purchase: DEBT — every cash-basis aggregate ignores it.
+      // 2026-03 card purchase: DEBT — the cash-basis aggregates
+      // (expensesByCategory, monthlyTotals, saldo) ignore it; only the
+      // budget-execution curve (cumulativeBudgetVsActual) counts it.
       {
         date: "2026-03-20",
         amountCents: 7_000,
@@ -154,8 +156,6 @@ describe("analytics service (integration on PGlite)", () => {
         (await monthlyTotals(appDb, "2026-03", 3)).map((row) => [row.month, row]),
       );
       expect(byMonth.get("2026-03")?.expenseCents).toBe(28_000);
-      const points = await cumulativeBudgetVsActual(appDb, 2026, { month: "2026-03" });
-      expect(points.at(-1)?.actualCumCents).toBe(43_000);
     });
   });
 
@@ -205,8 +205,17 @@ describe("analytics service (integration on PGlite)", () => {
         { month: "2026-01", plannedCumCents: 10_000, actualCumCents: 15_000 },
         // No 2026-02 budget row: planned stays, actual stays (no expenses).
         { month: "2026-02", plannedCumCents: 10_000, actualCumCents: 15_000 },
-        { month: "2026-03", plannedCumCents: 15_000, actualCumCents: 43_000 },
+        // Budget-execution basis: 20.000 + 8.000 cash + 7.000 card purchase.
+        { month: "2026-03", plannedCumCents: 15_000, actualCumCents: 50_000 },
       ]);
+    });
+
+    it("uses the budget-execution basis: card purchases count as actual", async () => {
+      // The fixture's 7.000 card purchase (Super, 2026-03) never hits the
+      // cash-basis aggregates (see expensesByCategory) but IS budget
+      // execution — the curve must match what the /presupuesto page shows.
+      const points = await cumulativeBudgetVsActual(appDb, 2026, { month: "2026-03" });
+      expect(points.at(-1)?.actualCumCents).toBe(50_000); // 15.000 Jan + 35.000 Mar
     });
 
     it("stops at the filter month — no future-zero spam", async () => {
@@ -227,7 +236,7 @@ describe("analytics service (integration on PGlite)", () => {
         month: "2026-03",
         categoryId: superCat.id,
       });
-      expect(onlySuper[2]).toEqual({ month: "2026-03", plannedCumCents: 15_000, actualCumCents: 30_000 });
+      expect(onlySuper[2]).toEqual({ month: "2026-03", plannedCumCents: 15_000, actualCumCents: 37_000 });
 
       const onlyCommon = await cumulativeBudgetVsActual(appDb, 2026, {
         month: "2026-01",

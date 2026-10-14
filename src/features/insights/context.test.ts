@@ -133,12 +133,13 @@ describe("insights context (integration on PGlite)", () => {
 
   it("pre-computes exact month summary figures", async () => {
     const ctx = await buildFinanceContext(appDb, MONTH, TODAY);
-    // Budget totals reuse budgets.getMonth semantics: spent is the CASH
-    // expenses of the month against the plan — the same numbers the
-    // /presupuesto page shows (card purchases are debt, never execution).
+    // Budget totals reuse budgets.getMonth semantics: spent is the
+    // budget-execution expenses of the month (cash + card, excluding
+    // card-payment capital mirrors) — the same numbers the /presupuesto
+    // page shows.
     // Carry (rollover) is the NET prior history per category: no prior
-    // budgets existed, so it is minus ALL prior cash spend (July Varios
-    // 100.000 + August 263.000) — unbudgeted months still debit.
+    // budgets existed, so it is minus ALL prior budget-execution spend
+    // (July Varios 100.000 + August 263.000) — unbudgeted months still debit.
     expect(ctx.summary).toEqual({
       incomeCents: 800_000,
       expenseCents: 306_000,
