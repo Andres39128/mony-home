@@ -8,14 +8,16 @@
  * inside a single DB transaction. ALL mutations are admin-only, enforced
  * here at service level — UI hiding is never trusted.
  *
- * "Spent" follows the BUDGET-EXECUTION basis (transactions.budgetExecution):
- * completed expenses of the period paid cash OR card — every card purchase
- * counts as spent in its real category, in the month it happened — EXCLUDING
- * the card-payment capital mirrors under "Pago de tarjetas" (paying the card
- * amortizes debt the purchase already booked; counting both would double the
- * budget). Cash-flow figures elsewhere (saldo, transactionTotals, analytics
- * breakdowns) stay cash-basis. Household income and expense context REUSES
- * transactions.transactionTotals (never duplicated).
+ * "Spent" follows the BUDGET-EXECUTION basis: EVERY completed expense of
+ * the period paid cash OR card — every card purchase counts as spent in
+ * its real category, in the month it happened, and a card payment fills
+ * the "Pago de tarjetas" settlement row against its own plan ("fila sí").
+ * That settlement row is excluded from the month TOTALS — planned, spent
+ * and carry, symmetric ("total no") — because its capital mirrors
+ * amortize debt the card purchase already booked; counting both would
+ * double the money. Cash-flow figures elsewhere (saldo, transactionTotals,
+ * analytics breakdowns) stay cash-basis. Household income and expense
+ * context REUSES transactions.transactionTotals (never duplicated).
  *
  * Rollover (roadmap F2): every row also carries the NET carry of its
  * category — the accumulated plan − spent of EVERY month strictly before
@@ -31,7 +33,7 @@ import { budgets, categories, transactions } from "@/db/schema";
 import type { Database } from "@/db";
 import { parseAmountToCents, percentage } from "@/lib/money";
 import {
-  budgetExecution,
+  completedOnly,
   filtersWhere,
   transactionTotals,
 } from "@/features/transactions/service";
@@ -111,11 +113,11 @@ export async function getMonth(
       db
         .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
         .from(transactions)
-        // Budget-execution basis: completed cash AND card expenses of the
-        // month, minus the card-payment capital mirrors (double-count
-        // guard) — the shared builder applies the identical rule every
-        // budget aggregate uses, no diverging copy.
-        .where(budgetExecution(mirrorCategoryId, filtersWhere({ month, type: "expense" })))
+        // Budget-execution basis: every completed expense of the month,
+        // cash AND card. No mirror exclusion here: capital mirrors only
+        // ever sit in the settlement category, so per-category figures
+        // never double count — the TOTALS below exclude that row instead.
+        .where(completedOnly(filtersWhere({ month, type: "expense" })))
         .groupBy(transactions.categoryId),
       // Rollover aggregates, bounded to every month STRICTLY before this one
       // (no lower bound needed: nothing exists before the history start).
@@ -125,14 +127,14 @@ export async function getMonth(
         .where(lt(budgets.month, bounds.start))
         .groupBy(budgets.categoryId),
       // The carry's "spent" side uses the SAME budget-execution basis as
-      // the month's execution figure — card purchases drag, capital
-      // mirrors do not.
+      // the month's execution figure — every completed expense before the
+      // month, cash and card (the settlement row's carry shows in its row
+      // and is excluded from the totals below).
       db
         .select({ categoryId: transactions.categoryId, spent: sum(transactions.amountCents) })
         .from(transactions)
         .where(
-          budgetExecution(
-            mirrorCategoryId,
+          completedOnly(
             and(eq(transactions.type, "expense"), lt(transactions.date, bounds.start)),
           ),
         )
@@ -173,9 +175,17 @@ export async function getMonth(
     };
   });
 
-  const totalsPlannedCents = rows.reduce((total, row) => total + row.plannedCents, 0);
-  const totalsSpentCents = rows.reduce((total, row) => total + row.spentCents, 0);
-  const totalsCarryCents = rows.reduce((total, row) => total + row.carryCents, 0);
+  // "Fila sí, total no": the settlement row stays in `rows` (its own plan,
+  // spend and carry, normal progress/status — overCount keeps counting it)
+  // but is excluded from the totals — planned, spent and carry, symmetric —
+  // so the same money never counts twice there. Null mirror id (seed not
+  // run) → no exclusion: no mirror can exist without the category.
+  const totalsRows = mirrorCategoryId
+    ? rows.filter((row) => row.categoryId !== mirrorCategoryId)
+    : rows;
+  const totalsPlannedCents = totalsRows.reduce((total, row) => total + row.plannedCents, 0);
+  const totalsSpentCents = totalsRows.reduce((total, row) => total + row.spentCents, 0);
+  const totalsCarryCents = totalsRows.reduce((total, row) => total + row.carryCents, 0);
 
   return {
     rows,
@@ -192,14 +202,16 @@ export async function getMonth(
 }
 
 /**
- * Id of the system category "Pago de tarjetas". Budget execution EXCLUDES
- * its loan-payment mirrors (the amortizing capital of a card payment): the
- * card purchase already booked that money in its real category the month
- * it happened — counting the payment again would double the budget. Null
- * when the category does not exist (seed not run): card payments fail
- * without it, so no mirror can exist and there is nothing to exclude.
- * Shared with analytics.cumulativeBudgetVsActual so both stay on the same
- * basis (it is budget-vs-actual, like the /presupuesto page).
+ * Id of the system category "Pago de tarjetas" — the settlement category
+ * excluded from budget TOTALS. Card payments fill its row against its own
+ * plan (fila sí), but the row's plan, spend and carry stay out of the
+ * month totals (total no): the capital mirrors amortize debt the card
+ * purchase already booked in its real category, so counting both would
+ * double the money. Null when the category does not exist (seed not run):
+ * card payments fail without it, so no mirror can exist and there is
+ * nothing to exclude. Shared with analytics.cumulativeBudgetVsActual so
+ * both stay on the same basis (it is budget-vs-actual, like the
+ * /presupuesto page).
  */
 export async function cardPaymentMirrorCategoryId(db: Database): Promise<string | null> {
   // findMirrorCategoryId is typed for a transaction client (its loans

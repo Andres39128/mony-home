@@ -75,6 +75,28 @@ cash-basis by design).
 - [x] T5 Full `npm run test`, `npm run typecheck`, `npm run lint` green; work-unit
       commit on fix/budget-card-purchases.
 
+## Adjustment round 2 (2026-10-14, user decision: "fila sí, total no")
+
+The user reviewed and wants card payments VISIBLE in the budget: the payment
+fills the "Pago de tarjetas" row against its own plan, while that row stays OUT
+of the general totals (planned + spent + carry, symmetric) so the same money
+never counts twice in totals. Per-category numbers were never double-counted
+(mirrors only exist in the settlement category), so the mirror exclusion in the
+spent aggregation becomes dead and is removed.
+
+- [x] T6 RED: budgets mirror test — "Pago de tarjetas" row spent 45.000 with its
+      own plan; totals exclude the row (planned and spent); totals spent still
+      68.000 (400+50+30+200). Analytics cumulative: row in, unfiltered curves
+      exclude the settlement category.
+- [x] T7 GREEN: drop mirror exclusion from the spent aggregation (budgetExecution
+      collapses to completedOnly — delete the builder); exclude the settlement
+      category from getMonth totals and from cumulativeBudgetVsActual's unfiltered
+      curves (explicit categoryId filter still wins); update doc comments
+      (budgets header, cardPaymentMirrorCategoryId, analytics header,
+      insights/context.test.ts comment).
+- [x] T8 Full `npm run test`, `npm run typecheck`, `npm run lint`; work-unit
+      commit on fix/budget-card-payment-row.
+
 ## Acceptance criteria
 
 - A card purchase in month M with category C increases C's spent (and totals) in M's
@@ -115,3 +137,22 @@ cash-basis by design).
   `immutable_review_transport_unsupported` (runtime eligibility). User chose
   continue-without-reporting; no native review cycle ran. Delivery under
   ordinary repository policy.
+- 2026-10-14 Round 2 TDD RED: budgets mirror test renamed/flipped —
+  "Pago de tarjetas" planned 500/spent 450 (pct 90, warn, carry −100 from
+  an unbudgeted April settlement spend); totals planned 280 (500+300+2000,
+  settlement 5000 excluded), spent 680, carry 0 (its −100 excluded);
+  analytics basis test flipped — unfiltered cumulative curves exclude the
+  settlement category (planned 15.000, actual 50.000 with the category's
+  own 15.000/12.000 filtered in). RED confirmed: exactly the two target
+  tests failed (settlement row spent came back 0).
+- 2026-10-14 Round 2 GREEN: budgetExecution deleted (collapsed to
+  completedOnly at both call sites — capital mirrors only ever sit in the
+  settlement category, so per-category figures never double count);
+  getMonth totals filter the settlement row out of planned/spent/carry
+  (row kept, overCount keeps counting it; null id → no exclusion);
+  cumulativeBudgetVsActual excludes the settlement category from both
+  unfiltered curves via ne(), explicit categoryId filter wins. Fixture
+  gotcha: setForMonth'ed categories must have the month budget cleared
+  before the category delete (budgets FK is RESTRICT). All checks green
+  (594 tests, typecheck, lint). Work-unit commit:
+  `fix(budgets): card payments fill their budget row, excluded from totals`.

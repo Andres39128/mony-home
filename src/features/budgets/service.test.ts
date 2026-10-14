@@ -342,7 +342,7 @@ describe("budgets service (integration on PGlite)", () => {
     await cleanupCarryFixture();
   });
 
-  it("excludes card-payment capital mirrors; interest, fee and loan-payment mirrors still count", async () => {
+  it("card payments fill the Pago de tarjetas row; that row stays out of the totals", async () => {
     await cleanupCarryFixture();
     const [pagoTarjetas, interesTarjetas, cuotaManejo, pagoPrestamos] = await db
       .insert(categories)
@@ -368,9 +368,9 @@ describe("budgets service (integration on PGlite)", () => {
       .returning();
 
     // May: a card purchase (the real category spend) plus the card's
-    // payment — capital 450 (excluded mirror: amortizes debt the purchase
-    // already booked), interest 50 and fee 30 (count: new money out) — and
-    // an unrelated loan payment 200 (counts: real cash outflow).
+    // payment — capital 450 (fills the settlement row against its plan),
+    // interest 50 and fee 30 (new money out) — and an unrelated loan
+    // payment 200 (counts: real cash outflow).
     // Transporte (not Super) so cleanupCarryFixture's date-bounded delete
     // also covers this purchase — a mid-test failure can never leave the
     // card referencing a purchase the next cleanup's loan delete hits.
@@ -445,25 +445,75 @@ describe("budgets service (integration on PGlite)", () => {
       },
     ]);
 
+    // April settlement spend with no April plan: the settlement row must
+    // carry its −100 into May (unbudgeted months still debit) — the
+    // assertion that the TOTALS exclude that carry is observable.
+    await db.insert(transactions).values({
+      date: "2026-04-15",
+      amountCents: 10_000,
+      type: "expense",
+      categoryId: pagoTarjetas.id,
+      memberId,
+    });
+
+    // The settlement row gets its own plan (fila sí); the other mirror
+    // categories are planned too so the totals exclusion is observable.
+    await setForMonth(appDb, admin, "2026-05", [
+      { categoryId: pagoTarjetas.id, amount: "500,00" },
+      { categoryId: interesTarjetas.id, amount: "50,00" },
+      { categoryId: cuotaManejo.id, amount: "30,00" },
+      { categoryId: pagoPrestamos.id, amount: "200,00" },
+    ]);
+
     const view = await getMonth(appDb, "2026-05");
     expect(view).not.toBeNull();
     if (!view) return;
     const rows = new Map(view.rows.map((row) => [row.categoryName, row]));
-    // The purchase counts in its real category; the capital mirror does not.
+    // The purchase counts in its real category.
     expect(rows.get("Transporte")?.spentCents).toBe(40_000);
-    expect(rows.get("Pago de tarjetas")?.spentCents).toBe(0);
+    // The payment FILLS its own row: the capital mirrors count against
+    // the settlement plan (90% → warn), only the totals exclude them.
+    expect(rows.get("Pago de tarjetas")).toMatchObject({
+      plannedCents: 50_000,
+      spentCents: 45_000,
+      pct: 90,
+      remainingCents: 5_000,
+      carryCents: -10_000,
+      availableCents: 40_000,
+      status: "warn",
+    });
     // Finance costs and loan payments are real new money out — they count.
     expect(rows.get("Intereses de tarjetas")?.spentCents).toBe(5_000);
     expect(rows.get("Cuota de manejo de tarjetas")?.spentCents).toBe(3_000);
     expect(rows.get("Pago de préstamos")?.spentCents).toBe(20_000);
-    expect(view.totals.spentCents).toBe(68_000); // 400 + 50 + 30 + 200
+    // "Fila sí, total no": the settlement row's plan, spend and carry stay
+    // out of the totals (symmetric) so the same money never counts twice.
+    expect(view.totals).toMatchObject({
+      plannedCents: 28_000, // 50 + 30 + 200; settlement's 500 excluded
+      spentCents: 68_000, // 400 + 50 + 30 + 200; settlement's 450 excluded
+      carryCents: 0, // settlement's −100 excluded
+      availableCents: 28_000,
+    });
 
     // Cleanup: purchase first (cardLoanId RESTRICT), then the ledger rows
     // (their mirrors cascade via loanPaymentId; loanId itself is RESTRICT),
-    // then the loan and the fixture categories.
+    // then the loan, every fixture-category transaction (the April
+    // settlement spend included — they RESTRICT the category delete) and
+    // the fixture categories.
     await db.delete(transactions).where(eq(transactions.id, purchase.id));
     await db.delete(loanPayments).where(eq(loanPayments.loanId, card.id));
     await db.delete(loans).where(eq(loans.id, card.id));
+    await db.delete(transactions).where(
+      inArray(transactions.categoryId, [
+        pagoTarjetas.id,
+        interesTarjetas.id,
+        cuotaManejo.id,
+        pagoPrestamos.id,
+      ]),
+    );
+    // The May plan references the fixture categories (budgets RESTRICT
+    // the delete) — clear the month first.
+    await setForMonth(appDb, admin, "2026-05", []);
     await db.delete(categories).where(
       inArray(categories.id, [pagoTarjetas.id, interesTarjetas.id, cuotaManejo.id, pagoPrestamos.id]),
     );

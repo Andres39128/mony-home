@@ -13,7 +13,7 @@
  * 1. Category kind must match the transaction type.
  * 2. Only active expense groups can be attached to new/updated movements.
  */
-import { and, count, desc, eq, gte, inArray, lt, lte, sql, sum, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, lte, sql, sum, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   categories,
@@ -351,32 +351,6 @@ export async function transactionTotals(
 export function cashOnly(where: SQL | undefined): SQL | undefined {
   const cash = eq(transactions.paymentMethod, "cash");
   return where ? and(where, cash) : cash;
-}
-
-/**
- * Budget-execution basis, composed onto the inner conditions (typically a
- * filtersWhere() result) by the budget aggregations (month spent, carry,
- * budget-vs-actual): completed expenses paid cash OR card — every card
- * purchase is spent in its real category the month it happens — MINUS the
- * card-payment capital mirrors (loanPaymentId set under "Pago de
- * tarjetas"): that cash only amortizes debt the purchase already booked,
- * so counting both would double the budget. A null mirror id means the
- * category does not exist (seed not run) → card payments cannot have
- * written a mirror, so nothing is excluded. Interest, fee and loan-payment
- * mirrors still count: they are new money out the purchase never booked.
- */
-export function budgetExecution(
-  cardPaymentMirrorId: string | null,
-  where: SQL | undefined,
-): SQL | undefined {
-  const conds = [
-    where,
-    inArray(transactions.paymentMethod, ["cash", "card"]),
-    cardPaymentMirrorId
-      ? sql`not (${transactions.loanPaymentId} is not null and ${transactions.categoryId} = ${cardPaymentMirrorId})`
-      : undefined,
-  ].filter((cond): cond is SQL => cond !== undefined);
-  return completedOnly(conds.length > 0 ? and(...conds) : undefined);
 }
 
 /**
