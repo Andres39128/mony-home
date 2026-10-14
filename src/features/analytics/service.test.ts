@@ -211,11 +211,11 @@ describe("analytics service (integration on PGlite)", () => {
       ]);
     });
 
-    it("uses the budget-execution basis and excludes the settlement category from unfiltered curves; an explicit filter wins", async () => {
-      // Fila sí, total no: the settlement row ("Pago de tarjetas", filled
-      // by card-payment capital mirrors) stays out of BOTH unfiltered
-      // curves — planned and actual — exactly like the budget page totals.
-      // The fixture's 7.000 card purchase (Super, 2026-03) still counts.
+    it("uses the budget-execution basis; the settlement category counts like any other, explicit filter wins", async () => {
+      // The settlement row ("Pago de tarjetas", filled by card-payment
+      // capital mirrors) counts in BOTH unfiltered curves exactly like
+      // the budget page totals. The fixture's 7.000 card purchase
+      // (Super, 2026-03) still counts too.
       const [pagoTarjetas] = await db
         .insert(categories)
         .values({ name: "Pago de tarjetas", kind: "expense", color: "#ef4444" })
@@ -233,15 +233,15 @@ describe("analytics service (integration on PGlite)", () => {
         .values({ month: "2026-03-01", categoryId: pagoTarjetas.id, amountCents: 15_000 });
 
       const points = await cumulativeBudgetVsActual(appDb, 2026, { month: "2026-03" });
-      // 15.000 Super plan (settlement's 15.000 out); 50.000 execution —
-      // 15.000 Jan + 28.000 Mar cash + 7.000 card — (settlement's 12.000 out).
+      // 30.000 plan (15.000 Super + 15.000 settlement); 62.000 execution —
+      // 15.000 Jan + 28.000 Mar cash + 7.000 card + 12.000 settlement.
       expect(points.at(-1)).toEqual({
         month: "2026-03",
-        plannedCumCents: 15_000,
-        actualCumCents: 50_000,
+        plannedCumCents: 30_000,
+        actualCumCents: 62_000,
       });
 
-      // An explicit categoryId filter wins unchanged: the settlement
+      // An explicit categoryId filter still wins: the settlement
       // category alone shows its own plan and spend.
       const settlement = await cumulativeBudgetVsActual(appDb, 2026, {
         month: "2026-03",

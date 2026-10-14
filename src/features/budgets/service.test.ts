@@ -345,7 +345,7 @@ describe("budgets service (integration on PGlite)", () => {
     await cleanupCarryFixture();
   });
 
-  it("card payments fill the Pago de tarjetas row; that row stays out of the totals", async () => {
+  it("card payments fill the Pago de tarjetas row; that row counts in the totals", async () => {
     await cleanupCarryFixture();
     const [pagoTarjetas, interesTarjetas, cuotaManejo, pagoPrestamos] = await db
       .insert(categories)
@@ -475,7 +475,7 @@ describe("budgets service (integration on PGlite)", () => {
     // The purchase counts in its real category.
     expect(rows.get("Transporte")?.spentCents).toBe(40_000);
     // The payment FILLS its own row: the capital mirrors count against
-    // the settlement plan (90% → warn), only the totals exclude them.
+    // the settlement plan (90% → warn), and the row reaches the totals.
     expect(rows.get("Pago de tarjetas")).toMatchObject({
       plannedCents: 50_000,
       spentCents: 45_000,
@@ -489,13 +489,14 @@ describe("budgets service (integration on PGlite)", () => {
     expect(rows.get("Intereses de tarjetas")?.spentCents).toBe(5_000);
     expect(rows.get("Cuota de manejo de tarjetas")?.spentCents).toBe(3_000);
     expect(rows.get("Pago de préstamos")?.spentCents).toBe(20_000);
-    // "Fila sí, total no": the settlement row's plan, spend and carry stay
-    // out of the totals (symmetric) so the same money never counts twice.
+    // The settlement row counts in the totals like any other category
+    // (user-accepted consequence: the same money counts twice — purchase
+    // in its category + payment here).
     expect(view.totals).toMatchObject({
-      plannedCents: 28_000, // 50 + 30 + 200; settlement's 500 excluded
-      spentCents: 68_000, // 400 + 50 + 30 + 200; settlement's 450 excluded
-      carryCents: 0, // settlement's −100 excluded
-      availableCents: -40_000, // 280 + 0 − 680 spent
+      plannedCents: 78_000, // 500 + 500 + 50 + 30 + 200
+      spentCents: 113_000, // 400 + 450 + 50 + 30 + 200
+      carryCents: -10_000, // settlement's −100 included
+      availableCents: -45_000, // 780 − 100 − 1.130
     });
 
     // Cleanup: purchase first (cardLoanId RESTRICT), then the ledger rows

@@ -112,6 +112,24 @@ commit to main and push.
       budgets/service.ts:173 and :197 + doc comments (BudgetRowView.available,
       module header mention); GREEN; full checks; work-unit commit on main.
 
+## Adjustment round 4 (2026-10-14, user decision after seeing real numbers)
+
+The user reversed the round-2 totals rule after reviewing live figures: the
+"Pago de tarjetas" row must be FULLY inside the totals (presupuestado AND
+gastado), like any other category. Accepted consequence (user-informed): the
+same money counts twice in totals (purchase in its category + payment in the
+settlement row). Implementation is the REMOVAL of the round-2 exclusion logic.
+
+- [x] T10 TDD: flip round-2 assertions — budgets mirror test totals include
+      the settlement row (planned +50.000, spent +45.000, carry included,
+      available recomputed with round-3 formula); analytics cumulative
+      unfiltered curves include the settlement category (explicit filter
+      branch unchanged). RED.
+- [x] T11 GREEN: remove the totals-exclusion filter in getMonth; remove the
+      ne() exclusions in cumulativeBudgetVsActual; delete now-unused
+      cardPaymentMirrorCategoryId (budgets) + its analytics import; update
+      module-header doc comments. Full checks; work-unit commit on main; push.
+
 ## Acceptance criteria
 
 - A card purchase in month M with category C increases C's spent (and totals) in M's
@@ -190,3 +208,21 @@ commit to main and push.
   (~:197) availableCents now subtract spent; BudgetRowView.available doc
   updated. All checks green (594 tests, typecheck, lint). Work-unit commit
   on main: `fix(budgets): disponible subtracts the month's spend`.
+- 2026-10-14 Round 4 TDD RED: budgets mirror test renamed ("...row counts
+  in the totals") — totals planned 78.000 (500+500+50+30+200), spent
+  113.000 (400+450+50+30+200), carry −10.000, available −45.000
+  (780−100−1.130, round-3 formula); analytics basis test renamed —
+  unfiltered 2026-03 planned 30.000 / actual 62.000 (settlement 15.000/
+  12.000 included, card purchase 7.000 still in), explicit-filter branch
+  unchanged. RED confirmed: exactly those two tests failed (totals still
+  28.000). No other fixture carries a settlement category (re-verified:
+  insights untouched).
+- 2026-10-14 Round 4 GREEN: round-2 exclusion logic REMOVED — getMonth
+  totals reduce over all rows; cardPaymentMirrorCategoryId deleted from
+  budgets (findMirrorCategoryId import with it; grep: no importers left);
+  cumulativeBudgetVsActual ne() exclusions and the helper call/import
+  removed (explicit categoryId filter branch kept). Module headers state
+  the final rule: every category row, settlement included, counts in
+  totals (user-accepted double count). All checks green (594 tests,
+  typecheck, lint). Work-unit commit on main:
+  `fix(budgets): settlement row counts fully in budget totals`.
