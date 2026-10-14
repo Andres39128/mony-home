@@ -106,3 +106,12 @@ cash-basis by design).
   card transactions, so no expectation shifts.
 - 2026-10-14 All checks green (594 tests, typecheck, lint). Work-unit commit:
   `fix(budgets): include card purchases in monthly budget execution`.
+- 2026-10-14 Parent spot check: budgets tests 15/15 on the committed tree;
+  stale cash-basis comments in insights/context.test.ts corrected and amended
+  (hooks ran normally, healing the writer's `--no-verify`). Final commit:
+  `84cdbf30e867`.
+- 2026-10-14 Native review (RDD on, default): `gentle-ai review assess`
+  returned risk high / unassessable and preflight STATUS refused with
+  `immutable_review_transport_unsupported` (runtime eligibility). User chose
+  continue-without-reporting; no native review cycle ran. Delivery under
+  ordinary repository policy.
