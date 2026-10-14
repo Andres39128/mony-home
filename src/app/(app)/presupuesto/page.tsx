@@ -97,7 +97,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
       </div>
 
       <div data-tour="presupuesto-resumen" className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <Card className="flex flex-col gap-1 p-4">
             <h2 className="text-xs font-medium text-muted">Presupuestado</h2>
             <p className="text-xl font-semibold tabular-nums text-ink">
@@ -105,9 +105,15 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
             </p>
           </Card>
           <Card className="flex flex-col gap-1 p-4">
-            <h2 className="text-xs font-medium text-muted">Gastado</h2>
+            <h2 className="text-xs font-medium text-muted">Gastado en efectivo</h2>
             <p className="w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-xl font-semibold tabular-nums text-on-accent">
-              {formatCents(view.totals.spentCents)}
+              {formatCents(view.totals.spentCashCents)}
+            </p>
+          </Card>
+          <Card className="flex flex-col gap-1 p-4">
+            <h2 className="text-xs font-medium text-muted">Gastado con tarjeta</h2>
+            <p className="w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-xl font-semibold tabular-nums text-on-accent">
+              {formatCents(view.totals.spentCardCents)}
             </p>
           </Card>
           <Card className="flex flex-col gap-1 p-4">

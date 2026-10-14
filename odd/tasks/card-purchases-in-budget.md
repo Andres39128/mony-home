@@ -130,6 +130,22 @@ settlement row). Implementation is the REMOVAL of the round-2 exclusion logic.
       cardPaymentMirrorCategoryId (budgets) + its analytics import; update
       module-header doc comments. Full checks; work-unit commit on main; push.
 
+## Adjustment round 5 (2026-10-14, user wants the payment-method split visible)
+
+The single "Gastado" KPI mixes cash and card spending. User decision: the KPI
+card becomes "Gastado en efectivo" (cash expenses of the month — includes the
+settlement payment, which is real cash out) and a NEW KPI "Gastado con tarjeta"
+(card purchases of the month). The two PARTITION the existing execution totals
+(sum = totals.spentCents), so Restante / % ejecutado / Disponible / the
+categories table / the settlement row are unchanged (rounds 1-4 intact).
+
+- [x] T12 TDD: budgets service test asserts the new totals fields
+      spentCashCents / spentCardCents (partition of execution by
+      paymentMethod; cash includes settlement mirrors). RED.
+- [x] T13 GREEN: getMonth gains the partition query + BudgetMonthView totals
+      fields; /presupuesto KPI grid shows "Gastado en efectivo" and "Gastado
+      con tarjeta" (6 cards). Full checks; work-unit commit on main; push.
+
 ## Acceptance criteria
 
 - A card purchase in month M with category C increases C's spent (and totals) in M's
@@ -226,3 +242,21 @@ settlement row). Implementation is the REMOVAL of the round-2 exclusion logic.
   totals (user-accepted double count). All checks green (594 tests,
   typecheck, lint). Work-unit commit on main:
   `fix(budgets): settlement row counts fully in budget totals`.
+- 2026-10-14 Round 5 TDD RED: three tests extended — roundtrip totals
+  toEqual gains spentCashCents 19.134 / spentCardCents 0 (toEqual is
+  exact, would fail without them); carry-test February split 40.000 cash
+  + 25.000 card; mirror-test May split 73.000 cash (450+50+30+200
+  mirrors) + 40.000 card with an explicit sum-equals-spentCents
+  (113.000) assertion. RED confirmed: exactly those 3 failed on
+  undefined fields.
+- 2026-10-14 Round 5 GREEN: getMonth Promise.all gains a groupBy
+  paymentMethod query on the SAME execution WHERE; totals gain
+  spentCashCents/spentCardCents (derived from the query, spentCents
+  untouched). /presupuesto KPI grid: "Gastado" replaced by "Gastado en
+  efectivo" + "Gastado con tarjeta" (both danger-fill), 6 cards,
+  lg:grid-cols-6, order Presupuestado/Efectivo/Tarjeta/Restante/
+  Disponible/% ejecutado. Blast radius verified safe: insights
+  summary.budget picks fields explicitly (no leak, 594 tests green);
+  dashboard fallback `??` union only reads pct/plannedCents/spentCents.
+  All checks green (594 tests, typecheck, lint). Work-unit commit on
+  main: `feat(budgets): split Gastado KPI into cash and card`.

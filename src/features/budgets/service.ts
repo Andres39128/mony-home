@@ -61,6 +61,10 @@ export interface BudgetMonthView {
   totals: {
     plannedCents: number;
     spentCents: number;
+    /** Cash side of spentCents — mirrors included (paying the card is cash out). */
+    spentCashCents: number;
+    /** Card side of spentCents — card purchases of the month. */
+    spentCardCents: number;
     pct: number;
     carryCents: number;
     availableCents: number;
@@ -97,7 +101,7 @@ export async function getMonth(
   const bounds = monthBounds(month);
   if (!bounds) return null;
 
-  const [categoryRows, budgetRows, spentRows, carryPlannedRows, carrySpentRows, context] =
+  const [categoryRows, budgetRows, spentRows, methodRows, carryPlannedRows, carrySpentRows, context] =
     await Promise.all([
       db
         .select({ id: categories.id, name: categories.name, color: categories.color })
@@ -115,6 +119,17 @@ export async function getMonth(
         // cash AND card — the settlement row counts like any category.
         .where(completedOnly(filtersWhere({ month, type: "expense" })))
         .groupBy(transactions.categoryId),
+      // Payment-method partition of the SAME execution basis — the KPI
+      // split of spentCents (their sum equals it by construction;
+      // spentCents itself stays the source of truth).
+      db
+        .select({
+          paymentMethod: transactions.paymentMethod,
+          spent: sum(transactions.amountCents),
+        })
+        .from(transactions)
+        .where(completedOnly(filtersWhere({ month, type: "expense" })))
+        .groupBy(transactions.paymentMethod),
       // Rollover aggregates, bounded to every month STRICTLY before this one
       // (no lower bound needed: nothing exists before the history start).
       db
@@ -139,6 +154,7 @@ export async function getMonth(
 
   const plannedByCategory = new Map(budgetRows.map((row) => [row.categoryId, row.amountCents]));
   const spentByCategory = new Map(spentRows.map((row) => [row.categoryId, Number(row.spent ?? 0)]));
+  const spentByMethod = new Map(methodRows.map((row) => [row.paymentMethod, Number(row.spent ?? 0)]));
 
   // Net carry per category: total prior plan (0 for unbudgeted months —
   // the documented rule) minus total prior budget-execution spend.
@@ -180,6 +196,8 @@ export async function getMonth(
     totals: {
       plannedCents: totalsPlannedCents,
       spentCents: totalsSpentCents,
+      spentCashCents: spentByMethod.get("cash") ?? 0,
+      spentCardCents: spentByMethod.get("card") ?? 0,
       pct: percentage(totalsSpentCents, totalsPlannedCents),
       carryCents: totalsCarryCents,
       availableCents: totalsPlannedCents + totalsCarryCents - totalsSpentCents,

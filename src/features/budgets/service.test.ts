@@ -120,6 +120,9 @@ describe("budgets service (integration on PGlite)", () => {
     expect(view.totals).toEqual({
       plannedCents: 150050,
       spentCents: 19134,
+      // Payment-method partition of spentCents (both cash in this fixture).
+      spentCashCents: 19134,
+      spentCardCents: 0,
       pct: 12.75,
       carryCents: 0,
       availableCents: 130916, // 150.050 + 0 − 19.134
@@ -333,6 +336,10 @@ describe("budgets service (integration on PGlite)", () => {
       65_000, // 40.000 cash + 25.000 card
     );
     expect(february?.totals.spentCents).toBe(65_000);
+    // Payment-method partition of February's execution: 40.000 cash +
+    // 25.000 card, summing to spentCents.
+    expect(february?.totals.spentCashCents).toBe(40_000);
+    expect(february?.totals.spentCardCents).toBe(25_000);
 
     // The same card purchase debits April's carry (600 − 250).
     const afterCard = await getMonth(appDb, "2026-04");
@@ -498,6 +505,14 @@ describe("budgets service (integration on PGlite)", () => {
       carryCents: -10_000, // settlement's −100 included
       availableCents: -45_000, // 780 − 100 − 1.130
     });
+    // Payment-method partition of the execution: cash side carries every
+    // mirror (settlement 450 + interest 50 + fee 30 + loan payment 200 —
+    // real cash out), card side only the purchase. Sum = spentCents.
+    expect(view.totals.spentCashCents).toBe(73_000);
+    expect(view.totals.spentCardCents).toBe(40_000);
+    expect(view.totals.spentCashCents + view.totals.spentCardCents).toBe(
+      view.totals.spentCents,
+    );
 
     // Cleanup: purchase first (cardLoanId RESTRICT), then the ledger rows
     // (their mirrors cascade via loanPaymentId; loanId itself is RESTRICT),
