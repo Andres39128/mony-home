@@ -14,7 +14,7 @@ import {
 
 type BudgetAction = (state: FormState, formData: FormData) => Promise<FormState>;
 
-export interface BudgetEditorRow {
+interface BudgetEditorRow {
   categoryId: string;
   categoryName: string;
   plannedCents: number;
@@ -23,8 +23,8 @@ export interface BudgetEditorRow {
 interface Props {
   month: string;
   rows: BudgetEditorRow[];
-  /** Month planned total EXCLUDING the settlement row — same source as the
-   *  page KPI cards (getMonth totals), so both "Presupuestado" figures agree. */
+  /** Month planned total — same source as the page KPI cards (getMonth
+   *  totals), so both "Presupuestado" figures agree. */
   plannedTotalCents: number;
   setAction: BudgetAction;
   copyAction: BudgetAction;

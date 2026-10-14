@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray, lt } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
-import { createTestDb } from "@/db/test-utils";
+import { createTestDb, seedUsers } from "@/db/test-utils";
 import type { Database } from "@/db";
-import { budgets, categories, loanPayments, loans, transactions, users } from "@/db/schema";
+import { budgets, categories, loanPayments, loans, transactions } from "@/db/schema";
 import {
   copyFromPreviousMonth,
   getMonth,
@@ -47,17 +47,8 @@ describe("budgets service (integration on PGlite)", () => {
   beforeAll(async () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
-    const [adminRow] = await db
-      .insert(users)
-      .values({ username: "admin", name: "Admin", passwordHash: "x", role: "admin" })
-      .returning();
-    const [mateRow] = await db
-      .insert(users)
-      .values({ username: "mate", name: "Mate", passwordHash: "x", role: "member" })
-      .returning();
-    admin = { id: adminRow.id, username: adminRow.username, name: adminRow.name, role: adminRow.role };
-    member = { id: mateRow.id, username: mateRow.username, name: mateRow.name, role: mateRow.role };
-    memberId = mateRow.id;
+    ({ admin, member } = await seedUsers(db));
+    memberId = member.id;
 
     const inserted = await db
       .insert(categories)
@@ -247,7 +238,7 @@ describe("budgets service (integration on PGlite)", () => {
   /** Wipes Transporte's Jan–Jul 2026 trace: budgets cleared, movements gone.
    * Runs at the START of each Transporte-fixture test too, so a failed
    * sibling test can never cascade its leftovers into the next assertion. */
-  async function cleanupCarryFixture(): Promise<void> {
+  async function cleanupCardFixture(): Promise<void> {
     await db
       .delete(transactions)
       .where(
@@ -259,17 +250,17 @@ describe("budgets service (integration on PGlite)", () => {
     await db.delete(loanPayments).where(
       inArray(
         loanPayments.loanId,
-        db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Visa carry")),
+        db.select({ id: loans.id }).from(loans).where(eq(loans.name, "Visa exec")),
       ),
     );
-    await db.delete(loans).where(eq(loans.name, "Visa carry"));
+    await db.delete(loans).where(eq(loans.name, "Visa exec"));
     for (const month of ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]) {
       await setForMonth(appDb, admin, month, []);
     }
   }
 
   it("card purchases count in their month's execution and totals", async () => {
-    await cleanupCarryFixture();
+    await cleanupCardFixture();
     await setForMonth(appDb, admin, "2026-02", [{ categoryId: transporteId, amount: "1.000,00" }]);
     await db.insert(transactions).values({
       date: "2026-02-10",
@@ -284,7 +275,7 @@ describe("budgets service (integration on PGlite)", () => {
     const [card] = await db
       .insert(loans)
       .values({
-        name: "Visa carry",
+        name: "Visa exec",
         kind: "credit_card",
         entity: "Banco",
         scope: "common",
@@ -312,11 +303,11 @@ describe("budgets service (integration on PGlite)", () => {
     expect(february?.totals.spentCashCents).toBe(40_000);
     expect(february?.totals.spentCardCents).toBe(25_000);
 
-    await cleanupCarryFixture();
+    await cleanupCardFixture();
   });
 
   it("card payments fill the Pago de tarjetas row; that row counts in the totals", async () => {
-    await cleanupCarryFixture();
+    await cleanupCardFixture();
     const [pagoTarjetas, interesTarjetas, cuotaManejo, pagoPrestamos] = await db
       .insert(categories)
       .values([
@@ -330,7 +321,7 @@ describe("budgets service (integration on PGlite)", () => {
     const [card] = await db
       .insert(loans)
       .values({
-        name: "Visa carry",
+        name: "Visa exec",
         kind: "credit_card",
         entity: "Banco",
         scope: "common",
@@ -344,7 +335,7 @@ describe("budgets service (integration on PGlite)", () => {
     // payment — capital 450 (fills the settlement row against its plan),
     // interest 50 and fee 30 (new money out) — and an unrelated loan
     // payment 200 (counts: real cash outflow).
-    // Transporte (not Super) so cleanupCarryFixture's date-bounded delete
+    // Transporte (not Super) so cleanupCardFixture's date-bounded delete
     // also covers this purchase — a mid-test failure can never leave the
     // card referencing a purchase the next cleanup's loan delete hits.
     const [purchase] = await db
@@ -483,6 +474,6 @@ describe("budgets service (integration on PGlite)", () => {
     await db.delete(categories).where(
       inArray(categories.id, [pagoTarjetas.id, interesTarjetas.id, cuotaManejo.id, pagoPrestamos.id]),
     );
-    await cleanupCarryFixture();
+    await cleanupCardFixture();
   });
 });

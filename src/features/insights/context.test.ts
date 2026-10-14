@@ -134,9 +134,9 @@ describe("insights context (integration on PGlite)", () => {
   it("pre-computes exact month summary figures", async () => {
     const ctx = await buildFinanceContext(appDb, MONTH, TODAY);
     // Budget totals reuse budgets.getMonth semantics: spent is the
-    // budget-execution expenses of the month (cash + card; the settlement
-    // row is excluded from totals) — the same numbers the /presupuesto
-    // page shows.
+    // budget-execution expenses of the month (cash + card; every category
+    // row, settlement included, counts in totals) — the same numbers the
+    // /presupuesto page shows.
     expect(ctx.summary).toEqual({
       incomeCents: 800_000,
       expenseCents: 306_000,

@@ -2,7 +2,8 @@
  * Derived projections (F4) — savings goal ETA and loan payoff date.
  *
  * ZERO new state, ZERO migrations: every figure is computed on READ from the
- * existing ledgers, same philosophy as the budget rollover. Pure functions
+ * existing ledgers, same derived-read-model philosophy as the rest of the
+ * services. Pure functions
  * are client-safe; the DB-fed builder follows the repo service shape and is
  * testable against PGlite.
  *

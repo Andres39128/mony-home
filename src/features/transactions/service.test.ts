@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
-import { createTestDb } from "@/db/test-utils";
+import { createTestDb, seedUsers } from "@/db/test-utils";
 import type { Database } from "@/db";
 import {
   categories,
@@ -83,23 +83,14 @@ describe("transactions service (integration on PGlite)", () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
 
-    const [adminRow] = await db
-      .insert(users)
-      .values({ username: "admin", name: "Admin", passwordHash: "x", role: "admin" })
-      .returning();
-    const [mateRow] = await db
-      .insert(users)
-      .values({ username: "mate", name: "Mate", passwordHash: "x", role: "member" })
-      .returning();
+    ({ admin, member: mate } = await seedUsers(db));
     const [anaRow] = await db
       .insert(users)
       .values({ username: "ana", name: "Ana", passwordHash: "x", role: "member" })
       .returning();
-    admin = { id: adminRow.id, username: adminRow.username, name: adminRow.name, role: adminRow.role };
-    mate = { id: mateRow.id, username: mateRow.username, name: mateRow.name, role: mateRow.role };
     ana = { id: anaRow.id, username: anaRow.username, name: anaRow.name, role: anaRow.role };
-    mateId = mateRow.id;
-    anaId = anaRow.id;
+    mateId = mate.id;
+    anaId = ana.id;
 
     [incomeCat, expenseCat] = await db
       .insert(categories)
@@ -1069,16 +1060,7 @@ describe("setOpeningBalance (integration on PGlite)", () => {
   beforeAll(async () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
-    const [adminRow] = await db
-      .insert(users)
-      .values({ username: "admin", name: "Admin", passwordHash: "x", role: "admin" })
-      .returning();
-    const [mateRow] = await db
-      .insert(users)
-      .values({ username: "mate", name: "Mate", passwordHash: "x", role: "member" })
-      .returning();
-    admin = { id: adminRow.id, username: adminRow.username, name: adminRow.name, role: adminRow.role };
-    mate = { id: mateRow.id, username: mateRow.username, name: mateRow.name, role: mateRow.role };
+    ({ admin, member: mate } = await seedUsers(db));
   });
 
   afterAll(async () => {

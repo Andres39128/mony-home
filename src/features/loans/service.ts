@@ -929,10 +929,9 @@ async function insertEngineRow(
 
 /**
  * Looks up a system mirror category by name; null when the seed has not
- * run. Exported for the budget-execution basis (budgets/analytics exclude
- * the "Pago de tarjetas" capital mirrors from budget execution).
+ * run. Internal to the loans mirror writes (card payments, loan payments).
  */
-export async function findMirrorCategoryId(tx: Tx, name: string): Promise<string | null> {
+async function findMirrorCategoryId(tx: Tx, name: string): Promise<string | null> {
   const [category] = await tx
     .select({ id: categories.id })
     .from(categories)

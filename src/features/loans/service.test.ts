@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { asc, and, eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
-import { createTestDb } from "@/db/test-utils";
+import { createTestDb, seedUsers } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { categories, loanPayments, loans, transactions, users } from "@/db/schema";
 import {
@@ -149,17 +149,8 @@ describe("loans CRUD (integration on PGlite)", () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
     await db.insert(categories).values({ name: "Pago de préstamos", kind: "expense" });
-    const [row] = await db
-      .insert(users)
-      .values({ username: "admin", name: "Admin", passwordHash: "x", role: "admin" })
-      .returning();
-    const [mate] = await db
-      .insert(users)
-      .values({ username: "mate", name: "Mate", passwordHash: "x", role: "member" })
-      .returning();
-    admin = { id: row.id, username: row.username, name: row.name, role: row.role };
-    member = { id: mate.id, username: mate.username, name: mate.name, role: mate.role };
-    memberId = mate.id;
+    ({ admin, member } = await seedUsers(db));
+    memberId = member.id;
   });
 
   afterAll(async () => {

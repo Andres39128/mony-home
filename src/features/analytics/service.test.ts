@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
-import { createTestDb } from "@/db/test-utils";
+import { createTestDb, seedUsers } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { budgets, categories, expenseGroups, loans, transactions, users } from "@/db/schema";
 import {
@@ -33,13 +33,10 @@ describe("analytics service (integration on PGlite)", () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
 
-    const [, mateRow, anaRow] = await db
+    const { member: mateRow } = await seedUsers(db);
+    const [anaRow] = await db
       .insert(users)
-      .values([
-        { username: "admin", name: "Admin", passwordHash: "x", role: "admin" },
-        { username: "mate", name: "Mate", passwordHash: "x" },
-        { username: "ana", name: "Ana", passwordHash: "x" },
-      ])
+      .values({ username: "ana", name: "Ana", passwordHash: "x" })
       .returning();
     mateId = mateRow.id;
     anaId = anaRow.id;

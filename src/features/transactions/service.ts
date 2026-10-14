@@ -345,8 +345,8 @@ export async function transactionTotals(
 
 /**
  * AND payment_method = 'cash', composed onto a filtersWhere() result. The
- * shared cash-basis switch for expense aggregations (analytics breakdowns,
- * budget execution): "Gastos" means cash spent everywhere.
+ * shared cash-basis switch for the analytics breakdowns (expensesByCategory,
+ * monthlyTotals): "Gastos" means cash spent everywhere.
  */
 export function cashOnly(where: SQL | undefined): SQL | undefined {
   const cash = eq(transactions.paymentMethod, "cash");

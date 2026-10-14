@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { PGlite } from "@electric-sql/pglite";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
-import { createTestDb } from "@/db/test-utils";
+import { createTestDb, seedUsers } from "@/db/test-utils";
 import type { Database } from "@/db";
 import { categories, loans, recurringMovements, transactions, users } from "@/db/schema";
 import {
@@ -49,21 +49,12 @@ describe("recurring service (integration on PGlite)", () => {
   beforeAll(async () => {
     ({ db, client } = await createTestDb());
     appDb = db as unknown as Database;
-    const [adminRow] = await db
-      .insert(users)
-      .values({ username: "admin", passwordHash: "x", name: "Admin", role: "admin" })
-      .returning();
-    const [mateRow] = await db
-      .insert(users)
-      .values({ username: "mate", passwordHash: "x", name: "Mate" })
-      .returning();
+    ({ admin, member } = await seedUsers(db));
     const [goneRow] = await db
       .insert(users)
       .values({ username: "gone", passwordHash: "x", name: "Gone", isActive: false })
       .returning();
-    admin = { id: adminRow.id, username: adminRow.username, name: adminRow.name, role: adminRow.role };
-    member = { id: mateRow.id, username: mateRow.username, name: mateRow.name, role: mateRow.role };
-    memberId = mateRow.id;
+    memberId = member.id;
     inactiveMemberId = goneRow.id;
 
     const inserted = await db

@@ -311,3 +311,33 @@ two identical figures). Carry is computed state (no schema change).
   (590 tests — 4 fewer, the deleted carry tests; typecheck, lint).
   Work-unit commit on main:
   `feat(budgets): remove arrastre carry and Disponible`.
+
+## Adjustment round 8 (2026-10-14, code hygiene after 7 rounds)
+
+Audit (read-only explorer, ponytail-audit lens): no dead code, no dup logic,
+no blockers. Residue: stale doc comments asserting removed semantics + naming
+leftovers + one unneeded export + duplicated test user fixtures. All fixes are
+comment/rename/dedup — zero behavior change.
+
+- [x] T17 Apply the 8 audit findings (4 stale docs, 1 philosophy comment,
+      rename leftovers, 1 unneeded export, seedUsers fixture dedup across 8
+      service test files). Zero behavior change; 590/590 green. Work-unit
+      commit on main.
+- 2026-10-14 Round 8 (hygiene): all 8 audit findings applied, zero behavior
+  change — budget-editor plannedTotalCents doc de-staled (settlement counts
+  since round 4); cashOnly doc now names its real consumers (analytics
+  breakdowns); insights/context.test.ts comment reworded to the round-4
+  rule; loans.findMirrorCategoryId de-exported (grep-verified 0 external
+  importers, 4 internal call sites) + doc de-staled; projections.ts
+  "budget rollover" philosophy phrase replaced; budgets test renames
+  (cleanupCardFixture, "Visa exec"); BudgetEditorRow export removed;
+  seedUsers(db) helper added to src/db/test-utils.ts replacing the
+  admin+mate fixture pair in 9 blocks across 8 test files (budgets,
+  categories, expense-groups, loans, savings, recurring, transactions x2,
+  analytics — extra users ana/gone stay local; users import trimmed where
+  it became unused). One mid-edit mishap (budgets block briefly
+  duplicated) caught and fixed before commit; a leftover mateRow
+  reference in transactions surfaced as 37 module-level skips + one
+  TS2304 and was fixed. 590/590, typecheck, lint green. Work-unit commit
+  on main: `chore: apply hygiene audit — stale docs, naming, test fixture
+  dedup`.

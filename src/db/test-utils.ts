@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
+import { users } from "./schema";
+import type { SessionUser } from "@/lib/auth";
 
 /**
  * In-memory Postgres (PGlite) with the REAL generated migrations applied.
@@ -24,6 +26,29 @@ export async function createTestDb(): Promise<{ db: PgliteDatabase; client: PGli
     migrationsFolder: fileURLToPath(new URL("./migrations", import.meta.url)),
   });
   return { db, client };
+}
+
+/**
+ * The canonical admin+member user pair shared by the service suites
+ * (identical username/name/role everywhere; passwordHash is a placeholder —
+ * these users never log in). Returns SessionUser-shaped rows so each suite
+ * binds its own locals (member ids, extra users) on top.
+ */
+export async function seedUsers(db: PgliteDatabase): Promise<{
+  admin: SessionUser;
+  member: SessionUser;
+}> {
+  const [adminRow, memberRow] = await db
+    .insert(users)
+    .values([
+      { username: "admin", name: "Admin", passwordHash: "x", role: "admin" },
+      { username: "mate", name: "Mate", passwordHash: "x", role: "member" },
+    ])
+    .returning();
+  return {
+    admin: { id: adminRow.id, username: adminRow.username, name: adminRow.name, role: adminRow.role },
+    member: { id: memberRow.id, username: memberRow.username, name: memberRow.name, role: memberRow.role },
+  };
 }
 
 /**
