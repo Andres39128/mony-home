@@ -281,6 +281,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
               categoryName,
               plannedCents,
             }))}
+            plannedTotalCents={view.totals.plannedCents}
             setAction={setBudgetsAction}
             copyAction={copyPreviousBudgetAction}
           />

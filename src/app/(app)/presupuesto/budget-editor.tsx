@@ -23,6 +23,9 @@ export interface BudgetEditorRow {
 interface Props {
   month: string;
   rows: BudgetEditorRow[];
+  /** Month planned total EXCLUDING the settlement row — same source as the
+   *  page KPI cards (getMonth totals), so both "Presupuestado" figures agree. */
+  plannedTotalCents: number;
   setAction: BudgetAction;
   copyAction: BudgetAction;
 }
@@ -33,17 +36,24 @@ interface Props {
  * clones the previous month in a single action call. Collapsed by default
  * behind a native <details> so it doesn't dwarf the page on mobile.
  */
-export default function BudgetEditor({ month, rows, setAction, copyAction }: Props) {
+export default function BudgetEditor({
+  month,
+  rows,
+  plannedTotalCents,
+  setAction,
+  copyAction,
+}: Props) {
   const [state, formAction, pending] = useActionState(setAction, {});
   const [copyState, copyFormAction, copyPending] = useActionState(copyAction, {});
-  const plannedTotal = rows.reduce((total, row) => total + row.plannedCents, 0);
 
   return (
     <EditDetails
       summary={
         <span className="text-sm font-normal text-muted">
           presupuesto del mes · {rows.length} categorías · Presupuestado:{" "}
-          <span className="font-medium tabular-nums text-ink">{formatCents(plannedTotal)}</span>
+          <span className="font-medium tabular-nums text-ink">
+            {formatCents(plannedTotalCents)}
+          </span>
         </span>
       }
     >
