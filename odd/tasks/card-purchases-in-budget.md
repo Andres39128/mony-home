@@ -137,6 +137,12 @@ spent aggregation becomes dead and is removed.
   `immutable_review_transport_unsupported` (runtime eligibility). User chose
   continue-without-reporting; no native review cycle ran. Delivery under
   ordinary repository policy.
+- 2026-10-14 Round 2 (fila sí, total no): writer commit `6d504549b18d` on
+  fix/budget-card-payment-row; 594/594 tests, typecheck, lint green; parent
+  spot check 15/15 budgets tests. RDD assess for this candidate returned the
+  same high/unassessable runtime-eligibility refusal; the user's standing
+  continue-without-reporting decision applies — delivery under ordinary
+  repository policy.
 - 2026-10-14 Round 2 TDD RED: budgets mirror test renamed/flipped —
   "Pago de tarjetas" planned 500/spent 450 (pct 90, warn, carry −100 from
   an unbudgeted April settlement spend); totals planned 280 (500+300+2000,
