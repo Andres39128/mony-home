@@ -260,3 +260,15 @@ categories table / the settlement row are unchanged (rounds 1-4 intact).
   dashboard fallback `??` union only reads pct/plannedCents/spentCents.
   All checks green (594 tests, typecheck, lint). Work-unit commit on
   main: `feat(budgets): split Gastado KPI into cash and card`.
+
+## Adjustment round 6 (2026-10-14, KPI clarity pass)
+
+User feedback: cards not clear enough. Presupuestado OK; cash+card spend must
+be ONE card; Restante/Disponible need plain-language subtitles; user believed
+"arrastre" = last month's card spend (corrected in conversation: it is the net
+plan−spent accumulation of every prior month per category).
+
+- [x] T14 /presupuesto KPI grid back to 5 cards: "Gastado" shows the total
+      with sub-line "Efectivo: X · Con tarjeta: Y"; Restante sub-line "lo que
+      queda: presupuesto − gastado del mes"; Disponible sub-line "restante +
+      arrastre: X". Presentational only — service and tests untouched.

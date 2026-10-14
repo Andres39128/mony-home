@@ -97,7 +97,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
       </div>
 
       <div data-tour="presupuesto-resumen" className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
           <Card className="flex flex-col gap-1 p-4">
             <h2 className="text-xs font-medium text-muted">Presupuestado</h2>
             <p className="text-xl font-semibold tabular-nums text-ink">
@@ -105,14 +105,12 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
             </p>
           </Card>
           <Card className="flex flex-col gap-1 p-4">
-            <h2 className="text-xs font-medium text-muted">Gastado en efectivo</h2>
+            <h2 className="text-xs font-medium text-muted">Gastado</h2>
             <p className="w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-xl font-semibold tabular-nums text-on-accent">
-              {formatCents(view.totals.spentCashCents)}
+              {formatCents(view.totals.spentCents)}
             </p>
-          </Card>
-          <Card className="flex flex-col gap-1 p-4">
-            <h2 className="text-xs font-medium text-muted">Gastado con tarjeta</h2>
-            <p className="w-fit rounded-lg bg-danger-fill px-2 py-0.5 text-xl font-semibold tabular-nums text-on-accent">
+            <p className="text-xs tabular-nums text-muted">
+              Efectivo: {formatCents(view.totals.spentCashCents)} · Con tarjeta:{" "}
               {formatCents(view.totals.spentCardCents)}
             </p>
           </Card>
@@ -123,6 +121,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
             >
               {formatCents(totals.remainingCents)}
             </p>
+            <p className="text-xs text-muted">lo que queda: presupuesto − gastado del mes</p>
           </Card>
           {/* Rollover: plan + NET carry of prior months (F2, computed). */}
           <Card className="flex flex-col gap-1 p-4">
@@ -133,7 +132,7 @@ export default async function PresupuestoPage({ searchParams }: { searchParams: 
               {formatCents(view.totals.availableCents)}
             </p>
             <p className="flex items-center gap-1 text-xs text-muted">
-              Arrastre: {formatCents(view.totals.carryCents)}
+              restante + arrastre: {formatCents(view.totals.carryCents)}
               <CarryChip carryCents={view.totals.carryCents} />
             </p>
           </Card>
