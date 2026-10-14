@@ -137,9 +137,6 @@ describe("insights context (integration on PGlite)", () => {
     // budget-execution expenses of the month (cash + card; the settlement
     // row is excluded from totals) — the same numbers the /presupuesto
     // page shows.
-    // Carry (rollover) is the NET prior history per category: no prior
-    // budgets existed, so it is minus ALL prior budget-execution spend
-    // (July Varios 100.000 + August 263.000) — unbudgeted months still debit.
     expect(ctx.summary).toEqual({
       incomeCents: 800_000,
       expenseCents: 306_000,
@@ -149,8 +146,6 @@ describe("insights context (integration on PGlite)", () => {
         plannedCents: 150_000,
         spentCents: 306_000,
         pct: 204,
-        carryCents: -363_000,
-        availableCents: -519_000, // 150.000 − 363.000 − 306.000
       },
     });
   });

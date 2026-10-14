@@ -188,8 +188,6 @@ export default async function DashboardPage({
     plannedCents: 0,
     spentCents: 0,
     pct: 0,
-    carryCents: 0,
-    availableCents: 0,
   };
   const budgetProgress = computeProgress(budgetTotals.plannedCents, budgetTotals.spentCents);
 

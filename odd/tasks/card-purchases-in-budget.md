@@ -272,3 +272,42 @@ plan−spent accumulation of every prior month per category).
       with sub-line "Efectivo: X · Con tarjeta: Y"; Restante sub-line "lo que
       queda: presupuesto − gastado del mes"; Disponible sub-line "restante +
       arrastre: X". Presentational only — service and tests untouched.
+
+## Adjustment round 7 (2026-10-14, user removes arrastre entirely)
+
+User: "Quitemos lo de arrastre, ese valor no afecta." The rollover/carry
+feature is removed: no carry computation, no Arrastre chips, no Disponible
+card/column (without carry, Disponible === Restante — keeping both would show
+two identical figures). Carry is computed state (no schema change).
+
+- [x] T15 TDD: budgets tests drop/flip carry+available assertions (round-1
+      carry test becomes obsolete — delete); insights context expectations
+      lose availableCents. RED.
+- [x] T16 GREEN: getMonth loses the carry queries and carry/available fields
+      (rows + totals); /presupuesto 4 KPI cards (drop Disponible, remove
+      CarryChip) and table drops the Disponible column; insights summary
+      drops disponible; dashboard fallback object updated; notifications
+      checked. Full checks; work-unit commit on main; push.
+- 2026-10-14 Round 7 TDD (feature REMOVAL — shape-pinned RED): four carry
+  tests deleted (zero-first-month, positive/negative, skips-future,
+  unbudgeted-prior); the round-1 carry test rewritten to keep only its
+  February execution coverage (spent 65.000, split 40.000/25.000); the
+  mirror test loses its carry/available keys and the April settlement
+  fixture row (existed only to make carry observable). Stripped
+  expectations first: the two exact-shape toEqual pins (budgets roundtrip,
+  insights summary) went RED on the EXTRA carryCents/availableCents still
+  returned — that pins the removal itself.
+- 2026-10-14 Round 7 GREEN: getMonth drops both carry queries, the
+  carryByCategory fold and every carry/available field (rows + totals) —
+  totals are now planned/spent/spentCash/spentCard/pct; `lt` import gone.
+  /presupuesto: 4 KPI cards (lg:grid-cols-4), Disponible card, CarryChip +
+  carryChipClass, table Disponible column and mobile Disponible line
+  removed. insights summary.budget reduced to planned/spent/pct (type,
+  construction and prompt arrastre/disponible keys); dashboard fallback
+  object drops the two keys. notifications/service.ts verified: reads only
+  planned/spent/pct — untouched. grep: zero carryCents/CarryChip in src;
+  surviving availableCents are all card-credit-limit, surviving "arrastre"
+  mentions are the cash saldo (opening balance) concept. All checks green
+  (590 tests — 4 fewer, the deleted carry tests; typecheck, lint).
+  Work-unit commit on main:
+  `feat(budgets): remove arrastre carry and Disponible`.
