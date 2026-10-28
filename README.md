@@ -2,6 +2,22 @@
 
 Self-hosted household finance web platform for a single household (2-6 users).
 
+Track categories, budgets, recurring transactions and credit-card cycles, with
+row-level security so each member only sees their own data. Ships with an
+LLM assistant that answers questions about your spending against a daily quota.
+
+**Stack:** Next.js · TypeScript · PostgreSQL (Supabase) · Drizzle ORM · Tailwind · zod
+
+## What it does
+
+- **Budgets by category** — monthly limits per category with progress tracking
+- **Recurring transactions** — catch-up logic handles missed cycles without double-counting
+- **Credit card cycles** — purchases, limits and closing dates tracked separately from cash
+- **Multi-currency** — balances and transactions can carry their own currency
+- **Audit trail** — every mutation is recorded, not just the current state
+- **LLM assistant** — OpenAI-compatible endpoint (default OpenRouter), per-user daily quota
+- **Self-hosted** — your financial data lives in your own Postgres, behind RLS
+
 ## Setup
 
 ```bash
@@ -166,3 +182,7 @@ hold data — proving backups restore, not just exist. Artifacts expire after
 - **`pg_dump` fails or hangs in the backup workflow.** `SUPABASE_DB_URL` is
   set to the transaction pooler (`6543`). It must be the session/direct
   (`5432`) URL.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
